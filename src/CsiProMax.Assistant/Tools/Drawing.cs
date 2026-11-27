@@ -68,8 +68,73 @@ public static class Drawing
             .Concat(CsiProMax.Model.SlabDefs.SlabRebars(m2).Select(b => (JsonNode)new JsonArray(b.Name, new JsonArray(new JsonArray(R(b.From[0]), R(b.From[1]), R(StripZ(m2, b.Story))), new JsonArray(R(b.To[0]), R(b.To[1]), R(StripZ(m2, b.Story)))),
                 "rebar", R(b.WidthLeft), R(b.WidthRight)))).ToList() : null : null);
         if (slabLines is { Count: > 0 }) model["slab_lines"] = new JsonArray(slabLines.ToArray());
+        // What the Set Display Options form shows on each object (releases, local axes, modifiers, offsets, hinges,
+        // springs, diaphragms, pier and spandrel labels), and which areas are openings or ramps.
+        var assign = Try(() => e is OfflineEtabs o3 ? Assignments(o3.Model) : null);
+        if (assign is { Count: > 0 }) model["assign"] = assign;
         if (supports is { Count: > 0 })
             model["supports"] = new JsonArray(supports.Take(MostSupports).Select(s => (JsonNode)new JsonArray(R(s.X), R(s.Y), R(s.Z), Kind(s.Restraint))).ToArray());
+    }
+
+    /// <summary>The assignments the display form can show, by the Viewer's object names (label@story), only where set:
+    /// f: {rel_i, rel_j, ang, mod, off, hin (relative places), spr, pier, span}; a: {kind, ang, mod, dia, spr, pier, span}; j: {spr, dia}.</summary>
+    public static JsonObject Assignments(CsiProMax.Model.StructuralModel m)
+    {
+        static string N(string label, string story) => label + "@" + story;
+        static string? Q(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim().Trim('"');
+        static double D(string? v) => double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0;
+        static JsonObject? Mods(Dictionary<string, double> all)
+        {
+            var set = all.Where(kv => Math.Abs(kv.Value - 1) > 1e-9).ToList();
+            return set.Count == 0 ? null : new JsonObject(set.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)JsonValue.Create(R(kv.Value)))));
+        }
+        void Put(JsonObject o, string k, JsonNode? v) { if (v is not null) o[k] = v; }
+        var hinges = CsiProMax.Model.PropertyDefs.Hinges(m).GroupBy(h => N(h.Label, h.Story)).ToDictionary(g => g.Key, g => new JsonArray(g.Select(h => (JsonNode)JsonValue.Create(R(h.Hinge.At))).ToArray()));
+        var f = new JsonObject();
+        foreach (var l in m.LineAssigns)
+        {
+            var o = new JsonObject();
+            var (i, j) = CsiProMax.Model.PropertyDefs.ReleasesOf(l);
+            if (i.Count > 0) o["rel_i"] = string.Join(" ", i);
+            if (j.Count > 0) o["rel_j"] = string.Join(" ", j);
+            var ang = D(CsiProMax.Model.PropertyDefs.Value(l.Extra, "ANG")); if (ang != 0) o["ang"] = R(ang);
+            Put(o, "mod", Mods(CsiProMax.Model.PropertyDefs.Modifiers(l.Extra, CsiProMax.Model.PropertyDefs.FrameModifiers)));
+            double oi = D(CsiProMax.Model.PropertyDefs.Value(l.Extra, "LENGTHOFFI")), oj = D(CsiProMax.Model.PropertyDefs.Value(l.Extra, "LENGTHOFFJ"));
+            if (oi != 0 || oj != 0) o["off"] = new JsonArray(R(oi), R(oj));
+            if (hinges.TryGetValue(N(l.Label, l.Story), out var h)) o["hin"] = h.DeepClone();
+            if (Q(CsiProMax.Model.PropertyDefs.Value(l.Extra, "SPRINGPROP")) is { } sp) o["spr"] = sp;
+            if (Q(CsiProMax.Model.PropertyDefs.Value(l.Extra, "PIER")) is { } pier) o["pier"] = pier;
+            if (Q(CsiProMax.Model.PropertyDefs.Value(l.Extra, "SPANDREL")) is { } span) o["span"] = span;
+            if (o.Count > 0) f[N(l.Label, l.Story)] = o;
+        }
+        var kinds = m.Areas.GroupBy(x => x.Label).ToDictionary(g => g.Key, g => g.First().Kind);
+        var a = new JsonObject();
+        foreach (var x in m.AreaAssigns)
+        {
+            var o = new JsonObject();
+            if (CsiProMax.Model.PropertyDefs.Value(x.Extra, "OPENING") is { } op && op.Trim('"').Equals("Yes", StringComparison.OrdinalIgnoreCase)) o["kind"] = "opening";
+            else if (kinds.TryGetValue(x.Label, out var k) && k == CsiProMax.Model.AreaKind.Ramp) o["kind"] = "ramp";
+            var ang = D(CsiProMax.Model.PropertyDefs.Value(x.Extra, "ANG")); if (ang != 0) o["ang"] = R(ang);
+            Put(o, "mod", Mods(CsiProMax.Model.PropertyDefs.Modifiers(x.Extra, CsiProMax.Model.PropertyDefs.ShellModifiers)));
+            if (Q(x.Diaphragm) is { } dia && !dia.Equals("None", StringComparison.OrdinalIgnoreCase)) o["dia"] = dia;
+            if (Q(CsiProMax.Model.PropertyDefs.Value(x.Extra, "SPRINGPROP")) is { } sp) o["spr"] = sp;
+            if (Q(CsiProMax.Model.PropertyDefs.Value(x.Extra, "PIER")) is { } pier) o["pier"] = pier;
+            if (Q(CsiProMax.Model.PropertyDefs.Value(x.Extra, "SPANDREL")) is { } span) o["span"] = span;
+            if (o.Count > 0) a[N(x.Label, x.Story)] = o;
+        }
+        var jt = new JsonObject();
+        foreach (var p in m.PointAssigns)
+        {
+            var o = new JsonObject();
+            if (Q(CsiProMax.Model.PropertyDefs.Value(p.Extra, "SPRINGPROP")) is { } sp) o["spr"] = sp;
+            if (Q(p.Diaphragm) is { } dia && !dia.Equals("None", StringComparison.OrdinalIgnoreCase)) o["dia"] = dia;
+            if (o.Count > 0) jt[N(p.Point, p.Story)] = o;
+        }
+        var all = new JsonObject();
+        if (f.Count > 0) all["f"] = f;
+        if (a.Count > 0) all["a"] = a;
+        if (jt.Count > 0) all["j"] = jt;
+        return all;
     }
 
     private static double StripZ(CsiProMax.Model.StructuralModel m, string story)

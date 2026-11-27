@@ -507,6 +507,34 @@ static class ExtrasTests
             Check(CsiProMax.Assistant.ReferenceForms.PathFor("safe", "Units > Show Units Form...")[0] == CsiProMax.Assistant.Etabs.MenuCommand.StatusBar, "SAFE's Units form is not opened from its status bar");
             Check(CsiProMax.Assistant.ModelerCheck.Script.Contains("the units at the bottom right, as ${target} has them", StringComparison.Ordinal), "the window check does not try the units control");
         });
+        yield return ("Ahmed 2026-11-27: Set Display Options is ETABS 23.2's form item for item (General, Object Assignments, Object Present in View with Openings), SAFE's and SAP2000's own, and every item has what it draws", () =>
+        {
+            var m = Seed.Etabs23();
+            var line = m.LineAssigns.First(l => l.Section is not null);
+            CsiProMax.Model.PropertyDefs.Put(line.Extra, "RELEASE", "\"M2I M3I M3J\"");
+            CsiProMax.Model.PropertyDefs.Put(line.Extra, "ANG", "30");
+            CsiProMax.Model.PropertyDefs.Put(line.Extra, "I3MOD", "0.35");
+            CsiProMax.Model.PropertyDefs.Put(line.Extra, "LENGTHOFFI", "0.25");
+            CsiProMax.Model.PropertyDefs.Put(line.Extra, "PIER", "\"P1\"");
+            var floor = m.AreaAssigns.First(a => m.Areas.Exists(x => x.Label == a.Label && x.Kind == AreaKind.Floor));
+            CsiProMax.Model.PropertyDefs.Put(floor.Extra, "OPENING", "\"Yes\"");
+            var j = m.PointAssigns.FirstOrDefault() ?? new PointAssign { Point = m.Points[0].Name, Story = m.Stories[^1].Name };
+            if (!m.PointAssigns.Contains(j)) m.PointAssigns.Add(j);
+            j.Diaphragm = "D1";
+            var a = CsiProMax.Assistant.Tools.Drawing.Assignments(m);
+            var f = a["f"]![line.Label + "@" + line.Story]!;
+            Check((string?)f["rel_i"] == "M2 M3" && (string?)f["rel_j"] == "M3", "the releases are not sent: " + f.ToJsonString());
+            Check((double?)f["ang"] == 30 && (double?)f["mod"]!["I3MOD"] == 0.35 && (double?)f["off"]![0] == 0.25 && (string?)f["pier"] == "P1", "the local axis, modifier, offset or pier is not sent: " + f.ToJsonString());
+            Check((string?)a["a"]![floor.Label + "@" + floor.Story]!["kind"] == "opening", "an area assigned as an opening is not sent as one");
+            Check((string?)a["j"]![j.Point + "@" + j.Story]!["dia"] == "D1", "a joint's diaphragm is not sent");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var marker in new[] { "title = safe ? \"Set Display Options\" : \"Set View Options\"", "title = \"Display Options for Active Window\"", "data-page=\"a\">Object Assignments</button>", "data-page=\"o\">Object Present in View</button>",
+                "kb(\"opening\", \"Openings\")", "nv(\"opening\", \"Openings Not in View\")", "cb(\"shrink\", \"Object Shrink\")", "cb(\"extrudeA\", \"Extrude Shells\")", "cb(\"fReleases\", \"Releases\")", "cb(\"fAxes\", \"Local Axes\")", "cb(\"aDia\", \"Diaphragms\")",
+                "if (a.kind === \"opening\") {", "function drawAssigns(p, g, to, T)", "[\"opening\", \"Openings\", areas]" })
+                Check(html.Contains(marker, StringComparison.Ordinal), "the display form lacks: " + marker);
+            foreach (var key in new[] { "names", "fSections", "fReleases", "fAxes", "fMods", "fOffsets", "fHinges", "fSprings", "fPier", "fSpan", "aNames", "aSections", "aAxes", "aMods", "aDia", "aSprings", "aPier", "aSpan", "jNames", "jSprings", "jDia" })
+                Check(html.Contains("opt." + key + " &&", StringComparison.Ordinal) || html.Contains("if (opt." + key + ")", StringComparison.Ordinal), "the item " + key + " draws nothing");
+        });
         yield return ("Ahmed 2026-11-27: a units change shows the whole model in the new units (stories, sections, materials, loads, tables) and it is saved in its own units, exactly as it was", () =>
         {
             static string Text(StructuralModel m) => string.Join("\n", E2kWriter.Write(m).Split('\n').Where(l => !l.StartsWith("$ File", StringComparison.Ordinal)));

@@ -224,6 +224,7 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg fieldset{border:1px solid var(--fgroup);border-radius:2px;margin:0 0 9px;padding:6px 10px 8px}
 .dlg legend{padding:0 4px;color:var(--group);font-weight:400}
 .dlg .g2{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}
+.dlg .g1{display:grid;gap:4px}
 .dlg .gu{display:grid;grid-template-columns:auto 1fr auto;gap:5px 8px;align-items:center}.dlg .gu .un{min-width:52px;color:var(--mute)}.dlg input.grey,.dlg select:disabled,.dlg input:disabled{background:var(--form);color:var(--mute)}
 .dlg .g3{display:grid;grid-template-columns:1fr 1fr;gap:3px 14px}
 .dlg .g4{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px 14px}
@@ -395,7 +396,14 @@ const unitDefaults = {
   mks: {name: "Metric MKS Defaults", force: "tonf", length: "m", temperature: "C", section: "cm", stress: "kgf/cm²", moment: "tonf-m"}};
 let dispU = null;
 let unitsText = "", lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
-const opt = {grid: true, extrude: false, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: true, sections: true, explorer: true, side: true};
+const opt = {grid: true, extrude: false, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: true, sections: true, explorer: true, side: true,
+  // The rest of Set Display Options (Ahmed 2026-11-27: every item of ETABS 23.2's form, and SAP2000's and SAFE's):
+  // shells extruded on their own, objects shrunk, dimension lines and story levels, and what each object is assigned.
+  extrudeA: false, shrink: false, dims: true, levels: true, aNames: false, jNames: false, jSprings: false, jDia: false,
+  fSections: false, fReleases: false, fAxes: false, fMods: false, fOffsets: false, fHinges: false, fSprings: false, fPier: false, fSpan: false,
+  aSections: false, aAxes: false, aMods: false, aDia: false, aSprings: false, aPier: false, aSpan: false, tNames: false, sNames: false};
+// Each object's assignments from the pack (releases, local axes, modifiers, offsets, hinges, springs, diaphragms, piers, spandrels).
+let assign = {f: {}, a: {}, j: {}};
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
 let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
@@ -709,7 +717,9 @@ function load(pack, keep) {
   const idxAt = q => { const n = pointAt.get(key(q[0], q[1], q[2])); return n === undefined ? -1 : pointIdx.get(String(n)); };
   frames = (m.frames || []).map((f, i) => ({id: i + 1, type: "f", name: String(f[0]), kind: f[1], section: f[2], story: f[3], a: [f[4], f[5], f[6]], b: [f[7], f[8], f[9]]}));
   frames.forEach(f => { f.ia = idxAt(f.a); f.ib = idxAt(f.b); });
-  areas = (m.areas || []).map((a, i) => ({id: frames.length + i + 1, type: "a", name: String(a.n), kind: a.k, section: a.s, pts: chunk(a.c)}));
+  assign = Object.assign({f: {}, a: {}, j: {}}, m.assign || {});
+  // An area assigned as an opening, or a ramp, keeps its own kind: the form turns each on and off (ETABS's Object Present in View).
+  areas = (m.areas || []).map((a, i) => ({id: frames.length + i + 1, type: "a", name: String(a.n), kind: (assign.a[String(a.n)] || {}).kind || a.k, section: a.s, pts: chunk(a.c)}));
   areas.forEach(a => { a.idx = a.pts.map(idxAt); a.story = storyAt(a, m.stories || []); });
   stories = (m.stories || []).slice().sort((a, b) => a.elevation - b.elevation);
   sizes = m.frame_sizes || {}; slabT = m.area_sizes || {};
@@ -1882,11 +1892,14 @@ function areaTris(pts) {
 function buildGeometry() {
   if (!gl) return;
   const solidF = new FL(1 << 16), solidA = new FL(1 << 14), edges = new FL(1 << 15), lines = new FL(1 << 14), bare = new FL(1024);
-  const extrude = opt.extrude && opt.sections;
+  const extrude = opt.extrude && opt.sections, extrudeA = opt.extrudeA && opt.sections;
+  // Object Shrink: each object drawn a little smaller than it is, towards its middle, so the joints between show.
+  const shrinkTo = (q, c) => opt.shrink ? add(c, mul(sub(q, c), 0.85)) : q;
   const tri = (L, p, n, id, pi, pw) => L.push(p[0], p[1], p[2], n[0], n[1], n[2], id, pi[0], pi[1], pi[2], pi[3], pw[0], pw[1], pw[2], pw[3]);
   const seg = (A, B, ia, ib, id, w, dash, L) => { for (const [e, s] of [[0, -1], [0, 1], [1, 1], [0, -1], [1, 1], [1, -1]]) (L || lines).push(A[0], A[1], A[2], B[0], B[1], B[2], ia, ib, e, s, w, id, dash || 0, 0, 0, 0, 0); };
   const edge = (p, pi, q, qi, id) => edges.push(p[0], p[1], p[2], pi, id, q[0], q[1], q[2], qi, id);
-  for (const f of frames) {
+  for (const f0 of frames) {
+    const mid = mul(add(f0.a, f0.b), 0.5), f = opt.shrink ? Object.assign(Object.create(f0), {a: shrinkTo(f0.a, mid), b: shrinkTo(f0.b, mid)}) : f0;
     seg(f.a, f.b, f.ia, f.ib, f.id, f.kind === "column" ? 3 : 2.2);
     if (!extrude) continue;
     // A member whose section size the pack does not give is drawn as a line, even among extruded ones.
@@ -1911,9 +1924,15 @@ function buildGeometry() {
   meshDrawn = meshWanted(); if (meshDrawn) meshIndex();
   const mxyz = n => pointXyz.has(n) ? pointXyz.get(n) : meshPts.get(n), midx = n => pointIdx.has(n) ? pointIdx.get(n) : meshIdx.has(n) ? meshIdx.get(n) : -1;
   for (const a of areas) {
-    const pts = a.pts, n0 = newell(pts), n = a.kind === "wall" ? n0 : (n0[2] < 0 ? mul(n0, -1) : n0), m = pts.length;
+    const cen = mul(a.pts.reduce(add, [0, 0, 0]), 1 / (a.pts.length || 1)), pts = opt.shrink ? a.pts.map(q => shrinkTo(q, cen)) : a.pts, n0 = newell(pts), n = a.kind === "wall" ? n0 : (n0[2] < 0 ? mul(n0, -1) : n0), m = pts.length;
     if (m < 3) continue;
-    const t = extrude ? (slabT[a.section] || 0) : 0, shift = a.kind === "wall" ? -t / 2 : -t;
+    // An opening is not filled: its outline crossed corner to corner, as ETABS draws one.
+    if (a.kind === "opening") {
+      for (let i = 0; i < m; i++) { const j = (i + 1) % m; edge(pts[i], a.idx[i] ?? -1, pts[j], a.idx[j] ?? -1, a.id); }
+      const h = Math.floor(m / 2); edge(pts[0], a.idx[0] ?? -1, pts[h], a.idx[h] ?? -1, a.id); if (m >= 4) edge(pts[1], a.idx[1] ?? -1, pts[h + 1], a.idx[h + 1] ?? -1, a.id);
+      continue;
+    }
+    const t = extrudeA ? (slabT[a.section] || 0) : 0, shift = a.kind === "wall" ? -t / 2 : -t;
     const top = pts.map(q => a.kind === "wall" && t ? add(q, mul(n, t / 2)) : q), bot = pts.map((q, i) => add(top[i], mul(n, a.kind === "wall" ? -t : shift)));
     const idx4 = k => [a.idx[k] ?? -1, -1, -1, -1];
     // The face: on the program's own mesh when the shell contours are shown and the pack has it; otherwise finely
@@ -1972,7 +1991,7 @@ function buildColours() {
   legend = new Map();
   buildDesignView();
   const put = (id, hex) => { const c = rgb(hex); out[id * 3] = c[0] * 255; out[id * 3 + 1] = c[1] * 255; out[id * 3 + 2] = c[2] * 255; };
-  const kindName = {column: "Columns", beam: "Beams", brace: "Braces", floor: "Floors", wall: "Walls"};
+  const kindName = {column: "Columns", beam: "Beams", brace: "Braces", floor: "Floors", wall: "Walls", ramp: "Ramps", opening: "Openings"};
   for (const o of frames.concat(areas)) {
     let c, label;
     if (dview) { const v = dview.byObj.get(o.id); c = designColour(v) || (o.type === "a" ? (T.dark ? "#3a4248" : "#dde2e5") : T.dark ? "#59636a" : "#b4bcc1"); label = null; }
@@ -2226,7 +2245,7 @@ function setCommon(pr, M, R, dpr, mode) {
 let curDefK = 0;
 function drawScene(p, M, R, dpr, mode) {
   // mode 0 draws for the eye, mode 1 draws object numbers for picking.
-  const T = theme(), extrude = opt.extrude && opt.sections && res.mode !== "forces", see = !extrude || opt.see || p.mode !== "3d";
+  const T = theme(), extrude = opt.extrude && opt.sections && res.mode !== "forces", see = !(extrude || opt.extrudeA && opt.sections) || opt.see || p.mode !== "3d";
   const contourOn = (res.mode === "contour" || res.mode === "shell") && contour;
   const L = unitv(add(add(mul(M.d, -0.55), mul(M.up, 0.75)), mul(M.right, -0.35)));
   gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); gl.disable(gl.BLEND);
@@ -2271,7 +2290,7 @@ function drawScene(p, M, R, dpr, mode) {
   if (extrude) solids(bufs.solidF, 1, true);
   if (!see || contourOn) solids(bufs.solidA, 1);
   // Grid lines after the solids, so members hide them; they do not hide anything themselves.
-  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, p.mode === "3d" && T.ground ? [0.62, 0.8, 0.96] : T.grid, 1, 0); thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
+  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, p.mode === "3d" && T.ground ? [0.62, 0.8, 0.96] : T.grid, 1, 0); if (opt.levels) thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
   if (!extrude) thick(bufs.lines, p.mode === "3d" ? (T.dark ? 1.6 : 0.75) : 2, 1); else thick(bufs.bare, 2, 1);
   if (opt.edges) thin(bufs.edges, extrude ? T.edge : 0.75, !extrude && !T.dark ? [1, 1, 1] : undefined);
   if (see && !contourOn && !under) {
@@ -2390,12 +2409,12 @@ function overlay(p, g, M, T, w, h) {
     }
     font(11); g.fillStyle = T.text; g.textAlign = "right"; g.textBaseline = "middle";
     const ys = p.auxInfo.lev.map(s => to(s.at)[1]), gap = ys.length > 1 ? Math.min(...ys.slice(1).map((y, i) => Math.abs(y - ys[i]))) : 99, every = gap < 13 ? Math.ceil(13 / Math.max(gap, 1)) : 1;
-    p.auxInfo.lev.forEach((s, i) => { if (i % every && i !== p.auxInfo.lev.length - 1) return; const q = to(s.at); if (gap < 28) { g.fillText(s.name, q[0] - 6, q[1]); return; } g.fillText(s.name, q[0] - 6, q[1] - 7); g.fillStyle = T.dark ? "#8f9aa1" : "#6b7880"; g.fillText(num(s.z) + (unit ? " " + unit : ""), q[0] - 6, q[1] + 7); g.fillStyle = T.text; });
+    if (opt.levels) p.auxInfo.lev.forEach((s, i) => { if (i % every && i !== p.auxInfo.lev.length - 1) return; const q = to(s.at); if (gap < 28) { g.fillText(s.name, q[0] - 6, q[1]); return; } g.fillText(s.name, q[0] - 6, q[1] - 7); g.fillStyle = T.dark ? "#8f9aa1" : "#6b7880"; g.fillText(num(s.z) + (unit ? " " + unit : ""), q[0] - 6, q[1] + 7); g.fillStyle = T.text; });
   }
-  if (opt.grid && p.auxInfo && p.mode === "plan") drawDims(g, to, T, p.auxInfo.bub);
+  if (opt.grid && opt.dims && p.auxInfo && p.mode === "plan") drawDims(g, to, T, p.auxInfo.bub);
   if (p.mode === "plan" && !opt.extrude) drawPlanColumns(p, g, to, T);
   if (opt.joints) drawJoints(p, g, to, T);
-  if (opt.names) drawNames(p, g, to, T);
+  drawAssigns(p, g, to, T);
   if (opt.supports && !gl) drawSupports(p, g, to, T);
   if (opt.pt !== false) drawPT(p, g, to, T);
   drawMarks(p, g, to, T);
@@ -2439,13 +2458,74 @@ function hScale(g, T, w, h, title, cols, label) {
   g.font = "10px Segoe UI, sans-serif"; g.fillStyle = T.text;
   const every = bw < 44 ? 2 : 1; for (let i = 0; i <= n; i++) { const s = label(i); if (s !== undefined && i % every === 0) g.fillText(s, x0 + i * bw, y + 21); }
 }
-function drawNames(p, g, to, T) {
-  let n = 0; for (const f of frames) if (p.vis && p.vis[f.id]) n++;
-  if (n > 2500) return;
-  g.font = "10px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "bottom"; g.fillStyle = T.text;
-  for (const f of frames) { if (!p.vis[f.id]) continue; const q = to(mul(add(f.a, f.b), 0.5)); if (q[3]) g.fillText(f.name, q[0], q[1] - 3); }
-  g.fillStyle = css(T.ghost); g.textBaseline = "middle";
-  for (const a of areas) { if (!p.vis[a.id]) continue; const q = to(mul(a.pts.reduce(add, [0, 0, 0]), 1 / a.pts.length)); if (q[3]) g.fillText(a.name, q[0], q[1]); }
+// What Set Display Options > Object Assignments shows on each object, as ETABS 23.2, SAP2000 26 and SAFE draw it: the
+// texts (label, section, modifiers, offsets, springs, diaphragm, pier and spandrel) stacked at the middle of the object,
+// releases as rings near the released end, hinges as dots where they are, local axes as three arrows (1 red, 2 white or
+// green, 3 blue), end offsets as a thick line along the length offset, and joint springs as a coil.
+const shortName = n => String(n).replace(/@[^@]*$/, "");
+function axesOf(f, ang) {
+  const ax = memberAxes(f), r = (ang || 0) * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  return [ax.a, add(mul(ax.e2, c), mul(ax.e3, s)), add(mul(ax.e3, c), mul(ax.e2, -s))];
+}
+function shellAxes(a, ang) {
+  const n = newell(a.pts), up = Math.abs(n[2]) > 0.99;
+  let e1 = up ? [1, 0, 0] : unitv(cross([0, 0, 1], n)); if (!up && e1.every(v => Math.abs(v) < 1e-9)) e1 = [1, 0, 0];
+  const n3 = a.kind === "wall" ? n : (n[2] < 0 ? mul(n, -1) : n), e2 = cross(n3, e1), r = (ang || 0) * Math.PI / 180, c = Math.cos(r), sn = Math.sin(r);
+  return [add(mul(e1, c), mul(e2, sn)), add(mul(e2, c), mul(e1, -sn)), n3];
+}
+const modText = m => m ? Object.entries(m).map(([k, v]) => k.replace(/MOD$/, "") + "=" + num(v)).join(" ") : "";
+function drawAssigns(p, g, to, T) {
+  if (!p.vis) return;
+  const fItems = opt.names || opt.fSections || opt.fReleases || opt.fAxes || opt.fMods || opt.fOffsets || opt.fHinges || opt.fSprings || opt.fPier || opt.fSpan;
+  const aItems = opt.aNames || opt.aSections || opt.aAxes || opt.aMods || opt.aDia || opt.aSprings || opt.aPier || opt.aSpan;
+  const jItems = opt.jNames || opt.jSprings || opt.jDia;
+  if (!fItems && !aItems && !jItems) return;
+  let n = 0; for (const o of frames) if (p.vis[o.id]) n++; for (const o of areas) if (p.vis[o.id]) n++;
+  const many = n > 4000, L = size * 0.025, taken = [];
+  g.font = "10px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.setLineDash([]);
+  const texts = (at, list, colour) => {
+    if (!list.length || many) return; const q = to(at); if (!q[3]) return;
+    const h = 11, y0 = q[1] - (list.length - 1) * h / 2;
+    list.forEach((t, i) => { const y = y0 + i * h, w = g.measureText(t).width; if (taken.some(r => q[0] - w / 2 < r[2] && q[0] + w / 2 > r[0] && y - 5 < r[3] && y + 5 > r[1])) return; taken.push([q[0] - w / 2, y - 5, q[0] + w / 2, y + 5]);
+      g.lineWidth = 3; g.strokeStyle = css(T.canvas); g.strokeText(t, q[0], y); g.fillStyle = colour || T.text; g.fillText(t, q[0], y); });
+  };
+  const arrows = (at, ax) => {
+    const o = to(at); if (!o[3]) return;
+    [["#e8291c", "1"], [T.dark ? "#ffffff" : "#1f8a4c", "2"], ["#1c5fd0", "3"]].forEach(([c, t], i) => { const b = to(add(at, mul(ax[i], L))); if (!b[3]) return; g.strokeStyle = g.fillStyle = c; g.lineWidth = 1.5; arrow(g, o, b); g.fillText(t, b[0] + (b[0] - o[0]) * 0.25, b[1] + (b[1] - o[1]) * 0.25); });
+  };
+  for (const f of frames) {
+    if (!fItems || !p.vis[f.id]) continue;
+    const s = assign.f[f.name] || {}, mid = mul(add(f.a, f.b), 0.5), at = t => add(f.a, mul(sub(f.b, f.a), t));
+    if (opt.fAxes) arrows(mid, axesOf(f, s.ang));
+    if (opt.fReleases && (s.rel_i || s.rel_j)) {
+      g.strokeStyle = "#16a34a"; g.lineWidth = 1.5;
+      for (const [r, t] of [[s.rel_i, 0.08], [s.rel_j, 0.92]]) if (r && /M2|M3|T/.test(r)) { const q = to(at(t)); if (q[3]) { g.beginPath(); g.arc(q[0], q[1], 3.5, 0, 7); g.stroke(); } }
+    }
+    if (opt.fHinges && s.hin) { g.fillStyle = "#d946ef"; for (const t of s.hin) { const q = to(at(Math.max(0, Math.min(1, +t)))); if (q[3]) { g.beginPath(); g.arc(q[0], q[1], 3.5, 0, 7); g.fill(); } } }
+    const len = Math.hypot(...sub(f.b, f.a)) || 1;
+    if (opt.fOffsets && s.off) { g.strokeStyle = T.dark ? "#ffd83c" : "#b86a12"; g.lineWidth = 4; const [oi, oj] = s.off;
+      if (oi > 0) { const a = to(f.a), b = to(at(Math.min(0.5, oi / len))); if (a[3] && b[3]) { g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); } }
+      if (oj > 0) { const a = to(f.b), b = to(at(1 - Math.min(0.5, oj / len))); if (a[3] && b[3]) { g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); } } }
+    texts(mid, [opt.names && shortName(f.name), opt.fSections && f.section, opt.fReleases && (s.rel_i || s.rel_j) && (s.rel_i || "-") + " / " + (s.rel_j || "-"), opt.fMods && modText(s.mod), opt.fOffsets && s.off && "I=" + num(s.off[0]) + " J=" + num(s.off[1]),
+      opt.fHinges && s.hin && s.hin.length + (s.hin.length === 1 ? " hinge" : " hinges"), opt.fSprings && s.spr, opt.fPier && s.pier && "P " + s.pier, opt.fSpan && s.span && "S " + s.span].filter(Boolean));
+  }
+  for (const a of areas) {
+    if (!aItems || !p.vis[a.id]) continue;
+    const s = assign.a[a.name] || {}, cen = mul(a.pts.reduce(add, [0, 0, 0]), 1 / a.pts.length);
+    if (opt.aAxes) arrows(cen, shellAxes(a, s.ang));
+    texts(cen, [opt.aNames && shortName(a.name), opt.aSections && a.section, opt.aMods && modText(s.mod), opt.aDia && s.dia, opt.aSprings && s.spr, opt.aPier && s.pier && "P " + s.pier, opt.aSpan && s.span && "S " + s.span].filter(Boolean), css(T.ghost));
+  }
+  if (jItems) {
+    const z = p.mode === "plan" ? elevationOf(p.story) : null;
+    for (const pt of points) {
+      const nm = String(pt[0]), at = [pt[1], pt[2], pt[3]], s = assign.j[nm] || {};
+      if (p.mode === "plan" && (z === null || Math.abs(at[2] - z) > tol() * 10)) continue;
+      if (p.mode === "elev" && p.line && !onLine(at, p.line)) continue;
+      if (opt.jSprings && s.spr) { const q = to(at); if (q[3]) { g.strokeStyle = T.support; g.lineWidth = 1.2; g.beginPath(); g.moveTo(q[0], q[1]); for (let i = 1; i <= 6; i++) g.lineTo(q[0] + (i % 2 ? 4 : -4), q[1] + i * 2.5); g.lineTo(q[0], q[1] + 17); g.stroke(); } }
+      const list = [opt.jNames && shortName(nm), opt.jSprings && s.spr, opt.jDia && s.dia].filter(Boolean);
+      if (list.length) { const q = to(at); if (q[3] && !many) { g.textAlign = "left"; g.fillStyle = T.text; list.forEach((t, i) => g.fillText(t, q[0] + 5, q[1] - 6 - i * 11)); g.textAlign = "center"; } }
+    }
+  }
 }
 function drawJoints(p, g, to, T) {
   const seen = new Set(); g.fillStyle = T.joint;
@@ -2479,16 +2559,18 @@ function drawPT(p, g, to, T) {
   // Strips: the centre line dashed and the band outlined, layer A in one colour and B in another (as SAFE colours its layers).
   g.lineWidth = 1; g.font = "10px Segoe UI, sans-serif"; g.textBaseline = "bottom"; g.textAlign = "left";
   for (const s of dstrips) {
+    if (hidden.kind.has("strip")) break;
     if (s.pts.length < 2 || !near(s.pts, tol() * 10)) continue;
     const c = s.layer === "B" ? "#d9822b" : "#2f9e44";
     const off = (q, i, w) => { const a = s.pts[Math.max(0, i - 1)], b = s.pts[Math.min(s.pts.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [q[0] - dy / l * w, q[1] + dx / l * w, q[2]]; };
     g.strokeStyle = c; g.setLineDash([6, 4]); line(s.pts); g.setLineDash([]);
     g.globalAlpha = 0.85; line(s.pts.map((q, i) => off(q, i, s.wl)).concat(s.pts.map((q, i) => off(q, i, -s.wr)).reverse()), true); g.globalAlpha = 1;
-    if (opt.names) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = c; g.fillText(s.name, x + 3, y - 3); } }
+    if (opt.sNames) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = c; g.fillText(s.name, x + 3, y - 3); } }
   }
   // Openings: their outline crossed corner to corner, as ETABS draws an opening in a floor.
   g.strokeStyle = "#6b7280"; g.lineWidth = 1;
   for (const o of openings) {
+    if (hidden.kind.has("opening")) break;
     if (o.pts.length < 3 || !near(o.pts, tol() * 10)) continue;
     line(o.pts, true); line([o.pts[0], o.pts[Math.floor(o.pts.length / 2)]]);
     if (o.pts.length >= 4) line([o.pts[1], o.pts[Math.min(o.pts.length - 1, Math.floor(o.pts.length / 2) + 1)]]);
@@ -2498,21 +2580,22 @@ function drawPT(p, g, to, T) {
   for (const s of slabLines) {
     if (s.pts.length < 2 || !near(s.pts, tol() * 10)) continue;
     const rebar = s.what === "rebar";
+    if (hidden.kind.has(rebar ? "rebar" : "release")) continue;
     g.strokeStyle = rebar ? "#8b5a2b" : "#d6336c"; g.lineWidth = rebar ? 2 : 1.5; g.setLineDash(rebar ? [] : [8, 3, 2, 3]); line(s.pts); g.setLineDash([]);
     if (rebar && (s.wl || s.wr)) {
       const [a, b] = s.pts, dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l;
       const o = (q, w) => [q[0] + nx * w, q[1] + ny * w, q[2]];
       g.lineWidth = 1; g.globalAlpha = 0.7; line([o(a, s.wl), o(b, s.wl), o(b, -s.wr), o(a, -s.wr)], true); g.globalAlpha = 1;
     }
-    if (opt.names || !rebar) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = g.strokeStyle; g.fillText(rebar ? s.name : s.name + " " + s.what, x + 3, y - 3); } }
+    if (opt.sNames || !rebar) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = g.strokeStyle; g.fillText(rebar ? s.name : s.name + " " + s.what, x + 3, y - 3); } }
   }
   // Tendons: their true profile in 3D and elevation; in plan, the tendons of the story's slab.
   g.strokeStyle = "#0fa3b1"; g.lineWidth = 2;
   for (const t of tendons) {
-    if (t.pts.length < 2) continue;
+    if (t.pts.length < 2 || hidden.kind.has("tendon")) continue;
     if (p.mode === "plan" ? t.story !== p.story : !near(t.pts, 0)) continue;
     line(t.pts);
-    if (opt.names) { const [x, y, , ok] = to(t.pts[0]); if (ok) { g.fillStyle = "#0fa3b1"; g.fillText(t.name, x + 3, y - 3); } }
+    if (opt.tNames) { const [x, y, , ok] = to(t.pts[0]); if (ok) { g.fillStyle = "#0fa3b1"; g.fillText(t.name, x + 3, y - 3); } }
   }
   g.lineWidth = 1;
 }
@@ -3144,7 +3227,7 @@ function act(name) {
   const p = panes[active];
   hideMenus();
   if (name.startsWith("r:")) return setRes(name.slice(2));
-  if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
+  if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude") opt.extrudeA = opt.extrude; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
   if (name.startsWith("m:")) return modelAct(name.slice(2));
   if (name === "u:consistent") return consistentUnits();
   if (name === "u:form") return unitsForm();
@@ -3438,14 +3521,45 @@ const dialogs = {
       [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Close"]], {width: 400}), resCases("reactions"));
   },
   display() {
-    const kinds = [["column", "Columns"], ["beam", "Beams"], ["brace", "Braces"], ["floor", "Floors"], ["wall", "Walls"]].filter(([k]) => frames.some(f => f.kind === k) || areas.some(a => a.kind === k));
-    dialog("Set View Options", `<div class="itabs"><button data-page="g" class="on">General</button><button data-page="o">Objects</button></div>
-      <div class="ipage on" data-page="g">
-      <fieldset><legend>Display</legend><div class="g3">${[["extrude", "Extruded sections"], ["fill", "Floors and walls (fill)"], ["see", "See-through floors and walls"], ["edges", "Object edges"], ["grid", "Grid lines"], ["axes", "Global axes"], ["names", "Labels"], ["supports", "Supports"], ["joints", "Joints"]].map(([k, l]) => `<label><input type="checkbox" data-o="${k}" ${opt[k] ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>
-      <fieldset><legend>Colours</legend><div class="g2"><span>Colour objects by</span><select id="dCol">${$("colour").innerHTML}</select><span>Background</span><select id="dBg">${opts([["black", "Black"], ["white", "White"]], bg)}</select></div></fieldset></div>
-      <div class="ipage" data-page="o"><fieldset><legend>Object types shown</legend><div class="g3">${kinds.map(([k, l]) => `<label><input type="checkbox" data-k="${k}" ${hidden.kind.has(k) ? "" : "checked"}>${l}</label>`).join("")}</div></fieldset>
-      <p class="kv">Sections can be turned on and off one by one in the Model Explorer.</p></div>`,
-      [["OK", d => applyDisplay(d)], ["Apply", d => { applyDisplay(d); return false; }, true], ["Cancel"]], {width: 460});
+    // ETABS 23.2's Set View Options (View > Set Display Options, Ctrl+W) item for item; SAFE's has the same tabs with its
+    // own objects; SAP2000's Display Options for Active Window keeps its one page of Joints / Frames / Areas / Links and
+    // General groups with its "Not in View" boxes (Ahmed 2026-11-27: every item there and working, Openings too).
+    const cb = (k, l) => `<label><input type="checkbox" data-o="${k}" ${opt[k] ? "checked" : ""}>${l}</label>`;
+    const kb = (k, l) => `<label><input type="checkbox" data-k="${k}" ${hidden.kind.has(k) ? "" : "checked"}>${l}</label>`;
+    const nv = (ks, l) => `<label><input type="checkbox" data-nv="${ks}" ${ks.split(",").every(k => hidden.kind.has(k)) ? "checked" : ""}>${l}</label>`;
+    const fs = (legend, items, cls) => `<fieldset><legend>${legend}</legend><div class="${cls || "g2"}">${items.join("")}</div></fieldset>`;
+    const colours = `<select id="dCol">${$("colour").innerHTML}</select>`, back = `<select id="dBg">${opts([["white", "White"], ["black", "Black"]], bg)}</select>`;
+    let body, title, width;
+    if (program === "sap2000") {
+      title = "Display Options for Active Window"; width = 620;
+      body = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+        ${fs("Joints", [cb("jNames", "Labels"), cb("supports", "Restraints"), cb("jSprings", "Springs"), cb("jDia", "Constraints"), cb("joints", "Invisible", true).replace(/data-o="joints" (checked)?/, `data-o="joints" data-inv="1" ${opt.joints ? "" : "checked"}`), nv("joint", "Not in View")])}
+        ${fs("Frames/Cables/Tendons", [cb("names", "Labels"), cb("fSections", "Sections"), cb("fReleases", "Releases"), cb("fAxes", "Local Axes"), cb("fMods", "Property Modifiers"), cb("fOffsets", "End Offsets"), cb("fHinges", "Hinges"), cb("fSprings", "Line Springs"), cb("tNames", "Tendon Labels"), nv("column,beam,brace", "Frames Not in View"), nv("tendon", "Tendons Not in View")])}
+        ${fs("Areas", [cb("aNames", "Labels"), cb("aSections", "Sections"), cb("aAxes", "Local Axes"), cb("aMods", "Property Modifiers"), cb("aSprings", "Area Springs"), cb("aDia", "Constraints"), nv("floor,wall,ramp", "Areas Not in View"), nv("opening", "Openings Not in View")])}
+        ${fs("General", [cb("shrink", "Shrink Objects"), cb("extrude", "Extrude View"), cb("fill", "Fill Objects"), cb("edges", "Show Edges"), cb("grid", "Show Grid"), cb("axes", "Show Axes"), cb("levels", "Show Bounding Planes"), cb("see", "See Through Areas")])}
+        </div>${fs("View by Colors of", [`<span>Colors</span>${colours}`, `<span>Background</span>${back}`])}`;
+    } else {
+      const safe = program === "safe";
+      title = safe ? "Set Display Options" : "Set View Options"; width = 640;
+      body = `<div class="itabs"><button data-page="g" class="on">General</button><button data-page="a">Object Assignments</button><button data-page="o">Object Present in View</button></div>
+        <div class="ipage on" data-page="g">
+        ${fs("View by Colors of", [`<span>Colors</span>${colours}`, `<span>Background Color</span>${back}`])}
+        ${fs("Special Effects", [cb("fill", "Object Fill"), cb("edges", "Object Edges"), cb("extrude", "Extrude Frames"), cb("extrudeA", "Extrude Shells"), cb("shrink", "Object Shrink"), cb("see", "See Through Shells")])}
+        ${fs("Other Special Items", [cb("grid", "Grid Lines"), cb("dims", "Dimension Lines"), cb("levels", safe ? "Reference Planes" : "Story Levels"), cb("axes", "Global Axes"), cb("joints", "Joints Invisible").replace(/data-o="joints" (checked)?/, `data-o="joints" data-inv="1" ${opt.joints ? "" : "checked"}`)])}
+        </div>
+        <div class="ipage" data-page="a"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
+        ${fs("Joint Assignments", [cb("jNames", "Labels"), cb("supports", "Restraints"), cb("jSprings", "Springs"), cb("jDia", "Diaphragms")], "g1")}
+        ${fs("Frame Assignments", [cb("names", "Labels"), cb("fSections", "Sections"), cb("fReleases", "Releases"), cb("fAxes", "Local Axes"), cb("fMods", "Property Modifiers"), cb("fOffsets", "End Length Offsets"), cb("fHinges", "Hinges"), cb("fSprings", "Line Springs"), cb("fPier", "Pier Labels"), cb("fSpan", "Spandrel Labels")], "g1")}
+        ${fs("Shell Assignments", [cb("aNames", "Labels"), cb("aSections", "Sections"), cb("aAxes", "Local Axes"), cb("aMods", "Property Modifiers"), cb("aDia", "Diaphragms"), cb("aSprings", "Area Springs"), cb("aPier", "Pier Labels"), cb("aSpan", "Spandrel Labels")], "g1")}
+        </div>${fs(safe ? "Tendons and Strips" : "Tendons and Slab Items", [cb("tNames", "Tendon Labels"), cb("sNames", safe ? "Strip and Slab Rebar Labels" : "Design Strip and Slab Rebar Labels")])}</div>
+        <div class="ipage" data-page="o"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
+        ${fs("Joints", [cb("joints", "Joints"), cb("supports", "Supports")], "g1")}
+        ${fs("Frames", safe ? [kb("beam", "Beams"), kb("column", "Columns"), kb("brace", "Braces"), kb("tendon", "Tendons")] : [kb("column", "Columns"), kb("beam", "Beams"), kb("brace", "Braces"), kb("tendon", "Tendons")], "g1")}
+        ${fs(safe ? "Areas" : "Shells", safe ? [kb("floor", "Slabs"), kb("wall", "Walls"), kb("ramp", "Ramps"), kb("opening", "Openings")] : [kb("floor", "Floors"), kb("wall", "Walls"), kb("ramp", "Ramps"), kb("opening", "Openings")], "g1")}
+        </div>${fs("Slab Design Items", [kb("strip", "Design Strips"), kb("rebar", "Slab Rebar"), kb("release", "Slab Line Releases")])}
+        <p class="kv">Sections can be turned on and off one by one in the Model Explorer.</p></div>`;
+    }
+    dialog(title, body, [["OK", d => applyDisplay(d)], ["Apply", d => { applyDisplay(d); return false; }, true], ["Cancel"]], {width});
     setTimeout(() => { const d = document.querySelector(".dlg:last-of-type #dCol"); if (d) d.value = $("colour").value; });
   },
   view3d() {
@@ -3533,8 +3647,14 @@ function applyContour(d) {
   $("case").value = res.case; $("comp").value = res.comp; pointsDirty = true; syncResults(); syncTools(); draw();
 }
 function applyDisplay(d) {
-  d.querySelectorAll("[data-o]").forEach(x => { const k = x.dataset.o; if (opt[k] !== x.checked) { opt[k] = x.checked; if (k === "extrude") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; } });
+  // A box shown twice (Restraints on two tabs) takes the one the user changed.
+  const seen = {};
+  d.querySelectorAll("[data-o]").forEach(x => { const k = x.dataset.o, v = x.dataset.inv ? !x.checked : x.checked; if (k in seen && v === opt[k]) return; seen[k] = v; });
+  const geo = ["extrude", "extrudeA", "shrink"];
+  for (const [k, v] of Object.entries(seen)) if (opt[k] !== v) { opt[k] = v; if (geo.includes(k)) { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; }
   d.querySelectorAll("[data-k]").forEach(x => { x.checked ? hidden.kind.delete(x.dataset.k) : hidden.kind.add(x.dataset.k); });
+  d.querySelectorAll("[data-nv]").forEach(x => x.dataset.nv.split(",").forEach(k => x.checked ? hidden.kind.add(k) : hidden.kind.delete(k)));
+  if (hidden.kind.has("joint")) opt.joints = false;
   hiddenVersion++;
   const c = q(d, "#dCol").value; if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design" || res.mode === "values" || res.mode === "loads") res.mode = "model"; syncResults(); }
   const b = q(d, "#dBg").value; if (b !== bg) act("bg");
@@ -4046,10 +4166,10 @@ function buildTree() {
   const plain = list => list.length ? list.map(x => `<div class="leaf">${esc(x)}</div>`).join("") : `<div class="leaf kv">none</div>`;
   const T = theme(), m = P.model, man = P.manifest || {}, count = (list, f) => list.filter(f).length;
   // The Model Explorer names objects as the program does: SAP2000 has frames and areas (no stories), SAFE has slabs.
-  const kinds = program === "sap2000" ? [["column", "Frames (vertical)", frames], ["beam", "Frames (horizontal)", frames], ["brace", "Frames (inclined)", frames], ["floor", "Areas (horizontal)", areas], ["wall", "Areas (vertical)", areas]]
-    : program === "safe" ? [["floor", "Slabs", areas], ["beam", "Beams", frames], ["column", "Columns", frames], ["wall", "Walls", areas], ["brace", "Braces", frames]]
-    : [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", "Floors", areas], ["wall", "Walls", areas]];
-  const kindLeaves = kinds.map(([k, title, list]) => { const n = count(list, o => o.kind === k); return n ? `<label class="leaf"><input type="checkbox" data-hide="kind" data-v="${k}" ${hidden.kind.has(k) ? "" : "checked"}><i style="background:${k === "floor" ? T.floor : k === "wall" ? T.wall : T[k]}"></i>${title}<span class="n">${n}</span></label>` : ""; }).join("");
+  const kinds = program === "sap2000" ? [["column", "Frames (vertical)", frames], ["beam", "Frames (horizontal)", frames], ["brace", "Frames (inclined)", frames], ["floor", "Areas (horizontal)", areas], ["wall", "Areas (vertical)", areas], ["ramp", "Areas (inclined)", areas], ["opening", "Openings", areas]]
+    : program === "safe" ? [["floor", "Slabs", areas], ["beam", "Beams", frames], ["column", "Columns", frames], ["wall", "Walls", areas], ["brace", "Braces", frames], ["ramp", "Ramps", areas], ["opening", "Openings", areas]]
+    : [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", "Floors", areas], ["wall", "Walls", areas], ["ramp", "Ramps", areas], ["opening", "Openings", areas]];
+  const kindLeaves = kinds.map(([k, title, list]) => { const n = count(list, o => o.kind === k) + (k === "opening" ? openings.length : 0); return n ? `<label class="leaf"><input type="checkbox" data-hide="kind" data-v="${k}" ${hidden.kind.has(k) ? "" : "checked"}><i style="background:${k === "floor" || k === "ramp" ? T.floor : k === "wall" ? T.wall : k === "opening" ? "transparent;border:1px solid " + T.floor : T[k]}"></i>${title}<span class="n">${n}</span></label>` : ""; }).join("");
   const secLeaves = (type, names, list) => names.map(s => { const n = count(list, o => o.section === s), z = type === "f" ? sizes[s] : slabT[s]; return `<div class="leaf go" data-sec="${type}" data-v="${esc(s)}" title="Click to light up its members"><input type="checkbox" data-hide="section" data-v="${esc(type + ":" + s)}" ${hidden.section.has(type + ":" + s) ? "" : "checked"}>${esc(s)}<span class="n">${z ? (type === "f" ? num(z[1]) + (z[2] ? "x" + num(z[2]) : "") : num(z)) + " · " : ""}${n}</span></div>`; }).join("") || `<div class="leaf kv">none</div>`;
   const fs = m.frame_sections || [...new Set(frames.map(f => f.section))], as = m.area_sections || [...new Set(areas.map(a => a.section))];
   const lines = dir => grids[dir].map(g => `<div class="leaf go" data-line="${esc(g.dir + g.label)}">${esc(g.label)}<span class="n">${dir} = ${num(g.at)}</span></div>`).join("");
@@ -4229,7 +4349,7 @@ function showPick() {
   if (!list.length && !joints.length) {
     const man = P.manifest || {}, count = k => frames.filter(f => f.kind === k).length;
     el.innerHTML = table([["Model", man.model || ""], ["Program", (man.program || "") + " " + (man.etabs || "")], ["Units", unitsWord(showU()) + (dispU ? " (model: " + unitsText + ")" : "")], ["Stories", Math.max(stories.length - 1, 0)], ["Grid lines", gridsGuessed ? "none in the file (column lines shown)" : grids.X.length + grids.Y.length],
-      ["Columns", count("column")], ["Beams", count("beam")], ["Braces", count("brace")], ["Floors", areas.filter(a => a.kind !== "wall").length], ["Walls", areas.filter(a => a.kind === "wall").length], ["Joints", points.length], ["Supports", supports.length],
+      ["Columns", count("column")], ["Beams", count("beam")], ["Braces", count("brace")], ["Floors", areas.filter(a => a.kind !== "wall" && a.kind !== "opening").length], ["Walls", areas.filter(a => a.kind === "wall").length], ...(areas.some(a => a.kind === "opening") || openings.length ? [["Openings", areas.filter(a => a.kind === "opening").length + openings.length]] : []), ["Joints", points.length], ["Supports", supports.length],
       ["Size X, Y, Z", [0, 1, 2].map(i => num(L(hi[i] - lo[i]))).join(", ") + (lu() ? " " + lu() : "")], ["Result tables", Object.keys(P.tables).length]]) + `<p class="kv">Click an object in a view to see it here. Double click it, or right click it, for its full information.</p>`;
     $("target").textContent = "Comment on the whole model. Click a member in a view to comment on it.";
     return;
