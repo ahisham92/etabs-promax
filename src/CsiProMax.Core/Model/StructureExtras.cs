@@ -19,7 +19,42 @@ public static class StructureExtras
         [GroupTable] = ["Steel", "Concrete", "Composite", "Selection", "SectionCut", "Aluminum", "ColdFormed", "Stage", "Bridge", "AutoSeismic", "AutoWind", "MassWeight"],
         [CutTable] = ["ResultType", "ResultLoc", "LocX", "LocY", "LocZ", "RotAboutZ", "RotAboutY", "RotAboutX"],
         [SpandrelTable] = ["MultiStory"],
+        ["Spring Property Definitions - Point Springs"] = ["NonlinOpt", "Color", "Notes"],
+        ["Spring Property Definitions - Line Springs"] = ["NonlinOpt2", "NonlinOpt3", "Color", "Notes"],
+        ["Spring Property Definitions - Area Springs"] = ["NonlinOpt3", "Color", "Notes"],
+        ["Link Property Definitions - Linear"] = LinkFields,
+        ["Link Property Definitions - Damper - Exponential"] = LinkFields,
+        ["Link Property Definitions - Gap"] = LinkFields,
+        ["Link Property Definitions - Hook"] = LinkFields,
+        ["Link Property Definitions - Plastic Wen"] = LinkFields,
+        ["Link Property Definitions - Isolator - Rubber"] = LinkFields,
+        ["Link Property Definitions - Isolator - Friction"] = LinkFields,
+        ["Link Property Definitions - Multilinear - Elastic"] = LinkFields,
+        ["Link Property Definitions - Multilinear - Plastic"] = LinkFields,
     };
+
+    /// <summary>Link/Support Property Data's Total Mass and Weight, Factors For Line and Area Springs and notes.</summary>
+    public static readonly string[] LinkFields = ["Mass", "Weight", "RotInert1", "RotInert2", "RotInert3", "DefLength", "DefArea", "Notes"];
+
+    public static string SpringTable(string kind) => "Spring Property Definitions - " + kind.ToLowerInvariant() switch { "point" => "Point Springs", "line" => "Line Springs", _ => "Area Springs" };
+
+    /// <summary>The program's table for a link type (the Modeler's names: LINEAR, DAMPER, GAP, ...).</summary>
+    public static string LinkTable(string type) => "Link Property Definitions - " + type.ToUpperInvariant() switch
+    {
+        "DAMPER" => "Damper - Exponential", "GAP" => "Gap", "HOOK" => "Hook", "PLASTIC (WEN)" => "Plastic Wen", "RUBBER ISOLATOR" => "Isolator - Rubber",
+        "FRICTION ISOLATOR" => "Isolator - Friction", "MULTILINEAR ELASTIC" => "Multilinear - Elastic", "MULTILINEAR PLASTIC" => "Multilinear - Plastic", _ => "Linear",
+    };
+
+    /// <summary>A nonlinear link's table has a row per direction: its rows are put in by name and direction.</summary>
+    public static bool PerDirection(string table) => table.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase) && !table.EndsWith("- Linear", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsLinkTable(string table) => table.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Takes a link's row out of every link table (its type may have changed).</summary>
+    public static void RemoveLink(StructuralModel m, string name)
+    {
+        foreach (var t in Fields.Keys.Where(k => k.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase)).ToList()) Remove(m, t, name);
+    }
 
     /// <summary>Fields only SAP2000's table has; left out of the row put into ETABS.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> SapOnly = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)

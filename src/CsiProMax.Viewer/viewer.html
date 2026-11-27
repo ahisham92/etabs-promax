@@ -5270,13 +5270,26 @@ async function hmLinks() {
     ["Delete Property", n => n && hmRun("define_link", {name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
   ], n => hmLink(pd, find(n), again));
 }
+// Link/Support Property Data as the programs show it: Link/Support Type, Property Name, Total Mass and Weight
+// (Mass, Weight, Rotational Inertia 1-3), Factors For Line and Area Springs, the Directional Properties (Direction,
+// Fixed/active, effective stiffness and damping), and the property's notes.
 function hmLink(pd, l, after) {
-  const u = hmU(), dofs = ["U1", "U2", "U3", "R1", "R2", "R3"];
-  const row = k => { const v = l && l.dofs[k]; return `<tr><td><label><input type="checkbox" data-on="${k}" ${v ? "checked" : ""}> ${k}</label></td><td><input data-s="${k}" type="number" step="any" value="${v ? v.stiffness : 0}"></td><td><input data-d="${k}" type="number" step="any" value="${v ? v.damping : 0}"></td></tr>`; };
-  return dialog("Link/Support Property Data", `<div class="g2"><span>Property Name</span><input id="lkN" value="${esc(l ? l.name : "Link" + (pd.links.length + 1))}" ${l ? "disabled" : ""}><span>Link Type</span><select id="lkT">${opts(pd.link_types, l ? l.type : "LINEAR")}</select></div>
-    <fieldset><legend>Directional Properties (effective, for linear analysis)</legend><table class="list hmgrid"><tr><th>Direction</th><th>Stiffness (${u.f}/${u.l}, ${u.f}-${u.l}/rad)</th><th>Damping</th></tr>${dofs.map(row).join("")}</table></fieldset>
+  const u = hmU(), dofs = ["U1", "U2", "U3", "R1", "R2", "R3"], x = (l && l.extras) || {};
+  const row = k => { const v = l && l.dofs[k]; return `<tr><td>${k}</td><td><input type="checkbox" data-on="${k}" ${v ? "checked" : ""}></td><td><input data-s="${k}" type="number" step="any" value="${v ? v.stiffness : 0}"></td><td><input data-d="${k}" type="number" step="any" value="${v ? v.damping : 0}"></td></tr>`; };
+  const d = dialog("Link/Support Property Data", `<div class="g2"><span>Link/Support Type</span><select id="lkT">${opts(pd.link_types, l ? l.type : "LINEAR")}</select><span>Property Name</span><input id="lkN" value="${esc(l ? l.name : "Link" + (pd.links.length + 1))}" ${l ? "disabled" : ""}><span>Property Notes</span><input id="lkNo" value="${esc(x.Notes || "")}"></div>
+    <div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Total Mass and Weight</legend><div class="gu">
+      <span>Mass</span><input data-x="Mass" type="number" step="any" value="${x.Mass || 0}"><span class="un">${u.f}-s²/${u.l}</span><span>Weight</span><input data-x="Weight" type="number" step="any" value="${x.Weight || 0}"><span class="un">${u.f}</span>
+      <span>Rotational Inertia 1</span><input data-x="RotInert1" type="number" step="any" value="${x.RotInert1 || 0}"><span class="un">${u.f}-${u.l}-s²</span><span>Rotational Inertia 2</span><input data-x="RotInert2" type="number" step="any" value="${x.RotInert2 || 0}"><span class="un">${u.f}-${u.l}-s²</span>
+      <span>Rotational Inertia 3</span><input data-x="RotInert3" type="number" step="any" value="${x.RotInert3 || 0}"><span class="un">${u.f}-${u.l}-s²</span></div></fieldset>
+    <fieldset style="flex:1;margin:0"><legend>Factors For Line and Area Springs</legend><div class="gu" style="grid-template-columns:1fr 90px auto">
+      <span>Property is Defined for This Length In a Line Spring</span><input data-x="DefLength" type="number" step="any" value="${x.DefLength || 1}"><span class="un">${u.l}</span>
+      <span>Property is Defined for This Area In Area Springs</span><input data-x="DefArea" type="number" step="any" value="${x.DefArea || 1}"><span class="un">${u.l}²</span></div></fieldset></div>
+    <fieldset><legend>Directional Properties</legend><table class="list hmgrid"><tr><th>Direction</th><th>Active</th><th>Effective Stiffness (${u.f}/${u.l}, ${u.f}-${u.l}/rad)</th><th>Effective Damping</th></tr>${dofs.map(row).join("")}</table></fieldset>
     <p class="kv">A nonlinear type's own curve (yield, gap opening, friction) goes in by Edit > Model Text.</p>`,
-    [["OK", d => { const o = {}; dofs.forEach(k => { if (q(d, `[data-on="${k}"]`).checked) o[k] = {stiffness: parseFloat(q(d, `[data-s="${k}"]`).value) || 0, damping: parseFloat(q(d, `[data-d="${k}"]`).value) || 0}; }); return submit(d, "define_link", {name: q(d, "#lkN").value.trim(), type: q(d, "#lkT").value, dofs: o}, after); }, true], ["Cancel"]], {width: 520});
+    [["OK", d => { const o = {}; dofs.forEach(k => { if (q(d, `[data-on="${k}"]`).checked) o[k] = {stiffness: parseFloat(q(d, `[data-s="${k}"]`).value) || 0, damping: parseFloat(q(d, `[data-d="${k}"]`).value) || 0}; });
+      const extras = {Notes: q(d, "#lkNo").value}; d.querySelectorAll("[data-x]").forEach(i => extras[i.dataset.x] = String(parseFloat(i.value) || 0));
+      return submit(d, "define_link", {name: q(d, "#lkN").value.trim(), type: q(d, "#lkT").value, dofs: o, extras}, after); }], ["Cancel"]], {width: 760});
+  return d;
 }
 
 // ---- Define: spring properties ----
@@ -5291,12 +5304,25 @@ async function hmSprings(kind) {
     ["Delete Property", n => n && hmRun("define_spring", {kind, name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
   ], n => hmSpring(kind, list.find(x => x.name === n), again));
 }
+// Point, Line and Area Spring Property Data as the programs show them: Property Name, Stiffness Options (User
+// Specified), the spring stiffness by direction with units, the Nonlinearity Specification (none, compression only,
+// tension only: a point spring's own, a line spring's U2 and U3, an area spring's U3), Display Color and notes.
 function hmSpring(kind, sp, after) {
-  const u = hmU(), keys = {point: ["UX", "UY", "UZ", "RX", "RY", "RZ"], line: ["U1", "U2", "U3", "R1"], area: ["U1", "U2", "U3"]}[kind];
+  const u = hmU(), keys = {point: ["UX", "UY", "UZ", "RX", "RY", "RZ"], line: ["U1", "U2", "U3", "R1"], area: ["U1", "U2", "U3"]}[kind], x = (sp && sp.extras) || {};
   const unit = k => kind === "point" ? (k[0] === "U" ? `${u.f}/${u.l}` : `${u.f}-${u.l}/rad`) : kind === "line" ? (k[0] === "U" ? `${u.f}/${u.l}/${u.l}` : `${u.f}-${u.l}/rad/${u.l}`) : `${u.f}/${u.l}/${u.l}²`;
-  return dialog({point: "Point", line: "Line", area: "Area"}[kind] + " Spring Property Data", `<div class="g2"><span>Property Name</span><input id="kN" value="${esc(sp ? sp.name : kind[0].toUpperCase() + "Spr1")}" ${sp ? "disabled" : ""}></div>
-    <fieldset><legend>Stiffness</legend><div class="g2" id="kV">${keys.map(k => `<span>${k} (${unit(k)})</span><input data-k="${k}" type="number" step="any" value="${sp ? sp.values[k] : 0}">`).join("")}</div></fieldset>`,
-    [["OK", d => { const values = {}; d.querySelectorAll("#kV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) values[x.dataset.k] = v; }); return submit(d, "define_spring", {kind, name: q(d, "#kN").value.trim(), values}, after); }, true], ["Cancel"]], {width: 400});
+  const label = k => ({UX: "UX Translation", UY: "UY Translation", UZ: "UZ Translation", RX: "RX Rotation", RY: "RY Rotation", RZ: "RZ Rotation", U1: "U1 Translation", U2: "U2 Translation", U3: "U3 Translation", R1: "R1 Rotation"})[k];
+  const nl = [["None", "Linear"], ["Compression Only", "Compression Only"], ["Tension Only", "Tension Only"]];
+  const nlKeys = {point: [["NonlinOpt", "Nonlinear Option"]], line: [["NonlinOpt2", "Nonlinear Option for U2"], ["NonlinOpt3", "Nonlinear Option for U3"]], area: [["NonlinOpt3", "Nonlinear Option for U3"]]}[kind];
+  const T = {point: "Point", line: "Line", area: "Area"}[kind];
+  const d = dialog(T + " Spring Property Data", `<div class="g2"><span>Property Name</span><input id="kN" value="${esc(sp ? sp.name : kind[0].toUpperCase() + "Spr1")}" ${sp ? "disabled" : ""}></div>
+    <fieldset><legend>Stiffness Options</legend><label style="display:block"><input type="radio" name="kO" checked> User Specified</label>${kind === "point" ? `<label style="display:block"><input type="radio" name="kO" disabled> Based on Soil Profile and Footing Dimensions</label>` : ""}<label style="display:block"><input type="radio" name="kO" disabled> Link Property</label></fieldset>
+    <fieldset><legend>${kind === "point" ? "Spring Stiffness in Global Directions" : kind === "line" ? "Spring Stiffness per Unit Length" : "Spring Stiffness per Unit Area"}</legend><div class="gu" id="kV">${keys.map(k => `<span>${label(k)}</span><input data-k="${k}" type="number" step="any" value="${sp ? sp.values[k] : 0}"><span class="un">${unit(k)}</span>`).join("")}</div></fieldset>
+    <fieldset><legend>Nonlinearity Specification</legend><div class="g2">${nlKeys.map(([k, t]) => `<span>${t}</span><select data-n="${k}">${opts(nl, x[k] || "None")}</select>`).join("")}</div></fieldset>
+    <fieldset><legend>Property Notes and Color</legend><div class="g2"><span>Display Color</span><input id="kC" type="color" value="${/^#[0-9a-f]{6}$/i.test(x.Color || "") ? x.Color : "#00a0a0"}" style="width:46px;padding:0"><span>Property Notes</span><input id="kNo" value="${esc(x.Notes || "")}"></div></fieldset>`,
+    [["OK", d => { const values = {}; d.querySelectorAll("#kV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) values[x.dataset.k] = v; });
+      const extras = {Color: q(d, "#kC").value, Notes: q(d, "#kNo").value}; d.querySelectorAll("[data-n]").forEach(s => extras[s.dataset.n] = s.value);
+      return submit(d, "define_spring", {kind, name: q(d, "#kN").value.trim(), values, extras}, after); }], ["Cancel"]], {width: 460});
+  return d;
 }
 
 // ---- What the .e2k has no place for: SAP2000 joint constraints and moving loads, SAFE design strips ----

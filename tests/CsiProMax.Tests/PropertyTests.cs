@@ -403,5 +403,24 @@ static class PropertyTests
             Do(new { undo = true });
             Check(PropertyDefs.Value(link.Model.LineAssigns.Single(y => y.Label == beam[..at] && y.Story == beam[(at + 1)..]).Extra, "ANG") is null, "undo takes it off");
         });
+
+        yield return ("properties: Spring and Link/Support Property Data's other fields (nonlinear options, colour, notes; mass, weight, inertia, line and area factors) are kept by the program's tables, and a link's row follows its type (Ahmed 2026-11-27, every field)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_spring", new { kind = "area", name = "AS1", values = new { U3 = 20000 }, extras = new Dictionary<string, string> { ["NonlinOpt3"] = "Compression Only", ["Color"] = "#ff0000", ["Notes"] = "soil" } });
+            var sp = StructureExtras.Get(link.Model, "Spring Property Definitions - Area Springs", "AS1");
+            Check(sp["NonlinOpt3"] == "Compression Only" && sp["Notes"] == "soil", "the area spring's row: " + string.Join(",", sp));
+            Refused(link, "define_spring", new { kind = "area", name = "AS2", values = new { U3 = 1 }, extras = new Dictionary<string, string> { ["NonlinOpt2"] = "Tension Only" } }, "has no field 'NonlinOpt2'");
+            Check(!PropertyDefs.Springs(link.Model).Exists(x => x.Name == "AS2"), "a refused spring is not made");
+            Run(link, "define_link", new { name = "L1", type = "GAP", dofs = new { U1 = new { stiffness = 1e6, damping = 0 } }, extras = new Dictionary<string, string> { ["Mass"] = "0.5", ["Notes"] = "bearing" } });
+            Check(StructureExtras.Get(link.Model, "Link Property Definitions - Gap", "L1")["Mass"] == "0.5", "the gap link's row");
+            Check(StructureExtras.PerDirection("Link Property Definitions - Gap") && !StructureExtras.PerDirection("Link Property Definitions - Linear"), "a nonlinear link's rows go in by direction");
+            Run(link, "define_link", new { name = "L1", type = "LINEAR", dofs = new { U1 = new { stiffness = 1e6, damping = 0 } } });
+            Check(StructureExtras.Get(link.Model, "Link Property Definitions - Linear", "L1")["Notes"] == "bearing" && StructureExtras.Get(link.Model, "Link Property Definitions - Gap", "L1").Count == 0, "the row moves with the type");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["links"]![0]!["extras"]!["Mass"]!.GetValue<string>() == "0.5" && pd["springs"]!.AsArray().Any(x => x!["name"]!.GetValue<string>() == "AS1" && x["extras"]!["Color"]!.GetValue<string>() == "#ff0000"), "the forms see them");
+            Run(link, "define_link", new { name = "L1", delete = true });
+            Check(StructureExtras.Get(link.Model, "Link Property Definitions - Linear", "L1").Count == 0, "a deleted link leaves no row");
+        });
     }
 }

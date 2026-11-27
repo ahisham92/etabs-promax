@@ -40,7 +40,11 @@ public static class ModelerTables
         {
             try
             {
-                EditableTables.Put(e, table, KeyOf(table), rows.Select(r => (IReadOnlyDictionary<string, string>)StructureExtras.ForEtabs(table, r)).ToList(), $"put the Modeler's '{table}' in");
+                var put = rows.Select(r => StructureExtras.ForEtabs(table, r)).ToList();
+                // A nonlinear link's table has a row per direction: the same fields on each of the link's directions.
+                if (StructureExtras.PerDirection(table))
+                    put = put.SelectMany(r => (PropertyDefs.Links(model).Find(l => l.Name == r.GetValueOrDefault("Name"))?.Dofs.Keys.ToList() ?? []).Select(dof => new Dictionary<string, string>(r) { ["Direction"] = dof })).ToList();
+                EditableTables.Put(e, table, KeyOf(table), put.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
@@ -198,6 +202,7 @@ public static class ModelerTables
     {
         "story definitions" => "Story",
         "mass source definition" => "Name|LoadPattern",
+        _ when StructureExtras.PerDirection(table) => "Name|Direction",
         _ => "Name",
     };
 }

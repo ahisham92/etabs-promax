@@ -12,6 +12,21 @@ namespace CsiProMax.Assistant.Tools;
 /// </summary>
 public static class PropertyTools
 {
+    /// <summary>Puts a form's other fields (extras) in the program's table row of the definition; blank takes a field off.</summary>
+    private static void SetRowExtras(StructuralModel m, JsonElement a, string table, string name)
+    {
+        if (!a.TryGetProperty("extras", out var x) || x.ValueKind != JsonValueKind.Object) return;
+        var now = new Dictionary<string, string>(StructureExtras.Get(m, table, name));
+        foreach (var p in x.EnumerateObject())
+        {
+            var v = (p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()).Trim();
+            var key = StructureExtras.Fields[table].First(f => f.Equals(p.Name, StringComparison.OrdinalIgnoreCase));
+            if (v.Length == 0) now.Remove(key); else now[key] = v;
+        }
+        StructureExtras.Remove(m, table, name);
+        if (now.Count > 0) StructureExtras.Set(m, table, name, now);
+    }
+
     /// <summary>Refuses extras the form has no field for before anything changes (a refusal leaves the model as it was).</summary>
     private static void CheckExtras(JsonElement a, string[] fields, string what)
     {
@@ -86,29 +101,41 @@ public static class PropertyTools
             }, a => $"Define the section {a.Text("name")}"),
         new("define_spring",
             "Adds or changes a spring property (Define > Spring Properties): kind point (UX UY UZ RX RY RZ, force per length or moment per radian), line (U1 U2 U3 R1, per length of member) or area (U1 U2 U3, per area, e.g. a soil subgrade modulus). delete: take it away (refused while assigned).",
-            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["point","line","area"]},"name":{"type":"string"},"values":""" + Numbers + ""","delete":{"type":"boolean"}}}""",
+            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["point","line","area"]},"name":{"type":"string"},"values":""" + Numbers + ""","delete":{"type":"boolean"},"extras":{"type":"object","additionalProperties":{"type":"string"},"description":"The form's other fields: point NonlinOpt (None, Compression Only, Tension Only), line NonlinOpt2 and NonlinOpt3, area NonlinOpt3; Color, Notes."}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
                 var kind = a.Need("kind").ToLowerInvariant(); var name = a.Need("name");
-                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteSpring(m, kind, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
+                var table = StructureExtras.SpringTable(kind);
+                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteSpring(m, kind, name); StructureExtras.Remove(m, table, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
                 var values = Values(a, "values", false);
-                Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values); return 0; }));
+                CheckExtras(a, StructureExtras.Fields[table].ToArray(), "A " + kind + " spring");
+                Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values); SetRowExtras(m, a, table, name); return 0; }));
                 return new JsonObject { ["spring"] = name, ["kind"] = kind };
             }, a => a.Flag("delete") ? $"Delete the spring {a.Text("name")}" : $"Define the spring {a.Text("name")}"),
         new("define_link",
             "Adds, changes or deletes a link property (Define > Section Properties > Link/Support Properties): type LINEAR, DAMPER, GAP, HOOK, PLASTIC (WEN), RUBBER ISOLATOR, FRICTION ISOLATOR, MULTILINEAR ELASTIC or MULTILINEAR PLASTIC, and per direction (U1 U2 U3 R1 R2 R3) its effective stiffness and damping, which the linear analysis uses. A nonlinear type's own curve goes in by Edit > Model Text.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"type":{"type":"string"},"dofs":{"type":"object","additionalProperties":{"type":"object","properties":{"stiffness":{"type":"number"},"damping":{"type":"number"}}}},"delete":{"type":"boolean"}}}""",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"type":{"type":"string"},"dofs":{"type":"object","additionalProperties":{"type":"object","properties":{"stiffness":{"type":"number"},"damping":{"type":"number"}}}},"delete":{"type":"boolean"},"extras":{"type":"object","additionalProperties":{"type":"string"},"description":"Mass, Weight, RotInert1, RotInert2, RotInert3 (Total Mass and Weight), DefLength, DefArea (Factors For Line and Area Springs), Notes."}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
                 var name = a.Need("name");
-                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteLink(m, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
+                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteLink(m, name); StructureExtras.RemoveLink(m, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
+                CheckExtras(a, StructureExtras.LinkFields, "A link property");
                 var dofs = new Dictionary<string, (double, double)>();
                 if (a.TryGetProperty("dofs", out var d) && d.ValueKind == JsonValueKind.Object)
                     foreach (var x in d.EnumerateObject())
                         dofs[x.Name.ToUpperInvariant()] = (x.Value.Number("stiffness", 0), x.Value.Number("damping", 0));
-                Core(() => link.Edit(m => { PropertyDefs.SetLink(m, name, a.Text("type", "LINEAR"), dofs); return 0; }));
+                Core(() => link.Edit(m =>
+                {
+                    PropertyDefs.SetLink(m, name, a.Text("type", "LINEAR"), dofs);
+                    var kept = StructureExtras.Fields.Keys.Where(StructureExtras.IsLinkTable).Select(t => StructureExtras.Get(m, t, name)).FirstOrDefault(r => r.Count > 0) ?? new Dictionary<string, string>();
+                    StructureExtras.RemoveLink(m, name);
+                    var table = StructureExtras.LinkTable(a.Text("type", "LINEAR"));
+                    if (kept.Count > 0) StructureExtras.Set(m, table, name, kept);
+                    SetRowExtras(m, a, table, name);
+                    return 0;
+                }));
                 return new JsonObject { ["link"] = name, ["directions"] = dofs.Count };
             }, a => a.Flag("delete") ? $"Delete the link {a.Text("name")}" : $"Define the link {a.Text("name")}"),
         new("assign_frame_data",
@@ -424,12 +451,13 @@ public static class PropertyTools
             ["link_types"] = new JsonArray(PropertyDefs.LinkTypes.Select(t => (JsonNode)t).ToArray()),
             ["links"] = new JsonArray(PropertyDefs.Links(m).Select(l => (JsonNode)new JsonObject
             {
-                ["name"] = l.Name, ["type"] = l.Type,
+                ["name"] = l.Name, ["type"] = l.Type, ["extras"] = new JsonObject(StructureExtras.Get(m, StructureExtras.LinkTable(l.Type), l.Name).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
                 ["dofs"] = new JsonObject(l.Dofs.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)new JsonObject { ["stiffness"] = kv.Value.Stiff, ["damping"] = kv.Value.Damp }))),
             }).ToArray()),
             ["springs"] = new JsonArray(springs.Select(s => (JsonNode)new JsonObject
             {
                 ["kind"] = s.Kind, ["name"] = s.Name, ["values"] = Numbers_(s.Values), ["used_by"] = PropertyDefs.SpringUsers(m, s.Kind, s.Name).Count(),
+                ["extras"] = new JsonObject(StructureExtras.Get(m, StructureExtras.SpringTable(s.Kind), s.Name).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             }).ToArray()),
         };
         if (objects.Count > 0)

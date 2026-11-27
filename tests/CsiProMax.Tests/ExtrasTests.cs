@@ -250,6 +250,13 @@ static class ExtrasTests
                 "<legend>Define Section Cut By</legend>", "Design (P, V2, V3, T, M2, M3)", "<legend>Section Cut Force Location</legend>", "<legend>Rotation of Section Cut Local Axes</legend>" })
                 Check(html.Contains(part), "viewer.html lost " + part);
         });
+        yield return ("extras: Link/Support Property Data and the spring forms match ETABS 23.2 and SAP2000 26.3 field by field: Total Mass and Weight, Factors For Line and Area Springs, Directional Properties, Nonlinearity Specification, Display Color and Property Notes (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<legend>Total Mass and Weight</legend>", "<legend>Factors For Line and Area Springs</legend>", "<legend>Directional Properties</legend>", "<span>Property is Defined for This Length In a Line Spring</span>",
+                "<span>Rotational Inertia 1</span>", "<legend>Nonlinearity Specification</legend>", "<legend>Stiffness Options</legend>", "<span>Display Color</span>", "<span>Link/Support Type</span>", "\"Link/Support Property Data\"" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
