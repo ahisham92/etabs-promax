@@ -40,6 +40,9 @@ public static class F2kWriter
 
     private static string I(int v) => v.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>A point's place, as the writer tells points apart.</summary>
+    internal static string PointKey(double x, double y, double z) => string.Create(CultureInfo.InvariantCulture, $"{Math.Round(x, 6)},{Math.Round(y, 6)},{Math.Round(z, 6)}");
+
     /// <summary>
     /// SAFE models one floor to a file (its own exports have no story table): every story with slabs, each as its own
     /// .f2k, so a building of many floors loses none of them. Busiest first.
@@ -81,11 +84,19 @@ public static class F2kWriter
         // ---- point objects: every corner and end, at its own place (the slab at the story's elevation) ----
         var points = new List<(string Name, double X, double Y, double Z)>();
         var index = new Dictionary<string, string>(StringComparer.Ordinal);
+        // A model read from SAFE's file keeps SAFE's point names, so a point keeps its name (and SAFE its GUID) on saving.
+        var safeNames = F2kSource.PointNames(m, story);
+        var taken = new HashSet<string>(safeNames.Values, StringComparer.OrdinalIgnoreCase);
+        var next = 0;
         string Point(double x, double y, double pz)
         {
-            var key = string.Create(CultureInfo.InvariantCulture, $"{Math.Round(x, 6)},{Math.Round(y, 6)},{Math.Round(pz, 6)}");
+            var key = PointKey(x, y, pz);
             if (index.TryGetValue(key, out var name)) return name;
-            name = I(points.Count + 1);
+            if (!safeNames.TryGetValue(key, out name!))
+            {
+                if (safeNames.Count == 0) name = I(points.Count + 1);
+                else { do name = I(++next); while (taken.Contains(name)); }
+            }
             points.Add((name, x, y, pz));
             index[key] = name;
             return name;
@@ -541,6 +552,8 @@ public static class F2kWriter
 
         // The tables of a SAFE file the Modeler opened that it has no form for, as the file had them.
         KeptTables.WriteInto(m, "safe", tables);
+        // A model read from SAFE's own file: what did not change goes back exactly as SAFE wrote it, field for field.
+        tables = F2kSource.Merge(m, story, tables);
 
         var header = $"File written by CSI ProMax Modeler on {DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}: story {story} of {(m.Title.Length > 0 ? m.Title : "the model")}";
         return new F2kResult(CsiTableText.Document(header, tables), story, areaRows.Count, beamRows.Count, columns.Count, wallRows.Count,

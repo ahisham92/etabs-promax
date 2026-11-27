@@ -78,6 +78,19 @@ public static class CsiTableText
         return tables;
     }
 
+    /// <summary>The tables' names (upper case) in the order the text has them.</summary>
+    public static List<string> Names(string text)
+    {
+        var names = new List<string>();
+        foreach (var raw in text.Replace("\r", "", StringComparison.Ordinal).Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.StartsWith("END TABLE DATA", StringComparison.OrdinalIgnoreCase)) break;
+            if (line.StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase)) names.Add(line[6..].Trim().Trim('"').ToUpperInvariant());
+        }
+        return names;
+    }
+
     /// <summary>The Key=Value pairs of one row line; a quoted value may hold spaces.</summary>
     public static Dictionary<string, string> Pairs(string line)
     {
