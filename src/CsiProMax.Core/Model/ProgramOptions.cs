@@ -50,7 +50,7 @@ public static class ProgramOptions
     };
 
     /// <summary>SAP2000's own assignment tables (no ETABS table has their shape).</summary>
-    public static readonly string[] SapOwnAssignTables = ["Area Edge Release Assignments", "Joint Panel Zone Assignments"];
+    public static readonly string[] SapOwnAssignTables = ["Area Edge Release Assignments", "Joint Panel Zone Assignments", .. SapObjectTables.Tables.Keys];
 
     public static readonly string[] SapAssignTables =
     [

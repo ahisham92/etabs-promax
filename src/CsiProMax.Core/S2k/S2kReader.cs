@@ -225,6 +225,33 @@ public static partial class S2kReader
 
         // SAP2000's own load tables (every Load Pattern, Load Case and Load Combination field) go into its load forms.
         SapLoadTables.Read(m, t, known);
+        // SAP2000's own per-object assignment and load tables (SapObjectTables) onto each object's Assign.Tables, every
+        // field as the file has it, so they follow the object; a table naming an object the Modeler has not got stays kept.
+        foreach (var name in t.Keys.Where(k => !known.Contains(k) && SapObjectTables.Has(k)).ToList())
+        {
+            var full = SapObjectTables.Name(name);
+            var kind = SapObjectTables.Tables[full].Kind;
+            var key = SapObjectTables.KeyField(kind);
+            Assign? Owner(Dictionary<string, string> r)
+            {
+                var who = S(r, key);
+                if (who.Length == 0) return null;
+                if (kind == "frame") return frameAt.TryGetValue(who, out var fa) ? m.LineAssigns.Find(x => x.Label == fa.Label && x.Story == fa.Story) : null;
+                if (kind == "area") return areaAt.TryGetValue(who, out var aa) ? m.AreaAssigns.Find(x => x.Label == aa.Label && x.Story == aa.Story) : null;
+                return joints.ContainsKey(who) ? PointOf(who) : null;
+            }
+            var rows = T(t, name);
+            if (rows.Count == 0 || rows.Exists(r => S(r, key).Length == 0 || (kind == "joint" ? !joints.ContainsKey(S(r, key)) : Owner(r) is null))) continue;
+            known.Add(name);
+            foreach (var r in rows)
+            {
+                var a = Owner(r)!;
+                a.Tables ??= new(StringComparer.OrdinalIgnoreCase);
+                var list = a.Tables.TryGetValue(full, out var have) ? have : a.Tables[full] = [];
+                list.Add(r.Where(kv => !kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal));
+            }
+        }
+
         // SAP2000's hinge definitions go into the Modeler's own hinge forms (DefineTables.SapHinges).
         foreach (var name in t.Keys.Where(k => !known.Contains(k) && DefineTables.IsSap(k)).ToList())
         {

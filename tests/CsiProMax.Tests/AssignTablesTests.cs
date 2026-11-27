@@ -35,6 +35,35 @@ static class AssignTablesTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("sap2000: SAP2000's own Assign tables (joint local axes, frame skew and gravity load, area auto mesh) stay on their objects, go into the .s2k and come back; ETABS is never given them", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            m.Target = "sap2000";
+            var beam = m.LineAssigns.First(a => m.Line(a.Label)!.Kind == LineKind.Beam && a.Story == "Story1");
+            var slab = m.AreaAssigns.First(a => a.Story == "Story1");
+            var point = m.PointAssigns.FirstOrDefault(p => p.Story == "Story1")?.Point ?? m.Points[0].Name;
+            var pattern = m.LoadPatterns[0].Name;
+            Run(link, "assign_frame_data", new { objects = new[] { beam.Label + "@Story1" }, tables = new Dictionary<string, object>
+            {
+                ["Frame End Skew Angle Assignments"] = new[] { new { SkewI = "10", SkewJ = "-5" } },
+                ["Frame Loads - Gravity"] = new[] { new { LoadPat = pattern, CoordSys = "GLOBAL", MultiplierX = "0", MultiplierY = "0", MultiplierZ = "-1" } },
+            } });
+            Run(link, "assign_shell_data", new { objects = new[] { slab.Label + "@Story1" }, tables = new Dictionary<string, object> { ["Area Auto Mesh Assignments"] = new[] { new { MeshType = "Number", Number1 = "4", Number2 = "3" } } } });
+            Run(link, "assign_joint_data", new { objects = new[] { point + "@Story1" }, tables = new Dictionary<string, object> { ["Joint Local Axes Assignments 1 - Typical"] = new[] { new { AngleA = "30", AngleB = "0", AngleC = "0", AdvanceAxes = "No" } } } });
+            var text = S2kWriter.Write(m, "own.s2k").Text;
+            foreach (var t in new[] { "FRAME END SKEW ANGLE ASSIGNMENTS", "FRAME LOADS - GRAVITY", "AREA AUTO MESH ASSIGNMENTS", "JOINT LOCAL AXES ASSIGNMENTS 1 - TYPICAL" })
+                Check(text.Contains("TABLE:  \"" + t + "\""), "the .s2k has " + t);
+            Check(System.Text.RegularExpressions.Regex.IsMatch(text, @"Frame=\S+\s+SkewI=10\s+SkewJ=-5"), "the skew row names the frame first");
+            var back = S2kReader.Read(text, "Own").Model;
+            var b2 = back.LineAssigns.First(a => a.Label == beam.Label && a.Story == beam.Story);
+            Check(AssignTables.Row(b2, "Frame End Skew Angle Assignments").GetValueOrDefault("SkewJ") == "-5", "the skew came back on the beam");
+            Check(AssignTables.Row(b2, "Frame Loads - Gravity").GetValueOrDefault("MultiplierZ") == "-1", "the gravity load came back on the beam");
+            Check(AssignTables.Row(back.AreaAssigns.First(a => a.Label == slab.Label && a.Story == slab.Story), "Area Auto Mesh Assignments").GetValueOrDefault("Number1") == "4", "the auto mesh came back on the slab");
+            Check(back.PointAssigns.Exists(p => AssignTables.Row(p, "Joint Local Axes Assignments 1 - Typical").GetValueOrDefault("AngleA") == "30"), "the joint axes came back");
+            Check(!(back.Kept ?? []).Keys.Any(k => k.Contains("SKEW", StringComparison.OrdinalIgnoreCase)), "not kept apart from the frame");
+            Check(!ProgramOptions.HasAssignTable("etabs", "Frame End Skew Angle Assignments") && ProgramOptions.HasAssignTable("sap2000", "Frame Loads - Gravity"), "SAP2000's own, not ETABS's");
+        });
         yield return ("assign tables: added mass, output stations, T/C limits, edge releases and an opening reach the model, the .cpm, Replicate and SAP2000's tables", () =>
         {
             var link = Frame();

@@ -369,6 +369,21 @@ public static class S2kWriter
         // release it imports (SAP2000 26.3, 2026-11-26); the constraints are set after the file opens.
         Add(tables, "AREA EDGE RELEASE ASSIGNMENTS", edgeReleases);
         Add(tables, "JOINT PANEL ZONE ASSIGNMENTS", panelZones);
+        // SAP2000's own per-object assignment and load tables (SapObjectTables), each row with the object's name first.
+        var own = new SortedDictionary<string, List<IReadOnlyList<(string, string)>>>(StringComparer.OrdinalIgnoreCase);
+        void Own(Assign a, string name)
+        {
+            var kind = AssignTables.KindOf(a);
+            foreach (var (table, rows) in a.Tables ?? [])
+                if (SapObjectTables.Tables.TryGetValue(table, out var st) && st.Kind == kind)
+                    foreach (var r in rows)
+                        (own.TryGetValue(table, out var list) ? list : own[table] = []).Add(new[] { (SapObjectTables.KeyField(kind), name) }.Concat(st.Fields.Where(r.ContainsKey).Select(f => (f, r[f]))).ToList());
+        }
+        foreach (var x in m.LineAssigns) if (frameNames.TryGetValue((x.Label, x.Story), out var ofn)) Own(x, ofn);
+        foreach (var x in m.AreaAssigns) if (areaNames.TryGetValue((x.Label, x.Story), out var oan)) Own(x, oan);
+        foreach (var pa in m.PointAssigns)
+            if (pa.Tables is not null && m.StoryIndex(pa.Story) is var osi && osi >= 0 && points.TryGetValue(pa.Point, out var op)) Own(pa, Joint(Physical.At(m, op, osi)));
+        foreach (var (ownTable, ownRows) in own) Add(tables, SapObjectTables.Name(ownTable).ToUpperInvariant(), ownRows);
         Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 1 - TRANSLATIONAL", genTrans);
         Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 2 - ROTATIONAL", genRot);
 
