@@ -20,6 +20,8 @@ public sealed class AnalysisModel
     public List<Joint> Joints { get; } = [];
     public List<Frame> Frames { get; } = [];
     public List<Shell> Shells { get; } = [];
+    /// <summary>Links and constraints that tie joints together (or one joint to the ground), as the program joins them.</summary>
+    public List<Link> Links { get; } = [];
     public Dictionary<string, FrameProp> FrameProps { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, ShellProp> ShellProps { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, MaterialProp> Materials { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -64,6 +66,13 @@ public sealed record Joint(string Name, string Label, string? Story, double X, d
 /// <param name="Releases">P V2 V3 T M2 M3 at end I, then the same at end J (12 values), as the CSI programs list them.</param>
 /// <param name="Meshed">SAP2000: the frame is auto meshed at the joints and members it meets.</param>
 public sealed record Frame(string Name, string Label, string? Story, string Kind, string I, string J, string? Section, bool[] Releases, bool Meshed = false, bool Spring = false);
+
+/// <summary>
+/// A link object, or a constraint (SAP2000's body, weld, equal...), between joint I and joint J; a link with one joint
+/// (J null) ties that joint to the ground. Its stiffness is not judged: what it joins counts as joined, so a part held only
+/// through a link (an isolator, a gap, a rigid link) is not called floating.
+/// </summary>
+public sealed record Link(string Name, string I, string? J, string Kind = "link");
 
 /// <param name="Kind">floor, wall or shell.</param>
 public sealed record Shell(string Name, string Label, string? Story, string Kind, IReadOnlyList<string> Joints, string? Section, bool Spring = false, string? Diaphragm = null, bool MeshNone = false);
