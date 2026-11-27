@@ -5898,7 +5898,7 @@ async function hmSapFrameHinges() {
   const pd = (await hmRun("property_definitions", {objects: names}, true)).result || {}, now = pd.objects || [];
   const own = n => (now.find(o => o.object === n) || {}).tables || {};
   const T0 = "Frame Hinge Assigns 00 - Hinge Distribution Type", T2 = "Frame Hinge Assigns 02 - User Defined Properties";
-  const count = now.reduce((s, o) => s + ((o.hinges || []).length || ((o.tables || {})[T2] || []).length), 0);
+  const count = now.reduce((s, o) => s + Math.max((o.hinges || []).length, [T2, ...sapAutoTables].reduce((k, T) => k + ((o.tables || {})[T] || []).length, 0)), 0);
   const first = names.length === 1 ? own(names[0]) : {}, r0 = (first[T0] || [])[0] || {};
   let type = (sapHgeTypes.find(t => t[0] === r0.HgeDistrTyp) || sapHgeTypes[0])[0], rows = names.length === 1 ? (first[T2] || []).map(r => ({...r})) : [], pick = -1, adv = false;
   const avail = v => `<select id="hAv" style="width:220px">${opts(["None", ...props], v || "None")}</select>`;
@@ -5926,9 +5926,14 @@ async function hmSapFrameHinges() {
         if (type === "Equal Spacing") { const n = q(d, "[name=hS]:checked").value === "num"; t0.SpaceType = n ? "Number of Hinges" : "Maximum Spacing"; t0.MaxSpace = n ? "0" : q(d, "#hMax").value.trim() || "0"; t0.NumHgeSpace = n ? q(d, "#hNum").value.trim() || "0" : "0"; t0.HngAtEnds = q(d, "#hEnds").checked ? "Yes" : "No"; if (!(+(n ? t0.NumHgeSpace : t0.MaxSpace) > 0)) { formError(d, n ? "The number of hinges is 1 or more." : "The maximum spacing is more than 0."); return false; } }
         if (av !== "None") list = [{HgeDistrTyp: type, AssignProp: av, GenHinge: "", SaveFibResp: fib, DistType: "RelDist", RelDist: "0", AbsDist: "0", LenOWType: "None", LenOWRel: "0", LenOWAbs: "0"}];
       }
-      const auto = list.filter(r => r.AssignProp === "Auto").map(r => ({at: +r.RelDist || 0, dof: r.AutoDof || "M3"}));
-      const user = list.filter(r => r.AssignProp !== "Auto").map(r => { const x = {...r}; delete x.AutoDof; return x; });
-      return sapSetEach("assign_frame_data", names, n => ({[T0]: [t0], [T2]: add ? [...(own(n)[T2] || []), ...user] : user}), {hinges: add && auto.length === 0 ? undefined : auto});
+      const autoRows = list.filter(r => r.AssignProp === "Auto" && r.Auto), user = list.filter(r => r.AssignProp !== "Auto").map(r => { const x = {...r}; delete x.Auto; return x; });
+      const auto = autoRows.filter(r => sapAutoNative(r.Auto.dof)).map(r => ({at: +r.RelDist || 0, dof: sapAutoNative(r.Auto.dof)}));
+      const at = r => ({...r.Auto.row, HgeDistrTyp: type, SaveFibResp: r.SaveFibResp || "Yes", DistType: r.DistType, RelDist: r.RelDist, AbsDist: r.AbsDist, LenOWType: r.LenOWType || "None", LenOWRel: r.LenOWRel || "0", LenOWAbs: r.LenOWAbs || "0"});
+      const tablesOf = n => { const t = {[T0]: [t0], [T2]: add ? [...(own(n)[T2] || []), ...user] : user};
+        for (const T of sapAutoTables) { const mine = autoRows.filter(r => r.Auto.table === T).map(at), was = add ? own(n)[T] || [] : []; t[T] = [...was, ...mine]; }
+        return t; };
+      const keepNative = add ? (now.find(o => o.object === names[0]) || {}).hinges || [] : [];
+      return sapSetEach("assign_frame_data", names, tablesOf, {hinges: add && auto.length === 0 ? undefined : [...keepNative, ...auto]});
     }), {width: 1000});
   function keep() { if (type === "User Defined" && pick >= 0) rowFrom(pick); }
   const cell = (id, html) => `<span id="${id}">${html}</span>`;
@@ -5947,7 +5952,7 @@ async function hmSapFrameHinges() {
       const head = ["Hinge Property", "Location Type", "Relative<br>Distance", `Absolute<br>Distance<br>${u.l}`, ...(adv ? ["Length<br>Overwrite Type", "Relative<br>Length", `Absolute<br>Length<br>${u.l}`, "Save Individual<br>Fiber Response?"] : [])];
       const cols = adv ? "170px 180px 90px 90px 110px 90px 90px 110px" : "190px 220px 100px 100px";
       const loc = r => r.DistType === "AbsDistI" ? sapHgeLoc[1] : r.DistType === "AbsDistJ" ? sapHgeLoc[2] : sapHgeLoc[0];
-      const fmt = r => [r.AssignProp === "Auto" ? `Auto ${r.AutoDof || ""}`.trim() : r.AssignProp, loc(r), r.DistType === "RelDist" ? r.RelDist : "", r.DistType === "RelDist" ? "" : r.AbsDist, ...(adv ? [r.LenOWType || "None", r.LenOWType === "Relative" ? r.LenOWRel : "", r.LenOWType === "Absolute" ? r.LenOWAbs : "", r.SaveFibResp || "Yes"] : [])];
+      const fmt = r => [r.AssignProp === "Auto" ? `Auto ${r.Auto ? r.Auto.dof : ""}`.trim() : r.AssignProp, loc(r), r.DistType === "RelDist" ? r.RelDist : "", r.DistType === "RelDist" ? "" : r.AbsDist, ...(adv ? [r.LenOWType || "None", r.LenOWType === "Relative" ? r.LenOWRel : "", r.LenOWType === "Absolute" ? r.LenOWAbs : "", r.SaveFibResp || "Yes"] : [])];
       box.innerHTML = lg + `<div style="display:flex;gap:16px"><div><div style="display:grid;grid-template-columns:${cols};text-align:center;font-size:12px;align-items:end">${head.map(h => `<span>${h}</span>`).join("")}</div>
         <div id="uIn" style="display:grid;grid-template-columns:${cols};gap:1px"><select id="uP">${opts(["Auto", ...props], "Auto")}</select><select id="uL">${opts(sapHgeLoc, sapHgeLoc[0])}</select><input id="uR" value="0"><input id="uA" disabled>${adv ? `<select id="uO">${opts(sapHgeLen, "None")}</select><input id="uOR" disabled><input id="uOA" disabled><select id="uF">${opts(["Yes", "No"], "Yes")}</select>` : ""}</div>
         <div id="uList" style="border:1px solid #7a9ab8;height:200px;overflow:auto;background:#fff">${rows.map((r, i) => `<div data-i="${i}" style="display:grid;grid-template-columns:${cols};cursor:default;${i === pick ? "background:#cce4f7" : ""}">${fmt(r).map(c => `<span style="padding:1px 4px">${esc(String(c))}</span>`).join("")}</div>`).join("")}</div>
@@ -5964,7 +5969,7 @@ async function hmSapFrameHinges() {
         const r = {AssignProp: q(d, "#uP").value, GenHinge: "", DistType: rel ? "RelDist" : l === sapHgeLoc[1] ? "AbsDistI" : "AbsDistJ", RelDist: rel ? R : "0", AbsDist: rel ? "0" : A,
           LenOWType: adv ? q(d, "#uO").value : old?.LenOWType || "None", LenOWRel: adv && q(d, "#uO").value === "Relative" ? q(d, "#uOR").value.trim() || "0" : old?.LenOWRel || "0",
           LenOWAbs: adv && q(d, "#uO").value === "Absolute" ? q(d, "#uOA").value.trim() || "0" : old?.LenOWAbs || "0", SaveFibResp: adv ? q(d, "#uF").value : old?.SaveFibResp || "Yes"};
-        if (r.AssignProp === "Auto") { if (!rel) { formError(d, "An auto hinge is placed by its relative distance."); return null; } r.AutoDof = await sapAutoHinge(old?.AutoDof); if (!r.AutoDof) return null; }
+        if (r.AssignProp === "Auto") { if (!rel) { formError(d, "An auto hinge is placed by its relative distance."); return null; } r.Auto = await sapAutoHinge(old?.Auto); if (!r.Auto) return null; }
         return r;
       };
       q(d, "#uAdd").onclick = async () => { const r = await read(); if (r) { rows.push(r); pick = rows.length - 1; paint(); } };
@@ -5995,19 +6000,138 @@ async function hmSapFrameHinges() {
     else if (type === "Distributed Plasticity") at.push(...(/^7/.test(q(d, "[name=hI]:checked").value) ? [0, 0.0848, 0.2655, 0.5, 0.7345, 0.9152, 1] : [0, 0.1727, 0.5, 0.8273, 1]));
     else { const n = q(d, "[name=hS]:checked").value === "num" ? Math.max(1, Math.round(+q(d, "#hNum").value || 1)) : 5, ends = q(d, "#hEnds").checked;
       for (let i = 0; i < n; i++) at.push(ends ? (n === 1 ? 0.5 : i / (n - 1)) : (i + 0.5) / n); }
-    rows = at.map(a => ({AssignProp: p, AutoDof: p === "Auto" ? "M3" : undefined, GenHinge: "", DistType: "RelDist", RelDist: String(+a.toFixed(4)), AbsDist: "0", LenOWType: "None", LenOWRel: "0", LenOWAbs: "0", SaveFibResp: "Yes"}));
+    rows = at.map(a => ({AssignProp: p, Auto: p === "Auto" ? {type: "From Tables In ASCE 41-17", table: sapAutoT + "19 - Auto ASCE 41-17 - Steel Beam", label: "Table 9-7.1 (Steel Beams - Flexure)", dof: "M3", row: {DOF: "M3", BeyondE: "Drops"}} : undefined, GenHinge: "", DistType: "RelDist", RelDist: String(+a.toFixed(4)), AbsDist: "0", LenOWType: "None", LenOWRel: "0", LenOWAbs: "0", SaveFibResp: "Yes"}));
     type = "User Defined"; q(d, "[name=hT][value='User Defined']").checked = true; pick = -1; paint();
   };
-  q(d, "#hFill").onclick = () => { type = "User Defined"; q(d, "[name=hT][value='User Defined']").checked = true; rows = (first[T2] || []).map(r => ({...r})); const nat = (now[0] || {}).hinges || []; for (const h of nat) rows.push({AssignProp: "Auto", AutoDof: h.dof, GenHinge: "", DistType: "RelDist", RelDist: String(h.at), AbsDist: "0", LenOWType: "None", LenOWRel: "0", LenOWAbs: "0", SaveFibResp: "Yes"}); pick = -1; paint(); };
+  q(d, "#hFill").onclick = () => { type = "User Defined"; q(d, "[name=hT][value='User Defined']").checked = true; rows = (first[T2] || []).map(r => ({...r}));
+    for (const T of sapAutoTables) for (const x of first[T] || []) { const ty = Object.keys(sapAutoTypes).find(k => sapAutoTypes[k].some(t => sapAutoT + t[2] === T)), row = {...x};
+      rows.push({AssignProp: "Auto", Auto: {type: ty, table: T, label: (sapAutoTypes[ty].find(t => sapAutoT + t[2] === T) || [""])[0], dof: x.DOF || "P", row}, GenHinge: "", DistType: x.DistType || "RelDist", RelDist: x.RelDist || "0", AbsDist: x.AbsDist || "0", LenOWType: x.LenOWType || "None", LenOWRel: x.LenOWRel || "0", LenOWAbs: x.LenOWAbs || "0", SaveFibResp: x.SaveFibResp || "Yes"}); }
+    if (!rows.some(r => r.AssignProp === "Auto")) for (const h of (now[0] || {}).hinges || []) rows.push({AssignProp: "Auto", Auto: {type: "From Tables In ASCE 41-17", table: sapAutoT + "19 - Auto ASCE 41-17 - Steel Beam", label: "", dof: h.dof, row: {DOF: h.dof, BeyondE: "Drops"}}, GenHinge: "", DistType: "RelDist", RelDist: String(h.at), AbsDist: "0", LenOWType: "None", LenOWRel: "0", LenOWAbs: "0", SaveFibResp: "Yes"});
+    pick = -1; paint(); };
   paint();
   return d;
 }
-// The degree of freedom of an auto hinge placed from the User Defined grid (the Engine's auto hinges by degree of freedom).
+// Auto Hinge Assignment Data (pictures Assign/Frame/Auto Hinge 1-20): SAP2000 26.3's three auto hinge types, each table's
+// own data, kept as rows of SAP2000's Frame Hinge Assigns table for that table (03 Caltrans, 10-14 ASCE 41-13, 17-21 ASCE 41-17).
+const sapAutoT = "Frame Hinge Assigns ";
+const sapAutoTypes = {
+  "From Tables In ASCE 41-17": [["Table 10-7 (Concrete Beams - Flexure) Item i", "cb", "17 - Auto ASCE 41-17 - Concrete Beam"], ["Table 10-8 and 10-9 (Concrete Columns)", "cc17", "18 - Auto ASCE 41-17 - Concrete Column"],
+    ["Table 9-7.1 (Steel Beams - Flexure)", "sb", "19 - Auto ASCE 41-17 - Steel Beam"], ["Table 9-7.1 (Steel Columns - Flexure)", "sc", "20 - Auto ASCE 41-17 - Steel Column"], ["Table 9-8 (Steel Braces - Axial)", "br", "21 - Auto ASCE 41-17 - Steel Brace"]],
+  "From Tables In ASCE 41-13": [["Table 10-7 (Concrete Beams - Flexure) Item i", "cb", "10 - Auto ASCE 41-13 - Concrete Beam"], ["Table 10-8 (Concrete Columns)", "cc13", "11 - Auto ASCE 41-13 - Concrete Column"],
+    ["Table 9-6 (Steel Beams - Flexure)", "sb", "12 - Auto ASCE 41-13 - Steel Beam"], ["Table 9-6 (Steel Columns - Flexure)", "sc", "13 - Auto ASCE 41-13 - Steel Column"], ["Table 9-7 (Steel Braces - Axial)", "br", "14 - Auto ASCE 41-13 - Steel Brace"]],
+  "Idealized Flexural Hinge": [["", "id", "03 - Auto Caltrans - Flexural Hinge"]],
+};
+const sapAutoTables = Object.values(sapAutoTypes).flat().map(t => sapAutoT + t[2]);
+const sapDof7 = ["M2", "M3", "M2-M3", "P-M2", "P-M3", "P-M2-M3", "Parametric P-M2-M3"];
+// The Engine's own auto hinge for a SAP2000 DOF (the ones the Engine analyses; the others stay SAP2000's rows only).
+const sapAutoNative = dof => ({M2: "M2", M3: "M3", "P-M3": "P-M3", "P-M2-M3": "P-M2-M3", "Parametric P-M2-M3": "P-M2-M3", P: "P"})[dof];
 function sapAutoHinge(now) {
+  const cases = (P && P.model && P.model.load_cases) || [], c0 = cases[0] || "DEAD";
+  const was = now || {type: "From Tables In ASCE 41-17", table: sapAutoT + "19 - Auto ASCE 41-17 - Steel Beam", row: {DOF: "M3"}}, r = {...(was.row || {})};
+  let type = was.type, table = was.table;
   return new Promise(res => {
     let done = false;
-    dialog("Auto Hinge Assignment Data", `${sapFormCss}<div class="sapF"><fieldset><legend>Degree of Freedom</legend>${["M3", "M2", "P", "V2", "V3", "T", "P-M2-M3", "P-M3", "M3-V2"].map(v => `<label><input type="radio" name="ahD" value="${v}" ${v === (now || "M3") ? "checked" : ""}> ${v}</label>`).join("")}</fieldset></div>`,
-      [["OK", x => { done = true; res(q(x, "[name=ahD]:checked").value); return true; }, true], ["Cancel", () => { if (!done) res(null); return true; }]], {width: 300, onClose: () => { if (!done) res(null); }});
+    const d = dialog("Auto Hinge Assignment Data", `${sapFormCss}<div class="sapF"><fieldset><legend>Auto Hinge Type</legend><select id="ahT" style="width:100%">${opts(Object.keys(sapAutoTypes), type)}</select></fieldset>
+      <fieldset id="ahTb"><legend>Select a Hinge Table</legend><select id="ahS" style="width:100%"></select></fieldset><div id="ahB" style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px"></div></div>`,
+      [["OK", x => { const o = read(); if (!o) return false; done = true; res(o); return true; }, true], ["Cancel", () => { if (!done) res(null); return true; }]], {width: 730});
+    const kind = () => (sapAutoTypes[type].find(t => sapAutoT + t[2] === table) || sapAutoTypes[type][0])[1];
+    const rad = (name, list, v, cols) => `<div style="display:grid;${cols > 1 ? "grid-template-rows:repeat(3,auto);grid-auto-flow:column" : ""};gap:2px 18px;justify-content:start">${list.map(([val, l]) => `<label><input type="radio" name="${name}" value="${esc(val)}" ${val === v ? "checked" : ""}> ${l}</label>`).join("")}</div>`;
+    const fs = (legend, html, id) => `<fieldset ${id ? `id="${id}"` : ""} style="min-height:80px"><legend>${legend}</legend>${html}</fieldset>`;
+    const caseSel = (id, v) => `<select id="${id}" style="width:150px">${opts(cases.length ? cases : [c0], v || c0)}</select>`;
+    const inp = (id, v, w) => `<input id="${id}" style="width:${w || 85}px" value="${esc(v ?? "")}">`;
+    const beyond = () => fs("Deformation Controlled Hinge Load Carrying Capacity", rad("ahE", [["Drops", "Drops Load After Point E"], ["Extrapolated", "Is Extrapolated After Point E"]], r.BeyondE || (type === "Idealized Flexural Hinge" ? "Extrapolated" : "Drops")));
+    const dofs = list => fs("Degree of Freedom", rad("ahD", list.map(x => [x, x]), list.includes(r.DOF) ? r.DOF : list.includes("M3") ? "M3" : list[0], list.length > 3 ? 2 : 1));
+    const vFrom = (label, pv) => fs(label, `<div style="display:grid;grid-template-columns:auto auto auto;gap:4px 10px;align-items:center"><label><input type="radio" name="ahV" value="Case" ${r[pv + "From"] === "User" ? "" : "checked"}> Case/Combo</label><span></span>${caseSel("ahVC", r[pv + "Case"])}
+      <label><input type="radio" name="ahV" value="User" ${r[pv + "From"] === "User" ? "checked" : ""}> User Value</label>`);
+    function paint() {
+      const k = kind(), id = k === "id", list = sapAutoTypes[type];
+      q(d, "#ahTb").style.display = id ? "none" : "";
+      q(d, "#ahS").innerHTML = opts(list.map(t => [sapAutoT + t[2], t[0]]), table);
+      let L = "", R = "";
+      if (k === "cb") {
+        L = dofs(["M2", "M3"]) + fs("Transverse Reinforcing", `<label><input type="checkbox" id="ahCf" ${r.Conforming === "No" ? "" : "checked"}> Transverse Reinforcing is Conforming</label>`) + beyond();
+        R = fs("V Value From", `<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center"><label><input type="radio" name="ahV" value="Case" ${r.VFrom === "User" ? "" : "checked"}> Case/Combo</label>${caseSel("ahVC", r.VCase)}<label><input type="radio" name="ahV" value="User" ${r.VFrom === "User" ? "checked" : ""}> User Value</label><span>V2 ${inp("ahVU", r.VUser)}</span></div>`)
+          + fs("Reinforcing Ratio&nbsp; (p - p') / pbalanced", `<label><input type="radio" name="ahR" value="Design" ${r.RatioFrom === "User" ? "" : "checked"}> From Current Design</label><div style="display:flex;justify-content:space-between"><label><input type="radio" name="ahR" value="User" ${r.RatioFrom === "User" ? "checked" : ""}> User Value (for positive bending)</label>${inp("ahRU", r.RatioUser)}</div>`);
+      } else if (k === "cc17") {
+        L = dofs(sapDof7) + fs("Not Controlled by Inadequate Development or Splicing", rad("ahCB", [["Not Controlled", "Not Controlled by Inadequate Development or Splicing"], ["Controlled", "Controlled by Inadequate Development or Splicing"]], r.ColBehavior === "Controlled" ? "Controlled" : "Not Controlled"))
+          + fs("Shear Reinforcing Ratio p = Av / (bw * s)", `<label><input type="radio" name="ahSR" value="Design" ${r.ShrRRatOpt === "User" ? "" : "checked"}> From Current Design</label><div style="display:flex;justify-content:space-between"><label><input type="radio" name="ahSR" value="User" ${r.ShrRRatOpt === "User" ? "checked" : ""}> User Value</label>${inp("ahSRU", r.UserShrRRat)}</div>`) + beyond();
+        const user = r.PFrom === "User";
+        R = fs("P Values From", `<div style="display:flex;gap:30px"><label><input type="radio" name="ahP" value="Case" ${user ? "" : "checked"}> Case/Combo</label><label><input type="radio" name="ahP" value="User" ${user ? "checked" : ""}> User Value</label></div>
+            <div style="display:grid;grid-template-columns:1fr 150px;gap:4px;align-items:center;margin-top:4px"><span>Gravity</span><span id="ahPG"></span><span>Gravity + Lateral</span><span id="ahPL"></span></div>`)
+          + fs("Shear Demand at Flex. Yielding / Shear Cap. (VyE / Vcol0E)", `<label><input type="radio" name="ahSD" value="Program" ${!r.ShrDmdOpt || r.ShrDmdOpt === "Program" ? "checked" : ""}> Program Calculated</label>
+            <label><input type="radio" name="ahSD" value="User VyE" ${r.ShrDmdOpt === "User VyE" ? "checked" : ""}> User-specified Shear Demand, VyE</label><div style="display:flex;gap:14px;justify-content:center">V2 ${inp("ahV2", r.VyE2)} V3 ${inp("ahV3", r.VyE3)}</div>
+            <label><input type="radio" name="ahSD" value="User Ratio" ${r.ShrDmdOpt === "User Ratio" ? "checked" : ""}> User-Specified Ratio, VyE/Vcol0E</label><div style="display:flex;gap:14px;justify-content:center">V2 ${inp("ahR2", r.VyE2Ratio)} V3 ${inp("ahR3", r.VyE3Ratio)}</div>`)
+          + fs("Shear Reinforcement Spacing Ratio (s/d)", `<label><input type="radio" name="ahSS" value="Design" ${r.ShrRSpcOpt === "User" ? "" : "checked"}> From Current Design</label><div style="display:flex;justify-content:space-between"><label><input type="radio" name="ahSS" value="User" ${r.ShrRSpcOpt === "User" ? "checked" : ""}> User Value</label>${inp("ahSSU", r.UserShrRSpc)}</div>`);
+      } else if (k === "cc13") {
+        L = dofs(sapDof7) + fs("Concrete Column Failure Condition", rad("ahFC", [["Condition i", "Condition i - Flexure"], ["Condition ii", "Condition ii - Flexure/Shear"], ["Condition iii", "Condition iii - Shear"], ["Condition iv", "Condition iv - Development"]], r.FailureCond || "Condition ii", 2)) + beyond();
+        R = fs("P and V Values From", `<div style="display:grid;grid-template-columns:auto 30px 1fr;gap:4px 8px;align-items:center"><label><input type="radio" name="ahV" value="Case" ${r.PandVFrom === "User" ? "" : "checked"}> Case/Combo</label><span></span>${caseSel("ahVC", r.PandVCase)}
+            <label><input type="radio" name="ahV" value="User" ${r.PandVFrom === "User" ? "checked" : ""}> User Value</label><span>P</span>${inp("ahPU", r.PUser)}<span>V2 ${inp("ahV2", r.V2User, 70)}</span><span>V3</span>${inp("ahV3", r.V3User)}</div>`)
+          + fs("Shear Reinforcing Ratio p = Av / (bw * s)", `<label><input type="radio" name="ahR" value="Design" ${r.RatioFrom === "User" ? "" : "checked"}> From Current Design</label><div style="display:flex;justify-content:space-between"><label><input type="radio" name="ahR" value="User" ${r.RatioFrom === "User" ? "checked" : ""}> User Value</label>${inp("ahRU", r.RatioUser)}</div>`);
+      } else if (k === "sb") { L = dofs(["M2", "M3"]); R = beyond(); }
+      else if (k === "sc") {
+        L = dofs(sapDof7) + fs("Force Controlled Hinge Load Carrying Capacity", `<label><input type="checkbox" id="ahDL" ${r.DropLoad === "Yes" ? "checked" : ""}> Hinge Drops Load When Max Force Is Reached</label>`);
+        R = beyond() + `<div id="ahPbox">${fs("P Value From", `<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center"><label><input type="radio" name="ahV" value="Case" ${r.PFrom === "User" ? "" : "checked"}> Case/Combo</label>${caseSel("ahVC", r.PCase)}<label><input type="radio" name="ahV" value="User" ${r.PFrom === "User" ? "checked" : ""}> User Value</label><span>P ${inp("ahPU", r.PUser)}</span></div>`)}</div>`;
+      } else if (k === "br") { L = beyond(); }
+      else {
+        L = dofs(["M2", "M3", "M2-M3", "P-M2", "P-M3", "P-M2-M3"]) + fs("Interaction Data", `<div id="ahI"></div>`, "ahIF")
+          + `<div id="ahPbox">${fs("P Value From", `<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center"><label><input type="radio" name="ahV" value="Case" ${r.PFrom === "User" ? "" : "checked"}> Case/Combo</label>${caseSel("ahVC", r.PCase)}<label><input type="radio" name="ahV" value="User" ${r.PFrom === "User" ? "checked" : ""}> User Value</label><span>P ${inp("ahPU", r.PUser || "0.")}</span></div>`)}</div>`;
+        R = fs("Miscellaneous Data", `<div style="display:grid;grid-template-columns:1fr 90px;gap:4px;align-items:center"><span>Hinge Length</span>${inp("ahHL", r.HingeLength || "1.")}</div>
+            <label><input type="checkbox" id="ahId" ${r.Idealized === "No" ? "" : "checked"}> Use Idealized (Bilinear) Moment-Curvature Curve</label><div style="display:grid;grid-template-columns:1fr 90px;gap:4px;align-items:center;margin-left:16px"><span>Design Code</span><select id="ahDC">${opts(["Caltrans", "JTG/T"], r.Idealized && r.Idealized !== "No" && r.Idealized !== "Yes" ? r.Idealized : "Caltrans")}</select></div>`) + beyond();
+      }
+      q(d, "#ahB").innerHTML = `<div>${L}</div><div>${R}</div>`;
+      sync();
+      d.querySelectorAll("#ahB input[type=radio], #ahB input[type=checkbox]").forEach(x => x.onchange = sync);
+    }
+    function sync() {
+      const k = kind(), v = s => (q(d, s) || {}).value, on = (s, yes) => { const x = q(d, s); if (x) x.disabled = !yes; };
+      const dof = (q(d, "[name=ahD]:checked") || {}).value || "";
+      if (k === "cb") { on("#ahVC", v("[name=ahV]:checked") === "Case"); on("#ahVU", v("[name=ahV]:checked") === "User"); on("#ahRU", v("[name=ahR]:checked") === "User"); }
+      if (k === "cc17") {
+        const user = v("[name=ahP]:checked") === "User";
+        q(d, "#ahPG").innerHTML = user ? inp("ahPGu", r.PUserGrav) : caseSel("ahPGc", r.PCaseGrav); q(d, "#ahPL").innerHTML = user ? inp("ahPLu", r.PUserGravLt) : caseSel("ahPLc", r.PCaseGravLt);
+        const sd = v("[name=ahSD]:checked"); on("#ahV2", sd === "User VyE"); on("#ahV3", sd === "User VyE"); on("#ahR2", sd === "User Ratio"); on("#ahR3", sd === "User Ratio");
+        on("#ahSRU", v("[name=ahSR]:checked") === "User"); on("#ahSSU", v("[name=ahSS]:checked") === "User");
+      }
+      if (k === "cc13") { const u = v("[name=ahV]:checked") === "User"; on("#ahVC", !u); for (const s of ["#ahPU", "#ahV2", "#ahV3"]) on(s, u); on("#ahRU", v("[name=ahR]:checked") === "User"); }
+      if (k === "sc" || k === "id") {
+        const box = q(d, "#ahPbox"); if (box) box.style.display = (k === "sc" ? dof === "Parametric P-M2-M3" : /^P-/.test(dof)) ? "none" : "";
+        const u = v("[name=ahV]:checked") === "User"; on("#ahVC", !u); on("#ahPU", u);
+      }
+      if (k === "id") {
+        on("#ahDC", q(d, "#ahId").checked);
+        const box = q(d, "#ahI"), f = q(d, "#ahIF"), line = (l, id, val, dis) => `<div style="display:grid;grid-template-columns:1fr 85px;gap:4px;align-items:center;margin:4px 0"><span>${l}</span><input id="${id}" value="${val}" ${dis ? "disabled" : ""}></div>`;
+        f.classList.toggle("dis", dof === "M2" || dof === "M3");
+        box.innerHTML = dof === "M2" || dof === "M3" ? `<p style="color:#888;margin:4px 0">No Interaction Data Required</p>` : dof === "M2-M3" ? line("Total Number of M2-M3 Points", "ahNC", r.NumCurves || "16")
+          : line("Total Number of PM Curves", "ahNC", dof === "P-M2-M3" ? r.NumCurves || "16" : "2", dof !== "P-M2-M3") + line("Max Num Points on Each PM Curve", "ahNP", r.NumPoints || "11");
+      }
+    }
+    function read() {
+      const k = kind(), v = s => (q(d, s) || {}).value, val = s => { const x = q(d, s); return x && !x.disabled ? x.value.trim() : ""; };
+      const out = {HgeDistrTyp: "User Defined", GenHinge: ""};
+      const dof = v("[name=ahD]:checked"); if (dof) out.DOF = dof;
+      out.BeyondE = v("[name=ahE]:checked");
+      const need = (s, what) => { const t = val(s); if (t === "" || !isFinite(+t)) { formError(d, what); throw 0; } return t; };
+      try {
+        if (k === "cb") { const u = v("[name=ahV]:checked") === "User"; Object.assign(out, {VFrom: u ? "User" : "Case", VCase: u ? "" : v("#ahVC"), VUser: u ? need("#ahVU", "Give the V2 value.") : "0", Conforming: q(d, "#ahCf").checked ? "Yes" : "No"});
+          const ru = v("[name=ahR]:checked") === "User"; Object.assign(out, {RatioFrom: ru ? "User" : "Design", RatioUser: ru ? need("#ahRU", "Give the reinforcing ratio.") : "0"}); }
+        if (k === "cc17") { const u = v("[name=ahP]:checked") === "User";
+          Object.assign(out, {PFrom: u ? "User" : "Case", PCaseGrav: u ? "" : v("#ahPGc"), PCaseGravLt: u ? "" : v("#ahPLc"), PUserGrav: u ? need("#ahPGu", "Give the gravity P.") : "0", PUserGravLt: u ? need("#ahPLu", "Give the gravity + lateral P.") : "0",
+            ColBehavior: v("[name=ahCB]:checked"), ShrDmdOpt: v("[name=ahSD]:checked")});
+          const sd = out.ShrDmdOpt; Object.assign(out, {VyE2: sd === "User VyE" ? need("#ahV2", "Give VyE for V2.") : "0", VyE3: sd === "User VyE" ? need("#ahV3", "Give VyE for V3.") : "0", VyE2Ratio: sd === "User Ratio" ? need("#ahR2", "Give the V2 ratio.") : "0", VyE3Ratio: sd === "User Ratio" ? need("#ahR3", "Give the V3 ratio.") : "0"});
+          const sr = v("[name=ahSR]:checked") === "User", ss = v("[name=ahSS]:checked") === "User";
+          Object.assign(out, {ShrRRatOpt: sr ? "User" : "Design", UserShrRRat: sr ? need("#ahSRU", "Give the shear reinforcing ratio.") : "0", ShrRSpcOpt: ss ? "User" : "Design", UserShrRSpc: ss ? need("#ahSSU", "Give the spacing ratio.") : "0"}); }
+        if (k === "cc13") { const u = v("[name=ahV]:checked") === "User"; Object.assign(out, {PandVFrom: u ? "User" : "Case", PandVCase: u ? "" : v("#ahVC"), PUser: u ? need("#ahPU", "Give P.") : "0", V2User: u ? need("#ahV2", "Give V2.") : "0", V3User: u ? need("#ahV3", "Give V3.") : "0", FailureCond: v("[name=ahFC]:checked")});
+          const ru = v("[name=ahR]:checked") === "User"; Object.assign(out, {RatioFrom: ru ? "User" : "Design", RatioUser: ru ? need("#ahRU", "Give the shear reinforcing ratio.") : "0"}); }
+        if (k === "sc") { out.DropLoad = q(d, "#ahDL").checked ? "Yes" : "No"; if (dof !== "Parametric P-M2-M3") { const u = v("[name=ahV]:checked") === "User"; Object.assign(out, {PFrom: u ? "User" : "Case", PCase: u ? "" : v("#ahVC"), PUser: u ? need("#ahPU", "Give P.") : "0"}); } }
+        if (k === "id") { const hl = need("#ahHL", "Give the hinge length."); if (!(+hl > 0)) { formError(d, "The hinge length is more than 0."); throw 0; }
+          Object.assign(out, {HingeLength: hl, Idealized: q(d, "#ahId").checked ? v("#ahDC") : "No", NumCurves: q(d, "#ahNC") ? q(d, "#ahNC").value.trim() : "0", NumPoints: q(d, "#ahNP") ? q(d, "#ahNP").value.trim() : "0"});
+          if (!/^P-/.test(dof)) { const u = v("[name=ahV]:checked") === "User"; Object.assign(out, {PFrom: u ? "User" : "Case", PCase: u ? "" : v("#ahVC"), PUser: u ? need("#ahPU", "Give P.") : "0"}); } }
+      } catch { return null; }
+      return {type, table, label: (sapAutoTypes[type].find(t => sapAutoT + t[2] === table) || [""])[0], dof: dof || "P", row: out};
+    }
+    q(d, "#ahT").onchange = () => { type = q(d, "#ahT").value; table = sapAutoT + (type === "From Tables In ASCE 41-17" ? "19 - Auto ASCE 41-17 - Steel Beam" : type === "From Tables In ASCE 41-13" ? sapAutoTypes[type][2][2] : sapAutoTypes[type][0][2]); for (const k in r) delete r[k]; paint(); };
+    q(d, "#ahS").onchange = () => { table = q(d, "#ahS").value; for (const k in r) delete r[k]; paint(); };
+    paint();
   });
 }
 // Assign > Frame > Reverse Connectivity: keep the assigns in the same global or the same local orientation.

@@ -393,6 +393,9 @@ public static class S2kWriter
         }
         Advanced("Frame Local Axes Assignments 2 - Advanced", "Frame", axes);
         Advanced("Area Local Axes Assignments 2 - Advanced", "Area", areaAxes);
+        // A frame with SAP2000's own auto hinge rows (Auto Hinge Assignment Data) writes those, not the ones made from the model.
+        var autoOwn = own.Where(kv => SapObjectTables.AutoHinges.Contains(kv.Key, StringComparer.OrdinalIgnoreCase)).SelectMany(kv => kv.Value.Select(r => r[0].Item2)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        hingeRows.RemoveAll(r => r.Count > 0 && autoOwn.Contains(r[0].Item2));
         Merge("Joint Spring Assignments 1 - Uncoupled", springs);
         Merge("Joint Added Mass Assignments", jointMass);
         Merge("Joint Panel Zone Assignments", panelZones);

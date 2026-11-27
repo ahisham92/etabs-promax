@@ -80,6 +80,7 @@ static class AssignTablesTests
                 ["Frame Offset Along Length Assignments"] = new[] { new { Type = "User", LengthI = "0.2", LengthJ = "0.3", RigidFactor = "0.5" } },
                 ["Frame Hinge Assigns 00 - Hinge Distribution Type"] = new[] { new { HgeDistrTyp = "User Defined", IsHgeLenRel = "No", HgeLenRel = "0", HgeLenAbs = "0" } },
                 ["Frame Hinge Assigns 02 - User Defined Properties"] = new[] { new { HgeDistrTyp = "User Defined", AssignProp = "FH1", SaveFibResp = "Yes", DistType = "RelDist", RelDist = "0.25", AbsDist = "0", LenOWType = "None" } },
+                ["Frame Hinge Assigns 17 - Auto ASCE 41-17 - Concrete Beam"] = new[] { new { HgeDistrTyp = "User Defined", DOF = "M3", VFrom = "Case", VCase = "DEAD", Conforming = "Yes", RatioFrom = "Design", BeyondE = "Drops", SaveFibResp = "Yes", DistType = "RelDist", RelDist = "0.1" } },
             } });
             var text = S2kWriter.Write(m, "frame.s2k").Text;
             int Rows(string table) { var at = text.IndexOf("TABLE:  \"" + table + "\"", StringComparison.Ordinal); if (at < 0) return 0; var end = text.IndexOf("TABLE:", at + 8, StringComparison.Ordinal); return text[at..(end < 0 ? text.Length : end)].Split('\n').Count(l => l.TrimStart().StartsWith("Frame=" + "", StringComparison.Ordinal)); }
@@ -91,6 +92,8 @@ static class AssignTablesTests
             var b2 = back.LineAssigns.First(a => a.Label == beam.Label && a.Story == beam.Story);
             Check(AssignTables.Row(b2, "Frame Material Temperatures").GetValueOrDefault("Temp") == "35", "the material temperature came back");
             Check(AssignTables.Row(b2, "Frame Hinge Assigns 02 - User Defined Properties").GetValueOrDefault("RelDist") == "0.25", "the user hinge came back");
+            Check(AssignTables.Row(b2, "Frame Hinge Assigns 17 - Auto ASCE 41-17 - Concrete Beam").GetValueOrDefault("VCase") == "DEAD", "the ASCE 41-17 auto hinge came back");
+            Check(System.Text.RegularExpressions.Regex.Matches(text, @"TABLE:  ""FRAME HINGE ASSIGNS 17 - AUTO ASCE 41-17 - CONCRETE BEAM""").Count == 1, "one ASCE 41-17 concrete beam table");
             Check(AssignTables.Row(b2, "Frame Local Axes Assignments 2 - Advanced").GetValueOrDefault("CoordDir1") == "+Y", "the advanced axes came back");
             Run(link, "assign_frame_data", new { objects = new[] { b }, release_i = new[] { "M3" }, release_j = Array.Empty<string>() });
             var (pi, pj) = (m.Line(beam.Label)!.PointI, m.Line(beam.Label)!.PointJ);
