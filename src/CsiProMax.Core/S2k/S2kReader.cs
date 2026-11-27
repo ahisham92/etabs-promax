@@ -205,6 +205,26 @@ public static partial class S2kReader
             areaJoints[name] = corners;
         }
 
+        // Assign > Area: stiffness modifiers, added mass, the typical local axis angle and the material overwrite
+        // (Area Section Assignments' MatProp), onto each area, so its forms show what the file has.
+        var areaAssignsByName = new Dictionary<string, AreaAssign>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (an, aw) in areaAt) if (m.AreaAssigns.Find(x => x.Label == aw.Label && x.Story == aw.Story) is { } aa) areaAssignsByName[an] = aa;
+        void AreaRow(AreaAssign a, string table, Dictionary<string, string> row) => AssignTables.Set(a, new Dictionary<string, List<Dictionary<string, string>>> { [table] = [row] });
+        foreach (var r in t.GetValueOrDefault("AREA SECTION ASSIGNMENTS") ?? [])
+            if (areaAssignsByName.TryGetValue(S(r, "Area"), out var aa) && S(r, "MatProp") is { Length: > 0 } mp && !mp.Equals("Default", StringComparison.OrdinalIgnoreCase))
+                AreaRow(aa, "Area Assignments - Material Overwrites", new() { ["Material"] = mp });
+        foreach (var r in Use("AREA STIFFNESS MODIFIERS"))
+            if (areaAssignsByName.TryGetValue(S(r, "Area"), out var aa))
+                PropertyDefs.SetModifiers(aa.Extra, PropertyDefs.ShellModifiers, new Dictionary<string, double>
+                {
+                    ["F11MOD"] = D(r, "f11", 1), ["F22MOD"] = D(r, "f22", 1), ["F12MOD"] = D(r, "f12", 1), ["M11MOD"] = D(r, "m11", 1), ["M22MOD"] = D(r, "m22", 1),
+                    ["M12MOD"] = D(r, "m12", 1), ["V13MOD"] = D(r, "v13", 1), ["V23MOD"] = D(r, "v23", 1), ["MMOD"] = D(r, "MassMod", 1), ["WMOD"] = D(r, "WeightMod", 1),
+                });
+        foreach (var r in Use("AREA ADDED MASS ASSIGNMENTS"))
+            if (areaAssignsByName.TryGetValue(S(r, "Area"), out var aa) && S(r, "MassPerArea").Length > 0) AreaRow(aa, "Area Assignments - Additional Mass", new() { ["AddedMass"] = S(r, "MassPerArea") });
+        foreach (var r in Use("AREA LOCAL AXES ASSIGNMENTS 1 - TYPICAL"))
+            if (areaAssignsByName.TryGetValue(S(r, "Area"), out var aa) && S(r, "Angle").Length > 0) AreaRow(aa, "Area Assignments - Local Axes", new() { ["Angle"] = S(r, "Angle") });
+
         // Joint assignments: supports and diaphragms.
         var pointAssigns = new Dictionary<(string, string), PointAssign>();
         PointAssign PointOf(string joint)

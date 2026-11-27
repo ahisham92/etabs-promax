@@ -168,6 +168,10 @@ public static class PropertyTools
             "Assigns to slabs and walls (label@story) what Assign > Shell offers: modifiers (F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD) and spring (an area spring property, e.g. soil under a mat; \"\" takes it off); opening (Assign > Shell > Opening: true makes the area an opening, false a slab or wall again); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Area Assignments - Additional Mass\": [{\"AddedMass\": \"0.1\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
             """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"opening":{"type":"boolean"},"tables":{"type":"object"}}}""",
             Ask.Changes, AssignShells, a => "Assign shell data"),
+        new("reverse_objects",
+            "SAP2000's Assign > Area > Reverse Local 3 (and Frame/Cable/Link Reverse Connectivity): reverses the corner order of areas (label@story), so the local 3 axis points the other way. keep: \"global\" (default) keeps the assignments in the same global orientation (an area load along local 3 changes sign), \"local\" keeps them in the same local orientation.",
+            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"keep":{"type":"string","enum":["global","local"]}}}""",
+            Ask.Changes, ReverseObjects, a => "Reverse local 3"),
         new("assign_joint_data",
             "Assigns to joints (point@story) what Assign > Joint offers: restraint (any of UX UY UZ RX RY RZ; [] frees the joint) and spring (a point spring property; \"\" takes it off); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Joint Assignments - Additional Mass\": [{\"MassXY\": \"2\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
             """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"restraint":{"type":"array","items":{"type":"string"}},"spring":{"type":"string"},"tables":{"type":"object"}}}""",
@@ -386,6 +390,41 @@ public static class PropertyTools
                 if (tables is not null) AssignTables.Set(x, tables);
             }
             return (JsonNode)new JsonObject { ["assigned"] = objects.Count };
+        }));
+    }
+
+    private static JsonNode ReverseObjects(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var m0 = link.Model;
+        var objects = Objects(a, (l, s) => m0.AreaAssigns.Exists(x => x.Label == l && x.Story == s), "area");
+        var global = a.Text("keep", "global") != "local";
+        // An area object is shared by every story that has its label: reversing it on some stories only would reverse it on all.
+        foreach (var label in objects.Select(o => o.Item1).Distinct())
+        {
+            var on = m0.AreaAssigns.Where(x => x.Label == label).Select(x => x.Story).ToList();
+            var picked = objects.Where(o => o.Item1 == label).Select(o => o.Item2).ToHashSet();
+            if (on.Exists(s => !picked.Contains(s))) throw new ToolInputException($"The area {label} is the same object on stories {string.Join(", ", on)}: select it on each of them to reverse it.");
+        }
+        return Core(() => link.Edit(m =>
+        {
+            foreach (var label in objects.Select(o => o.Item1).Distinct())
+            {
+                var area = m.Area(label) ?? throw new ArgumentException($"There is no area {label}.");
+                // SAP2000 keeps corner 1 and runs the others the other way round.
+                area.PointNames = [area.PointNames[0], .. Enumerable.Reverse(area.PointNames.Skip(1))];
+                if (area.StoriesBelow.Count == area.PointNames.Count) area.StoriesBelow = [area.StoriesBelow[0], .. Enumerable.Reverse(area.StoriesBelow.Skip(1))];
+                if (!global) continue;
+                foreach (var load in m.AreaLoads.Where(x => x.Object == label))
+                {
+                    var dir = E2k.E2kText.Value(load.Tokens, "DIR") ?? "";
+                    if (!dir.Trim('"').Equals("Local-3", StringComparison.OrdinalIgnoreCase) && !dir.Trim('"').Equals("3", StringComparison.Ordinal)) continue;
+                    for (var i = 0; i + 1 < load.Tokens.Count; i++)
+                        if (load.Tokens[i] is "FVAL" or "UNIFLOAD" && double.TryParse(load.Tokens[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                            load.Tokens[i + 1] = (-v).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+                }
+            }
+            return (JsonNode)new JsonObject { ["reversed"] = objects.Count };
         }));
     }
 
