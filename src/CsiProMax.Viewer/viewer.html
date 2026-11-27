@@ -5735,6 +5735,7 @@ function hmMaterialTime(st, row, setRow, pd, name) {
 // ---- Define: frame sections ----
 // Frame Properties, as ETABS lists them: a filter by type and a find box above the list, and its Click to: buttons.
 async function hmFrameSections() {
+  if (program === "sap2000") return hmSapFrameSections();
   const defs = await hmDefs(), pd = (await hmRun("property_definitions", {}, true)).result || {frame_sections: []};
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFrameSections(); };
   const find = n => defs.frame_sections.find(s => s.name === n);
@@ -5816,10 +5817,10 @@ async function hmSectionProps(name, shape, dims) {
   return dialog("Property Data", `<fieldset><legend>Section Name</legend><input class="grey" readonly style="width:100%" value="${esc(name)}"></fieldset><fieldset><legend>Properties</legend><div class="gu">${rows.map(([k, v, un]) => `<span>${k}</span><input class="grey" readonly value="${n(v)}"><span class="un">${un}</span>`).join("")}</div></fieldset>`, [["OK"]], {width: 460});
 }
 // The property modifiers of a section or a selection: one row per factor, 1 where not changed.
-function hmModifiers(keys, now, done) {
+function hmModifiers(keys, now, done, title) {
   const label = {AMOD: "Cross-section (axial) Area", A2MOD: "Shear Area in 2 direction", A3MOD: "Shear Area in 3 direction", JMOD: "Torsional Constant", I2MOD: "Moment of Inertia about 2 axis", I3MOD: "Moment of Inertia about 3 axis", MMOD: "Mass", WMOD: "Weight",
     F11MOD: "Membrane f11 direction", F22MOD: "Membrane f22 direction", F12MOD: "Membrane f12 direction", M11MOD: "Bending m11 direction", M22MOD: "Bending m22 direction", M12MOD: "Bending m12 direction", V13MOD: "Shear v13 direction", V23MOD: "Shear v23 direction"};
-  const d = dialog("Property/Stiffness Modification Factors", `<fieldset><legend>Property/Stiffness Modifiers for Analysis</legend><div class="g2" id="pmV">${keys.map(k => `<span>${esc(label[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${now && now[k] != null ? now[k] : 1}">`).join("")}</div></fieldset>`,
+  const d = dialog(title || "Property/Stiffness Modification Factors", `<fieldset><legend>Property/Stiffness Modifiers for Analysis</legend><div class="g2" id="pmV">${keys.map(k => `<span>${esc(label[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${now && now[k] != null ? now[k] : 1}">`).join("")}</div></fieldset>`,
     [["OK", d => { const o = {}; d.querySelectorAll("#pmV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) o[x.dataset.k] = v; }); done(o); }], ["Cancel"]], {width: 380});
   return d;
 }
@@ -5855,6 +5856,7 @@ function shapeSvg(shape, v) {
   return `<svg width="160" height="150" viewBox="0 0 160 150"><path d="M80 8v134M10 75h140" stroke="#7a8890" stroke-dasharray="3 2"/><path d="${p}" fill="${/^Concrete/.test(shape) ? "#c8c8c8" : "#9fb4cc"}" stroke="#3a4650" fill-rule="evenodd"/><text x="84" y="16" font-size="11" fill="#555">3</text><text x="144" y="70" font-size="11" fill="#555">2</text></svg>`;
 }
 async function hmFrameSection(s, after, copy, newShape) {
+  if (program === "sap2000") return hmSapFrameSection(s, after, copy, newShape);
   const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
   const cur = s && pd ? pd.frame_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
   if (cur && pd && !pd.shapes.some(x => x.shape === cur.shape)) return dialog("Frame Section Property Data", `<p class="kv" style="max-width:360px">${esc(cur.name)} is a ${esc(cur.shape)} section. The Modeler keeps it as the file has it and draws with it; Edit > Model Text changes it.</p>`, [["OK"]], {width: 400});
@@ -5929,6 +5931,206 @@ async function hmFrameSection(s, after, copy, newShape) {
   return d;
 }
 
+// ---- SAP2000 26.3's own frame section forms (read on Ahmed's PC 2026-11-27: field/reference-forms/sap2000/Define/Frame Sections *) ----
+// Frame Properties (Find this property, Click to:), Add Frame Section Property (Frame Section Property Type and its section
+// buttons), each shape's own Section form (Section Name, Display Color, Section Notes, Dimensions with SAP2000's t3/t2/tf/tw
+// words, Section drawing, Properties, Material with its +, Property Modifiers; Concrete Reinforcement for concrete).
+// A button whose section the Engine cannot hold yet is greyed.
+const sapFrameTiles = {
+  "Steel": [["I / Wide Flange", "Steel I/Wide Flange"], ["Channel", "Steel Channel"], ["Tee", "Steel Tee"], ["Angle", "Steel Angle"], ["Double Angle", "Steel Double Angle"], ["Double Channel", "Steel Double Channel"],
+    ["Pipe", "Steel Pipe"], ["Tube", "Steel Tube"], ["Rectangular", ""], ["Circular", "Steel Rod"], null, ["Steel Joist", ""]],
+  "Built-Up Steel": [["Hybrid I", ""], ["Hybrid U", ""]],
+  "Concrete": [["Rectangular", "Concrete Rectangular"], ["Circular", "Concrete Circle"], ["Pipe", ""], ["Tube", ""], ["Trapezoidal", ""], ["Precast I", ""], ["Precast U", ""], ["Precast Super-T", ""], ["Precast Box", ""]],
+  "Aluminum": [["I Section", ""], ["Channel", ""], ["Tee", ""], ["Angle", ""], ["Pipe", "Steel Pipe"], ["Tube", ""]],
+  "Cold Formed": [["C Section", ""], ["Z Section", ""], ["Hat Section", ""], ["I Section", ""], ["Tee Section", ""], ["Angle Section", ""], ["Box section", ""], ["Pipe section", ""]],
+  "Other": [["General", ""], ["Section Designer", ""]]};
+// The line pictures on SAP2000's section buttons.
+function sapTileIcon(label) {
+  const p = {"I / Wide Flange": "M10 6h20M10 34h20M20 6v28", "I Section": "M12 6h16M12 34h16M20 6v28", "Hybrid I": "M12 6h16M8 34h24M20 6v28", "Channel": "M28 6H14v28h14", "C Section": "M26 6H14v28h12M26 6v3M26 34v-3",
+    "Tee": "M8 8h24M20 8v26", "Tee Section": "M10 8h20M20 8v26", "Angle": "M14 6v26h18", "Angle Section": "M10 10v20q0 4 4 4h18v-4", "Double Angle": "M6 12h12v22M34 12H22v22M18 12v0", "Double Channel": "M12 6h8v28h-8M28 6h-8M28 34h-8",
+    "Pipe": "M20 8a12 12 0 1 0 .01 0z", "Pipe section": "M20 6a14 14 0 1 0 .01 0z", "Tube": "M9 9h22v22H9zM12 12h16v16H12z", "Box section": "M10 8h20v24H10z", "Rectangular": "M12 6h16v28H12z", "Circular": "M20 8a12 12 0 1 0 .01 0z",
+    "Steel Joist": "M12 6h16M12 34h16M20 6v28M16 6v4M24 6v4", "Hybrid U": "M8 6h8l4 28M32 6h-8l-4 28M14 34h12", "Z Section": "M8 34h10V6h14", "Hat Section": "M8 34h6V8h12v26h6",
+    "Trapezoidal": "M8 8h24l-5 26H13z", "Precast I": "M8 6h24v4H24v14h4v10H12V24h4V10H8z", "Precast U": "M8 6h6l3 24h6l3-24h6l-6 28H14z", "Precast Super-T": "M4 6h32v4h-6l-3 24H13l-3-24H4z", "Precast Box": "M6 6h28v28H6zM11 11h18v18H11z",
+    "General": "M14 6q14 0 14 12t-4 16q-8 0-12-10T14 6z", "Section Designer": "M8 8h16v16H8zM26 20a8 8 0 1 0 .01 0z"}[label] || "M8 8h24v24H8z";
+  const fill = /Rectangular|Circular|Trapezoidal|Precast|General|Section Designer/.test(label);
+  return `<svg width="40" height="40" viewBox="0 0 40 40"><path d="${p}" fill="${fill ? "#c0c0c0" : "none"}" fill-rule="evenodd" stroke="#333" stroke-width="${fill ? 1 : 2.2}"/></svg>`;
+}
+// Each shape's SAP2000 form: its title, and its dimension rows [key, label] in SAP2000's words.
+const sapShapeForms = {
+  "Steel I/Wide Flange": ["I/Wide Flange Section", [["D", "Outside height  ( t3 )"], ["B", "Top flange width  ( t2 )"], ["TF", "Top flange thickness  ( tf )"], ["TW", "Web thickness  ( tw )"], ["BBOTTOM", "Bottom flange width  ( t2b )"], ["TFBOTTOM", "Bottom flange thickness  ( tfb )"], ["FilletRad", "Fillet Radius"]]],
+  "Steel Channel": ["Channel Section", [["D", "Outside depth  ( t3 )"], ["B", "Outside flange width  ( t2 )"], ["TF", "Flange thickness  ( tf )"], ["TW", "Web thickness  ( tw )"], ["FilletRad", "Fillet Radius"]]],
+  "Steel Tee": ["Tee Section", [["D", "Outside stem  ( t3 )"], ["B", "Outside flange  ( t2 )"], ["TF", "Flange thickness  ( tf )"], ["TW", "Stem thickness  ( tw )"], ["FilletRad", "Fillet Radius"]]],
+  "Steel Angle": ["Angle Section", [["D", "Outside vertical leg  ( t3 )"], ["B", "Outside horizontal leg  ( t2 )"], ["TF", "Horizontal leg thickness  ( tf )"], ["TW", "Vertical leg thickness  ( tw )"], ["FilletRad", "Fillet Radius"]]],
+  "Steel Double Angle": ["Double Angle Section", [["D", "Total depth  ( t3 )"], ["B", "Width of a single angle"], ["TF", "Horizontal leg thickness  ( tf )"], ["TW", "Vertical leg thickness  ( tw )"], ["DIS", "Back to back distance  ( dis )"], ["FilletRad", "Fillet Radius"]]],
+  "Steel Double Channel": ["Double Channel Section", [["D", "Total depth  ( t3 )"], ["B", "Width of a single channel"], ["TF", "Flange thickness  ( tf )"], ["TW", "Web thickness  ( tw )"], ["DIS", "Back to back distance  ( dis )"], ["FilletRad", "Fillet Radius"]]],
+  "Steel Pipe": ["Pipe Section", [["D", "Outside diameter  ( t3 )"], ["TW", "Wall thickness  ( tw )"]]],
+  "Steel Tube": ["Box/Tube Section", [["D", "Outside depth  ( t3 )"], ["B", "Outside width  ( t2 )"], ["TF", "Flange thickness  ( tf )"], ["TW", "Web thickness  ( tw )"], ["CornerRad", "Corner Radius"]]],
+  "Steel Rod": ["Circle Section", [["D", "Diameter  ( t3 )"]]],
+  "Concrete Rectangular": ["Rectangular Section", [["D", "Depth  ( t3 )"], ["B", "Width  ( t2 )"]]],
+  "Concrete Circle": ["Circle Section", [["D", "Diameter  ( t3 )"]]]};
+// SAP2000's starting dimensions of a new section, in metres (its US defaults).
+const sapShapeDefaults = {"Steel I/Wide Flange": {D: 0.3048, B: 0.127, TF: 9.652e-3, TW: 6.35e-3, BBOTTOM: 0.127, TFBOTTOM: 9.652e-3}, "Steel Channel": {D: 0.2032, B: 0.0508, TF: 9.652e-3, TW: 6.35e-3},
+  "Steel Tee": {D: 0.1524, B: 0.127, TF: 9.652e-3, TW: 6.35e-3}, "Steel Angle": {D: 0.1016, B: 0.1016, TF: 6.35e-3, TW: 6.35e-3}, "Steel Double Angle": {D: 0.0762, B: 0.0508, TF: 6.35e-3, TW: 6.35e-3, DIS: 9.652e-3},
+  "Steel Double Channel": {D: 0.2032, B: 0.0508, TF: 9.652e-3, TW: 6.35e-3, DIS: 9.652e-3}, "Steel Pipe": {D: 0.1524, TW: 6.35e-3}, "Steel Tube": {D: 0.1524, B: 0.1016, TF: 6.35e-3, TW: 6.35e-3},
+  "Steel Rod": {D: 0.0254}, "Concrete Rectangular": {D: 0.4572, B: 0.254}, "Concrete Circle": {D: 0.3048}};
+const sapFmt = v => { const n = typeof v === "number" ? v : parseFloat(v); return v === "" || v == null || !isFinite(n) ? "" : n !== 0 && Math.abs(n) < 1e-2 ? n.toExponential(3).toUpperCase().replace(/E([+-])(\d)$/, "E$10$2") : String(+n.toPrecision(7)); };
+async function hmSapFrameSections() {
+  const defs = await hmDefs();
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hm.defs = null; hmSapFrameSections(); };
+  const find = n => defs.frame_sections.find(s => s.name === n), all = defs.frame_sections.map(s => s.name);
+  const acts = [["Import New Property...", () => hmFrameImport(again)], ["Add New Property...", () => hmSapFrameAdd(again)],
+    ["Add Copy of Property...", n => n && hmSapFrameSection(find(n), again, true)], ["Modify/Show Property...", n => n && hmSapFrameSection(find(n), again)],
+    ["Delete Property", n => n && hmRun("delete_definition", {kind: "frame_section", name: n}).then(j => j.ok ? again() : hmSay(j.error, true))]];
+  const d = dialog("Frame Properties", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Properties</legend><span>Find this property:</span><input id="fpF" style="width:100%;box-sizing:border-box;margin:2px 0 4px">
+      <select id="hmList" size="10" style="width:100%;height:auto"></select></fieldset>
+      <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${acts.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div></fieldset></div>`,
+    [["OK"], ["Cancel"]], {width: 500});
+  const list = q(d, "#hmList");
+  const fill = () => { const f = q(d, "#fpF").value.trim().toLowerCase(), names = all.filter(n => !f || n.toLowerCase().includes(f)); list.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join(""); if (names.length) list.selectedIndex = 0; paint(); };
+  // With nothing listed, only Import and Add New are open, as SAP2000 greys the others.
+  const paint = () => d.querySelectorAll("[data-a]").forEach(b => b.disabled = +b.dataset.a > 1 && !list.value);
+  q(d, "#fpF").oninput = fill; list.onchange = paint; fill();
+  d.querySelectorAll("[data-a]").forEach(b => b.onclick = () => acts[+b.dataset.a][1](list.value, d));
+  list.ondblclick = () => list.value && hmSapFrameSection(find(list.value), again);
+  return d;
+}
+function hmSapFrameAdd(after, type) {
+  type = type || "Steel";
+  const tiles = sapFrameTiles[type], word = type === "Other" ? "a" : /^[AEIOU]/.test(type) ? "an " + type : "a " + type;
+  const d = dialog("Add Frame Section Property", `<fieldset><legend>Select Property Type</legend><div class="g2"><span>Frame Section Property Type</span><select id="afT">${opts(Object.keys(sapFrameTiles), type)}</select></div></fieldset>
+    <fieldset><legend>Click to Add ${esc(word)} Section</legend><div style="display:grid;grid-template-columns:repeat(4,76px);gap:14px;justify-content:center;min-height:250px;align-content:start">
+      ${tiles.map((t, i) => t ? `<button data-t="${i}" ${t[1] ? "" : 'disabled title="Not in the Engine yet"'} style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;height:62px;padding:2px">${sapTileIcon(t[0])}<span style="font-size:10px">${esc(t[0])}</span></button>` : "<span></span>").join("")}</div></fieldset>`,
+    [["Cancel"]], {width: 420});
+  q(d, "#afT").onchange = e => { d.close(); hmSapFrameAdd(after, e.target.value); };
+  d.querySelectorAll("[data-t]").forEach(b => b.onclick = () => { const t = tiles[+b.dataset.t]; d.close(); hmSapFrameSection(null, after, false, t[1], type); });
+  return d;
+}
+async function hmSapFrameSection(s, after, copy, newShape, family) {
+  const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
+  const dd = (await hmRun("definition_data", {}, true)).result || {section_rebar: {}, rebar_sizes: []};
+  const cur = s && pd ? pd.frame_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
+  const shape = cur ? cur.shape : newShape;
+  if (!sapShapeForms[shape]) return dialog("Frame Section Property Data", `<p class="kv" style="max-width:360px">${esc(cur ? cur.name : "")} is a ${esc(shape || "")} section. The Engine keeps it as the file has it and draws with it; Edit > Model Text changes it.</p>`, [["OK"]], {width: 400});
+  const [title, rows] = sapShapeForms[shape], concrete = /^Concrete/.test(shape), mm = uLen[u.l] || 1;
+  const extras = {...((cur && cur.extras) || {})}, fields = (pd && pd.frame_extra_fields && pd.frame_extra_fields[shape]) || ["Color", "Notes"];
+  let mods = cur ? {...cur.modifiers} : null, rebar = s ? (dd.section_rebar[s.name] ? {...dd.section_rebar[s.name]} : null) : null;
+  const mats = (pd ? pd.materials : defs.materials).filter(m => concrete ? /concrete/i.test(m.type) : family === "Aluminum" || (cur && /alum/i.test((pd.materials.find(x => x.name === cur.material) || {}).type || "")) ? /alum/i.test(m.type) : /steel|coldformed/i.test(m.type)).map(m => m.name);
+  const n = defs.frame_sections.length + 1;
+  if (!extras.Color) extras.Color = matColors[n % matColors.length];
+  const name0 = s ? (copy ? s.name + " copy" : s.name) : "FSEC" + n;
+  // SAP2000 shows the bottom flange as the top's when it is the same.
+  const val = k => { if (/Rad$/.test(k)) return extras[k] || "0"; const v = cur ? cur.dims[k] ?? cur.dims[{BBOTTOM: "B", TFBOTTOM: "TF"}[k]] : (sapShapeDefaults[shape] || {})[k] * mm; return v == null || !isFinite(v) ? "" : sapFmt(v); };
+  const dimRows = rows.map(([k, label]) => `<span>${esc(label)}</span><input ${/Rad$/.test(k) ? `data-x="${k}"` : `data-k="${k}"`} value="${esc(val(k))}" style="width:90px">`).join("");
+  const d = dialog(title, `<div class="sapFs"><style>.sapFs fieldset{margin:0 0 8px}.sapFs .g2{grid-template-columns:minmax(170px,auto) auto}</style>
+    <fieldset><div style="display:grid;grid-template-columns:110px 1fr auto 30px;gap:6px 10px;align-items:center"><b>Section Name</b><input id="sN" value="${esc(name0)}"><span>Display Color</span><button id="sCol" style="width:18px;height:16px;padding:0"></button>
+      <span>Section Notes</span><button id="sNotes">Modify/Show Notes...</button><span></span><span></span></div></fieldset>
+    <div style="display:grid;grid-template-columns:1fr 215px;gap:8px">
+      <fieldset style="margin:0"><legend>Dimensions</legend><div class="g2" id="sDims">${dimRows}</div>
+        ${shape === "Steel Channel" ? `<label style="display:block;margin-top:40px"><input type="checkbox" checked disabled title="SAP2000's default; the Engine keeps it on"> Include Shear Center Offset in Analysis</label>` : ""}</fieldset>
+      <div><fieldset><legend>Section</legend><div id="sP" style="display:flex;justify-content:center;background:#fff"></div></fieldset>
+        <fieldset><legend>Properties</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="sProps">Section Properties...</button><button id="sTime">Time Dependent Properties...</button></div></fieldset></div>
+      <fieldset style="margin:0"><legend>Material</legend><div style="display:flex;gap:4px"><button id="sMplus" title="Define a material" style="width:22px;padding:0">+</button><select id="sM" style="flex:1">${opts(mats, cur && mats.includes(cur.material) ? cur.material : mats[0])}</select></div></fieldset>
+      <fieldset style="margin:0"><legend>Property Modifiers</legend><button id="sMod" style="width:100%">Set Modifiers...</button></fieldset></div>
+    ${concrete ? `<div style="text-align:center;margin-top:10px"><button id="sRebar" style="width:180px">Concrete Reinforcement...</button></div>` : ""}</div>`,
+    [["OK", d => {
+      const name = q(d, "#sN").value.trim(), material = q(d, "#sM").value, dims = dimsNow();
+      d.querySelectorAll("[data-x]").forEach(x => extras[x.dataset.x] = x.value.trim());
+      const ex = {}; for (const f of fields) if (extras[f] != null) ex[f] = String(extras[f]);
+      if (ex.FilletRad === "0") ex.FilletRad = ""; if (ex.CornerRad === "0") ex.CornerRad = "";
+      formError(d, "");
+      const kind = rebar && rebar.TYPE === "Beam" ? "beam" : "column";
+      (async () => {
+        if (shape === "Concrete Rectangular") { const j = await hmRun("define_frame_section", {name, was, kind, depth: dims.D, width: dims.B, material}, true); if (!j.ok) return formError(d, j.error); }
+        const k = await hmRun("define_frame_shape", {name, was: shape === "Concrete Rectangular" ? name : was, shape, material, dims, modifiers: mods || undefined, extras: ex}, true); if (!k.ok) return formError(d, k.error);
+        if (concrete && rebar) { const r = await hmRun("define_frame_rebar", {section: name, values: rebar}, true); if (!r.ok) return formError(d, r.error); }
+        d.close(); hmSay("Done. Edit > Undo steps back."); if (after) after(k);
+      })();
+      return false;
+    }, true], ["Cancel"]], {width: 600});
+  const dimsNow = () => { const o = {}; d.querySelectorAll("#sDims [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) o[x.dataset.k] = v; }); return o; };
+  const redraw = () => q(d, "#sP").innerHTML = shapeSvg(shape, dimsNow());
+  const swatch = () => q(d, "#sCol").style.background = matColorCss(extras.Color);
+  d.querySelectorAll("#sDims [data-k]").forEach(x => x.oninput = redraw);
+  q(d, "#sCol").onclick = () => hmColor(extras.Color, c => { extras.Color = c; swatch(); });
+  q(d, "#sNotes").onclick = () => dialog("Frame Section Property Notes", `<textarea id="nT" rows="5" maxlength="255" style="width:100%;box-sizing:border-box">${esc(extras.Notes || "")}</textarea><p class="kv" style="margin:4px 0 0">Note: Notes are limited to 255 characters maximum.</p>`, [["OK", n => { extras.Notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420});
+  q(d, "#sMplus").onclick = () => hmSapMaterials();
+  q(d, "#sProps").onclick = () => hmSapSectionProps(q(d, "#sN").value, shape, dimsNow());
+  // Time Dependent Properties: the notional size h, Auto (2 x area / perimeter, times the factor) or User-defined.
+  q(d, "#sTime").disabled = !fields.includes("NotSizeType"); if (q(d, "#sTime").disabled) q(d, "#sTime").title = "SAP2000 keeps a notional size for concrete sections";
+  q(d, "#sTime").onclick = () => {
+    const v = dimsNow(), auto = shape === "Concrete Circle" ? (v.D || 0) / 2 : 2 * (v.D || 0) * (v.B || 0) / (2 * ((v.D || 0) + (v.B || 0)) || 1), t = extras.NotSizeType || "Auto";
+    dialog("Time Dependent Properties", `<fieldset><legend>Notional Size, h</legend><div style="display:grid;grid-template-columns:auto 90px auto 70px;gap:6px 10px;align-items:center">
+      <label><input type="radio" name="nsT" value="Auto" ${t !== "User" ? "checked" : ""}> Auto</label><input class="grey" readonly value="${sapFmt(auto)}"><span>Factor</span><input id="nsF" value="${esc(extras.NotAutoFact || "1")}">
+      <label><input type="radio" name="nsT" value="User" ${t === "User" ? "checked" : ""}> User-defined</label><input id="nsU" value="${esc(extras.NotUserSize || sapFmt(auto))}"><span></span><span></span>
+      <label><input type="radio" name="nsT" value="None" disabled title="The Engine keeps Auto or User-defined"> None</label></div></fieldset>`,
+      [["OK", x => { const user = q(x, "input[name=nsT]:checked").value === "User"; extras.NotSizeType = user ? "User" : "Auto"; extras.NotAutoFact = user ? "" : q(x, "#nsF").value; extras.NotUserSize = user ? q(x, "#nsU").value : ""; }], ["Cancel"]], {width: 400});
+  };
+  q(d, "#sMod").onclick = () => hmModifiers(pd.frame_modifiers, mods || (cur && cur.modifiers), o => { mods = o; }, "Frame Property/Stiffness Modification Factors");
+  if (concrete) q(d, "#sRebar").onclick = () => hmSapReinforcement(shape, rebar, dd.rebar_sizes || [], (pd ? pd.materials : defs.materials).filter(m => /rebar/i.test(m.type)).map(m => m.name), r => { rebar = r; });
+  if (!mats.length) formError(d, concrete ? "Define a concrete material first (the + beside Material)." : "Define a steel material first (the + beside Material).");
+  redraw(); swatch();
+  return d;
+}
+// SAP2000's Property Data window of a frame section: two columns of its properties.
+async function hmSapSectionProps(name, shape, dims) {
+  const j = await hmRun("section_properties", {shape, dims}, true);
+  if (!j.ok) return hmSay(j.error, true);
+  const p = j.result, cell = (k, v) => `<span>${esc(k)}</span><input class="grey" readonly style="width:80px;text-align:right" value="${v == null ? "0." : sapFmt(v)}">`;
+  const left = [["Cross-section (axial) area", p.A], ["Moment of Inertia about 3 axis", p.I33], ["Moment of Inertia about 2 axis", p.I22], ["Product of Inertia about 2-3", p.I23], ["Torsional constant", p.J], ["Shear area in 2 direction", p.As2], ["Shear area in 3 direction", p.As3],
+    ["CG offset in 3 direction", 0], ["CG offset in 2 direction", 0], ["Shear Center Offset (x3)*", 0], ["Shear Center Offset (x2)*", 0]];
+  const right = [["Section modulus about 3 axis (top)", p.S33Top], ["Section modulus about 3 axis (bottom)", p.S33Bot], ["Section modulus about 2 axis (left)", p.S22Left], ["Section modulus about 2 axis (right)", p.S22Right], ["Warping Constant (Cw)", 0],
+    ["Plastic modulus about 3 axis", p.Z33], ["Plastic modulus about 2 axis", p.Z22], ["Radius of Gyration about 3 axis", p.R33], ["Radius of Gyration about 2 axis", p.R22]];
+  return dialog("Property Data", `<div class="g2" style="margin:0 0 8px 40px;grid-template-columns:120px 1fr"><span>Section Name</span><input class="grey" readonly value="${esc(name)}"></div>
+    <fieldset><legend>Properties</legend><div style="display:grid;grid-template-columns:auto auto auto auto;gap:6px 12px;align-items:center">${left.map((x, i) => cell(...x) + (right[i] ? cell(...right[i]) : i === 10 ? `<span style="grid-column:3/5">* Value is not used in analysis</span>` : "<span></span><span></span>")).join("")}</div></fieldset>`, [["OK"]], {width: 620});
+}
+// SAP2000's Reinforcement Data of a concrete frame section: Rebar Material, Design Type, Reinforcement Configuration,
+// Confinement Bars, the bars by size from Define > Section Properties > Reinforcement Bar Sizes, and Check/Design.
+function hmSapReinforcement(shape, now, sizes, rebars, done) {
+  const r = {...(now || {TYPE: "Column", PATTERN: shape === "Concrete Circle" ? "C-8" : "R-3-3", TRANSREINF: "TIES", DESIGNCHECK: "DESIGN", COVER: 0.04 * (uLen[hmU().l] || 1), CONFINEBARSPACING: 0.15 * (uLen[hmU().l] || 1), NUMCONFINEBARS3: 3, NUMCONFINEBARS2: 3})};
+  const pat = /^R-(\d+)-(\d+)$/.exec(r.PATTERN || "") || /^C-(\d+)$/.exec(r.PATTERN || "") || [];
+  const circ = /^C-/.test(r.PATTERN || "") || (!r.PATTERN && shape === "Concrete Circle");
+  const sizeOf = a => { const x = sizes.find(b => Math.abs(b.area - parseFloat(a)) < 1e-9 * Math.max(1, b.area) || Math.abs(b.area - parseFloat(a)) / b.area < 1e-3); return x ? x.name : ""; };
+  const sizeSel = (id, a, def) => `<button title="Define bar sizes" class="rbPlus" style="width:22px;padding:0">+</button><select id="${id}">${opts(sizes.map(b => b.name), sizeOf(a) || def || (sizes[0] || {}).name)}</select>`;
+  const plus = (id, v) => `<span style="display:flex;gap:4px"><button class="rbMat" title="Define a material" style="width:22px;padding:0">+</button><select id="${id}" style="flex:1;min-width:150px">${opts(rebars, v || rebars[0])}</select></span>`;
+  const row = (label, box) => `<span>${esc(label)}</span><span style="display:flex;gap:4px;justify-content:flex-end">${box}</span>`;
+  const inp = (id, v) => `<input id="${id}" style="width:100px" value="${esc(sapFmt(v))}">`;
+  const d = dialog("Reinforcement Data", `<div class="sapRb"><style>.sapRb fieldset{margin:0 0 6px}.sapRb .g2{grid-template-columns:1fr auto}</style>
+    <fieldset><legend>Rebar Material</legend><div class="g2"><span>Longitudinal Bars</span>${plus("rbL", r.LONGBARMATERIAL)}<span>Confinement Bars  (Ties)</span>${plus("rbC", r.CONFINEBARMATERIAL)}</div></fieldset>
+    <fieldset><legend>Design Type</legend><label style="display:block"><input type="radio" name="rbT" value="Column" ${r.TYPE !== "Beam" ? "checked" : ""}> Column  (P-M2-M3 Design)</label><label style="display:block"><input type="radio" name="rbT" value="Beam" ${r.TYPE === "Beam" ? "checked" : ""}> Beam  (M3 Design Only)</label></fieldset>
+    <div id="rbCol"><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><fieldset><legend>Reinforcement Configuration</legend><label style="display:block"><input type="radio" name="rbG" value="R" ${circ ? "" : "checked"}> Rectangular</label><label style="display:block"><input type="radio" name="rbG" value="C" ${circ ? "checked" : ""}> Circular</label></fieldset>
+      <fieldset><legend>Confinement Bars</legend><label style="display:block"><input type="radio" name="rbS" value="TIES" ${r.TRANSREINF !== "SPIRAL" ? "checked" : ""}> Ties</label><label style="display:block"><input type="radio" name="rbS" value="SPIRAL" ${r.TRANSREINF === "SPIRAL" ? "checked" : ""}> Spiral</label></fieldset></div>
+      <fieldset><legend id="rbLg">Longitudinal Bars - Rectangular Configuration</legend><div class="g2">${row("Clear Cover for Confinement Bars", inp("rbCv", r.COVER))}
+        <span class="rbR">Number of Longit Bars Along 3-dir Face</span><span class="rbR" style="text-align:right">${inp("rb3", circ ? 3 : pat[1] || 3)}</span><span class="rbR">Number of Longit Bars Along 2-dir Face</span><span class="rbR" style="text-align:right">${inp("rb2", circ ? 3 : pat[2] || 3)}</span>
+        <span class="rbCc">Number of Longit Bars</span><span class="rbCc" style="text-align:right">${inp("rbN", circ ? pat[1] || 8 : 8)}</span>
+        ${row("Longitudinal Bar Size", sizeSel("rbLs", r.LONGBARAREA, "#9"))}</div></fieldset>
+      <fieldset><legend>Confinement Bars</legend><div class="g2">${row("Confinement Bar Size", sizeSel("rbCs", r.CONFINEBARAREA, "#4"))}${row("Longitudinal Spacing of Confinement Bars", inp("rbSp", r.CONFINEBARSPACING))}
+        <span class="rbR">Number of Confinement Bars in 3-dir</span><span class="rbR" style="text-align:right">${inp("rbC3", r.NUMCONFINEBARS3 ?? 3)}</span><span class="rbR">Number of Confinement Bars in 2-dir</span><span class="rbR" style="text-align:right">${inp("rbC2", r.NUMCONFINEBARS2 ?? 3)}</span></div></fieldset></div>
+    <div id="rbBeam"><fieldset><legend>Concrete Cover to Longitudinal Rebar Center</legend><div class="g2">${row("Top", inp("rbTop", r.COVERTOP ?? 0.06 * (uLen[hmU().l] || 1)))}${row("Bottom", inp("rbBot", r.COVERBOTTOM ?? 0.06 * (uLen[hmU().l] || 1)))}</div></fieldset>
+      <fieldset><legend>Reinforcement Overrides for Ductile Beams</legend><div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center"><span></span><b>Left</b><b>Right</b>
+        <span>Top Bars</span>${inp("rbTI", r.ATI ?? 0)}${inp("rbTJ", r.ATJ ?? 0)}<span>Bottom Bars</span>${inp("rbBI", r.ABI ?? 0)}${inp("rbBJ", r.ABJ ?? 0)}</div></fieldset></div>
+    <fieldset id="rbCD" style="width:55%"><legend>Check/Design</legend><label style="display:block"><input type="radio" name="rbD" value="CHECK" ${r.DESIGNCHECK === "CHECK" ? "checked" : ""}> Reinforcement to be Checked</label><label style="display:block"><input type="radio" name="rbD" value="DESIGN" ${r.DESIGNCHECK !== "CHECK" ? "checked" : ""}> Reinforcement to be Designed</label></fieldset></div>`,
+    [["OK", x => {
+      const v = id => q(x, id).value.trim(), area = id => { const b = sizes.find(s => s.name === q(x, id).value); return b ? b.area : undefined; };
+      const col = q(x, "input[name=rbT]:checked").value === "Column", c = q(x, "input[name=rbG]:checked").value === "C";
+      const o = {TYPE: col ? "Column" : "Beam", LONGBARMATERIAL: v("#rbL"), CONFINEBARMATERIAL: v("#rbC")};
+      if (col) Object.assign(o, {PATTERN: c ? `C-${parseInt(v("#rbN")) || 8}` : `R-${parseInt(v("#rb3")) || 3}-${parseInt(v("#rb2")) || 3}`, TRANSREINF: q(x, "input[name=rbS]:checked").value, DESIGNCHECK: q(x, "input[name=rbD]:checked").value,
+        COVER: v("#rbCv"), LONGBARAREA: area("#rbLs"), CONFINEBARAREA: area("#rbCs"), CONFINEBARSPACING: v("#rbSp"), NUMCONFINEBARS3: v("#rbC3"), NUMCONFINEBARS2: v("#rbC2")});
+      else Object.assign(o, {COVERTOP: v("#rbTop"), COVERBOTTOM: v("#rbBot"), ATI: v("#rbTI"), ATJ: v("#rbTJ"), ABI: v("#rbBI"), ABJ: v("#rbBJ")});
+      for (const k in o) if (o[k] === undefined || o[k] === "") delete o[k]; else o[k] = String(o[k]);
+      done(o);
+    }], ["Cancel"]], {width: 480});
+  const paint = () => {
+    const col = q(d, "input[name=rbT]:checked").value === "Column", c = q(d, "input[name=rbG]:checked").value === "C";
+    q(d, "#rbCol").hidden = !col; q(d, "#rbCD").hidden = !col; q(d, "#rbBeam").hidden = col;
+    q(d, "#rbLg").textContent = "Longitudinal Bars - " + (c ? "Circular" : "Rectangular") + " Configuration";
+    d.querySelectorAll(".rbR").forEach(e => e.hidden = c); d.querySelectorAll(".rbCc").forEach(e => e.hidden = !c);
+    const sp = d.querySelector("input[name=rbS][value=SPIRAL]"); sp.disabled = !c; if (!c && sp.checked) d.querySelector("input[name=rbS][value=TIES]").checked = true;
+  };
+  d.querySelectorAll("input[name=rbT],input[name=rbG]").forEach(e => e.onchange = paint);
+  d.querySelectorAll(".rbPlus").forEach(b => b.onclick = () => hmRebarSizes()); d.querySelectorAll(".rbMat").forEach(b => b.onclick = () => hmSapMaterials());
+  paint();
+  return d;
+}
 // ---- Define: slab and wall sections ----
 // Slab Properties and Wall Properties, each a list of its own as ETABS and SAFE have them (Define > Section
 // Properties > Slab Sections / Wall Sections); SAP2000 has one Area Sections list of shell sections.
