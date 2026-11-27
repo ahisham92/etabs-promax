@@ -680,6 +680,7 @@ public static class EngineRun
                 // Whether the last analysis is of the model as it is now: a design then needs no new analysis.
                 ["analysed"] = _analysedModel is not null && _analysedRevision == _analysedModel.Revision && File.Exists(_analysedFile),
                 ["starts"] = _starts,
+                ["analysed_file"] = _analysedFile,
                 ["closed"] = _closed,
                 ["kept_open"] = _keptOpen,
                 ["monitor"] = _mon?.Json(),

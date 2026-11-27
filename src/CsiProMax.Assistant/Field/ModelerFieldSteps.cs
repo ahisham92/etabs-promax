@@ -643,6 +643,12 @@ public static class ModelerFieldSteps
         });
     }
 
+    /// <summary>A pier label and a story where a wall carries it: the only rows ETABS's pier overwrite tables have.</summary>
+    internal static (string Name, string Story) PierOnWall(CsiProMax.Model.StructuralModel m) =>
+        m.AreaAssigns.Where(x => m.Area(x.Label)?.Kind == CsiProMax.Model.AreaKind.Wall)
+            .Select(x => (Name: CsiProMax.Model.PropertyDefs.Value(x.Extra, "PIER") ?? "", x.Story))
+            .FirstOrDefault(x => x.Name.Length > 0 && Tools.StructureTools.Labels(m).Contains(("pier", x.Name)));
+
     /// <summary>Diaphragms, pier and spandrel labels, groups and a section cut, named CPM- for the program checks.</summary>
     private static void Structure(FieldContext ctx, OfflineEtabs modeler)
     {
@@ -653,6 +659,10 @@ public static class ModelerFieldSteps
         if (floors.Count > 0) ctx.Tool("assign_diaphragm_data", """{"objects":[""" + Q(floors[0]) + """],"diaphragm":"CPM-D2"}""", null, "tool assign_diaphragm_data, on a floor");
         ctx.Refused("define_diaphragm", """{"name":"CPM-D2","delete":true}""", floors.Count > 0 ? "take it off" : "", "tool define_diaphragm says no to deleting one in use");
         ctx.Tool("define_pier_spandrel", """{"kind":"pier","name":"CPM-P1"}""", null, "tool define_pier_spandrel, a pier label");
+        // The pier on a wall: ETABS lists a pier's design overwrite rows only for the stories where walls carry it
+        // (0.4.68 full test: "Shear Wall Pier Design Overwrites - ACI 318-19 ... the table is as it was (0 rows)").
+        var walls = m.AreaAssigns.Where(x => m.Area(x.Label)?.Kind == CsiProMax.Model.AreaKind.Wall).Select(x => x.Label + "@" + x.Story).ToList();
+        if (walls.Count > 0) ctx.Tool("assign_pier_spandrel_data", """{"objects":[""" + Q(walls[0]) + """],"pier":"CPM-P1"}""", null, "tool assign_pier_spandrel_data, a pier on a wall");
         if (beams.Count > 0) ctx.Tool("assign_pier_spandrel_data", """{"objects":[""" + Q(beams[0]) + """],"spandrel":"CPM-S1"}""", null, "tool assign_pier_spandrel_data, a spandrel on a beam");
         ctx.Tool("define_group", """{"name":"CPM-G","color":"Blue"}""", null, "tool define_group");
         ctx.Tool("assign_group_data", """{"group":"CPM-G","objects":""" + List(beams.Take(3)) + "}", a => FieldContext.Expect(Int(a["members"]) == Math.Min(3, beams.Count), "the group has " + a["members"]), "tool assign_group_data, three beams");
@@ -725,8 +735,8 @@ public static class ModelerFieldSteps
             var wCode = CsiProMax.Model.ProgramForms.Code(modeler.Model, "shear_wall") is { Length: > 0 } wc ? wc : CsiProMax.Model.ProgramForms.Codes(modeler.Model.Target, "shear_wall").FirstOrDefault() ?? "";
             // Only on a pier label the model has: ETABS takes an overwrite for its own piers only.
             if (modeler.Model.Target == CsiProMax.Model.ProgramOptions.Etabs && CsiProMax.Model.ProgramForms.OverwriteTables("etabs", "shear_wall", wCode).FirstOrDefault() is { } pierTable
-                && Tools.StructureTools.Labels(modeler.Model).FirstOrDefault(l => l.Kind == "pier").Name is { Length: > 0 } pierName)
-                ctx.Tool("define_table_rows", """{"table":""" + Q(pierTable) + ""","name":""" + Q(pierName) + ""","rows":[{"Story":""" + Q(beam.Story) + ""","LLRF":"0.9"}]}""", null, "tool define_table_rows, a pier's shear wall design overwrite (View/Revise Pier Overwrites)");
+                && PierOnWall(modeler.Model) is var (pierName, pierStory) && !string.IsNullOrEmpty(pierName))
+                ctx.Tool("define_table_rows", """{"table":""" + Q(pierTable) + ""","name":""" + Q(pierName) + ""","rows":[{"Story":""" + Q(pierStory) + ""","LLRF":"0.9"}]}""", null, "tool define_table_rows, a pier's shear wall design overwrite (View/Revise Pier Overwrites)");
             ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":0.05,"dof":"M3"},{"at":0.95,"dof":"M3"},{"at":0.5,"dof":"V2"}]}""", null, "tool assign_frame_data, auto hinges at both ends and a shear hinge");
             ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":1.5,"dof":"M3"}]}""", "0 to 1", "tool assign_frame_data says no to a hinge beyond the member");
             ctx.Tool("property_definitions", """{"objects":[""" + obj + """]}""", a =>

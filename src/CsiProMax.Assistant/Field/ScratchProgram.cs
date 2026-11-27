@@ -189,6 +189,9 @@ public static class ScratchDialogs
     /// "Warning", 2026-11-26). In the test's own scratch window it is answered OK, so
     /// the call comes back and the step can say why. Never a licence message.
     /// </summary>
+    /// <summary>The program's own "Open Model File" box, which the test cancelled: it did not get the file it was given.</summary>
+    public static bool AskedForFile(string text) => text.Contains("asked for a file to open", StringComparison.OrdinalIgnoreCase);
+
     public static bool IsFileRefused(string text) =>
         (text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) || text.Contains("Error in performing miOpen", StringComparison.OrdinalIgnoreCase)
             // ETABS 23 on a line of a text file it cannot read: "Error reading line 348. Line Ignored." (2026-11-26).
@@ -778,6 +781,21 @@ public sealed class ScratchProgram : IScratchWindow
             }
             string[] refused;
             lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
+            // ETABS 23.2 answered 0 and asked for a file in its own "Open Model File" box, or held "(Untitled)", for an
+            // .EDB that was there, just after the program before it had closed with it (0.4.68 full test: the Engine's
+            // second run on the analysed model, and the hidden copy of the pack). The file is given again, up to 3 times.
+            for (var again = 0; again < 3 && answer == 0 && File.Exists(modelFile) && (refused.Any(ScratchDialogs.AskedForFile) || !Holds(modelFile)); again++)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(10));
+                lock (_noticesClosed) _noticesClosed.RemoveAll(ScratchDialogs.AskedForFile);
+                ScratchDialogs.WaitUntilFree(modelFile, TimeSpan.FromSeconds(60));
+                answer = Convert.ToInt32(Ask(FileTimeout, "open the file again", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
+                    $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
+                Thread.Sleep(TimeSpan.FromSeconds(2));
+                lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
+            }
+            if (answer == 0 && refused.Length == 0 && !Holds(modelFile))
+                throw new EtabsException($"{name} answered that it opened {Path.GetFileName(modelFile)}, but it holds '{Path.GetFileName(OpenFileName())}' (3 more tries).");
             if (answer != 0 || refused.Length > 0)
                 throw new EtabsException($"{name} could not open the file the Modeler wrote (it answered {answer})." + (refused.Length > 0 ? $" It said: {string.Join(" | ", refused)}; the test pressed OK." : ""));
             Ask(FileTimeout, "use the model's own units", m => { CsiProMax.Assistant.Etabs.EditableTables.PresentAsDatabase(m); return 0; }, $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes.");
@@ -984,6 +1002,16 @@ public sealed class ScratchProgram : IScratchWindow
     /// The program said it opened the text file but holds none of its objects (<paramref name="held"/>: its areas and
     /// frames): SAFE 23.1 does so with the Modeler's .f2k (0.4.56, 2026-11-26).
     /// </summary>
+    /// <summary>The file the program has open now ("" when it cannot say).</summary>
+    private string OpenFileName()
+    {
+        try { return Convert.ToString(Ask(TimeSpan.FromMinutes(1), "name the open model", m => (object)(Convert.ToString(m.GetModelFilename(true)) ?? ""), $"{_program.Name} did not answer.")) ?? ""; }
+        catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { return ""; }
+    }
+
+    /// <summary>Whether the program holds <paramref name="file"/> (a text file opens under its own name or as the model it makes).</summary>
+    private bool Holds(string file) => OpenFileName() is var open && (open.Length == 0 || SameName(open, file));
+
     /// <summary>The objects (frames and areas) an .e2k or .s2k holds; 0 for any other file.</summary>
     public static int TextObjectCount(CsiProgram program, string file)
     {

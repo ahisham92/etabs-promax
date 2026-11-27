@@ -873,6 +873,63 @@ static class TesterBugTests
             var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/EngineRun.cs"));
             Check(src.Contains("could not open the model: {open.Detail}", StringComparison.Ordinal), "the Run Report does not lead with the rejected file");
         });
+        yield return ("real model: shell uniform load sets are the slabs' loads everywhere, and an opening is a hole (Ahmed's real model, 2026-11-27: slabs with no load, \"no mass\")", () =>
+        {
+            var e2k = string.Join("\r\n", [
+                "$ STORIES - IN SEQUENCE FROM TOP", "  STORY \"S1\"  HEIGHT 3", "  STORY \"Base\"  ELEV 0",
+                "$ POINT COORDINATES", "  POINT \"1\"  0 0", "  POINT \"2\"  6 0", "  POINT \"3\"  6 6", "  POINT \"4\"  0 6", "  POINT \"5\"  2 2", "  POINT \"6\"  3 2", "  POINT \"7\"  3 3", "  POINT \"8\"  2 3",
+                "$ AREA CONNECTIVITIES", "  AREA \"F1\"  FLOOR  4  \"1\"  \"2\"  \"3\"  \"4\"  0  0  0  0", "  AREA \"A1\"  FLOOR  4  \"5\"  \"6\"  \"7\"  \"8\"  0  0  0  0",
+                "$ AREA ASSIGNS", "  AREAASSIGN  \"F1\"  \"S1\"  SECTION \"S200\"", "  AREAASSIGN  \"A1\"  \"S1\"  OPENING \"Yes\"",
+                "$ LOAD PATTERNS", "  LOADPATTERN \"Live\"  TYPE  \"Live\"  SELFWEIGHT  0", "  LOADPATTERN \"Flooring\"  TYPE  \"Super Dead\"  SELFWEIGHT  0",
+                "$ SHELL UNIFORM LOAD SETS", "  SHELLUNIFORMLOADSET \"Offices\"  LOADPAT \"Flooring\"  VALUE 1", "  SHELLUNIFORMLOADSET \"Offices\"  LOADPAT \"Live\"  VALUE 3.5",
+                "$ SHELL OBJECT LOADS", "  AREALOAD  \"F1\"  \"S1\"  TYPE \"UNIFLOADSET\"  \"Offices\"",
+                "$ END OF MODEL FILE", ""]);
+            var m = CsiProMax.E2k.E2kReader.Read(e2k);
+            var loads = CsiProMax.Model.LoadSets.Expanded(m);
+            Check(loads.Count == 2 && loads.Any(l => l.Pattern == "Live" && l.Tokens.Contains("3.5")) && loads.Any(l => l.Pattern == "Flooring"), "the set is not the slab's loads: " + string.Join(" | ", loads.Select(l => string.Join(" ", l.Tokens))));
+            var a = CsiProMax.Checks.Stability.FromStructural.Read(m, "etabs");
+            Check(a.Patterns.All(p => p.HasLoads), "a pattern a load set carries counts as having no load");
+            Check(a.Shells.Count == 1 && a.Shells[0].Label == "F1", "the opening is analysed as a shell: " + string.Join(", ", a.Shells.Select(x => x.Label)));
+            var s2k = CsiProMax.S2k.S2kWriter.Write(m).Text;
+            Check(s2k.Contains("UnifLoad=3.5", StringComparison.Ordinal) || s2k.Contains("UnifLoad=3.5 ", StringComparison.Ordinal), "SAP2000's file has no load from the set");
+            var off = new CsiProMax.Assistant.Etabs.OfflineEtabs(m, "");
+            Check(off.Areas().Count == 1, "the opening is drawn as a floor");
+            Check(CsiProMax.Model.SlabDefs.Openings(m).Count == 1, "the opening is not drawn as an opening");
+            Check(off.ReadTable("Shell Loads - Uniform", null, null).Rows.Count == 2, "the slab shows no load");
+            Check(CsiProMax.E2k.E2kWriter.Write(m).Contains("TYPE \"UNIFLOADSET\"  \"Offices\"", StringComparison.Ordinal) || CsiProMax.E2k.E2kWriter.Write(m).Contains("UNIFLOADSET", StringComparison.Ordinal), "the set is not written back as a set");
+        });
+        yield return ("real models: the round trip finds the PC's models, and names every table, row and field that differs (Ahmed 2026-11-27: \"it should be exactly the same\")", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "real-models-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(Path.Combine(dir, "Projects", "A"));
+            try
+            {
+                File.WriteAllText(Path.Combine(dir, "Projects", "A", "tower.e2k"), "$ STORIES\r\n");
+                File.WriteAllText(Path.Combine(dir, "Projects", "A", "cpm-field-test-1.e2k"), "$ STORIES\r\n");
+                File.WriteAllText(Path.Combine(dir, "Projects", "A", "frame.EDB"), "x");
+                File.WriteAllText(Path.Combine(dir, "Projects", "A", "frame.e2k"), "$ STORIES\r\n");
+                File.WriteAllText(Path.Combine(dir, "Projects", "A", "solo.sdb"), "x");
+                var etabs = RealModelField.Find(CsiProMax.Assistant.Etabs.CsiProgram.Etabs, [dir], Path.Combine(dir, "none.txt")).Select(Path.GetFileName).ToList();
+                Check(etabs.Contains("tower.e2k") && etabs.Contains("frame.e2k") && !etabs.Contains("frame.EDB") && !etabs.Contains("cpm-field-test-1.e2k"), "ETABS models: " + string.Join(", ", etabs));
+                Check(RealModelField.Find(CsiProMax.Assistant.Etabs.CsiProgram.Sap2000, [dir], Path.Combine(dir, "none.txt")).Count == 0, "a SAP2000 model with no text beside it is taken");
+            }
+            finally { Directory.Delete(dir, true); }
+            var a = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Shell Uniform Load Sets"] = new(["Name", "LoadPattern", "Value"], [["Offices", "Live", "3.5"], ["Offices", "Flooring", "1"]]),
+                ["Area Assignments - Openings"] = new(["Story", "Label", "Opening"], [["L5", "A1", "Yes"]]),
+                ["Joint Coordinates"] = new(["Label", "X", "GUID"], [["1", "5.6506705", "a"]]),
+            };
+            var b = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Shell Uniform Load Sets"] = new(["Name", "LoadPattern", "Value"], [["Offices", "Live", "3.4"], ["Offices", "Flooring", "1"]]),
+                ["Joint Coordinates"] = new(["Label", "X", "GUID"], [["1", "5.65067050001", "b"]]),
+            };
+            var d = RealModelField.Compare(a, b, model: true);
+            Check(d.Count == 2 && d.Any(x => x.StartsWith("Shell Uniform Load Sets: Offices|Live Value is '3.4', not '3.5'", StringComparison.Ordinal)) && d.Any(x => x.StartsWith("Area Assignments - Openings: the table is gone", StringComparison.Ordinal)),
+                "differences: " + string.Join(" | ", d));
+            var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(src.Contains("RealModelField.Run(ctx, program);", StringComparison.Ordinal), "the field test does not run the real-model round trip");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
@@ -1555,6 +1612,26 @@ static class TesterBugTests
             Check(com.Contains("catch (OutOfMemoryException) { return ReadInPages(key, cases, combos); }", StringComparison.Ordinal), "a table read that runs out of memory is read in pages");
             Check(com.Contains("catch (OutOfMemoryException ex) { done.SetException(ex); }", StringComparison.Ordinal), "and out of memory is not wrapped on the program's thread, so the pages are tried");
             Check(com.Contains("ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one])", StringComparison.Ordinal), "one load case or combination a page");
+        });
+
+        yield return ("Out of memory box (0.4.68): a large model's results table is read one load case or combination at a time from the start, with repeated values kept once", () =>
+        {
+            Check(ComEtabs.IsCaseTable(["Story", "Joint", "OutputCase", "CaseType", "UX"]), "a table with OutputCase is read by case");
+            Check(ComEtabs.IsCaseTable(["Frame", "Station", "Combo", "P"]), "a table with Combo is read by case");
+            Check(!ComEtabs.IsCaseTable(["Story", "Height", "Elevation"]), "a table without cases is read whole");
+            Check(!ComEtabs.PagesNeeded(1_000, 10, 20), "a small table stays one read");
+            Check(ComEtabs.PagesNeeded(50_000, 20, 10), "one case of 50,000 rows x 20 fields over 10 cases is read in pages");
+            var repeats = new Repeats(2);
+            var a = repeats.Kept(0, new string("DEAD".ToCharArray()));
+            var b = repeats.Kept(0, new string("DEAD".ToCharArray()));
+            Check(ReferenceEquals(a, b), "a value repeated down a column is kept once");
+            for (var i = 0; i < 5000; i++) repeats.Kept(1, i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var c = repeats.Kept(1, new string("x1".ToCharArray()));
+            var d = repeats.Kept(1, new string("x1".ToCharArray()));
+            Check(!ReferenceEquals(c, d), "a column of mostly distinct numbers stops being tracked");
+            var com = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/ComEtabs.cs"));
+            Check(com.IndexOf("if (Paged(key, cases, combos) is { } paged) return paged;", StringComparison.Ordinal) is var paged and > 0
+                && paged < com.IndexOf("return ReadTableKept(key, cases, combos);", StringComparison.Ordinal), "the size is checked before any whole-table read");
         });
 
         yield return ("SAFE tester (0.4.68): a field test started from a Modeler window with no program expects the Modeler to name itself in get_model_context", () =>
