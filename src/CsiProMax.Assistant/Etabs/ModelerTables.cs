@@ -69,6 +69,16 @@ public static class ModelerTables
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
+        // Load combination notes and ETABS's default design combinations (Auto), which ETABS's .e2k has no line for: the
+        // whole combination as rows of "Load Combination Definitions" (Name, Type, Is Auto, Load Name, SF, Notes; one row per
+        // load case or combination, the first carrying Type and Notes), by name.
+        var comboRows = ComboRows(model);
+        if (comboRows.Count > 0)
+        {
+            const string table = "Load Combination Definitions";
+            try { EditableTables.Put(e, table, "Name", comboRows.Select(x => (IReadOnlyDictionary<string, string>)x).ToList(), $"put the Modeler's '{table}' in"); done.Add($"{table}: {comboRows.Count} row{(comboRows.Count == 1 ? "" : "s")}"); }
+            catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
+        }
         // A frame section's other fields (colour, notes, notional size, fillet radius, ...), in its shape's table by name.
         // The shapes the .e2k has no line for go in whole (FrameTableShapes): every row with its name, material and modifiers.
         foreach (var g in model.FrameSections.Where(x => PropertyDefs.FrameExtras(x).Count > 0 || (FrameTableShapes.Is(x.Shape) && !FrameTableShapes.AsRead(x))).GroupBy(x => x.Shape))
@@ -242,6 +252,27 @@ public static class ModelerTables
 
     /// <summary>The fields a definition table's row is found by: its name, or the story (Story Definitions), or the
     /// source and its load pattern (Mass Source Definition, one row per pattern).</summary>
+    /// <summary>The "Load Combination Definitions" rows of the combinations with notes or made by Add Default Design Combos.</summary>
+    internal static List<Dictionary<string, string>> ComboRows(StructuralModel model)
+    {
+        var rows = new List<Dictionary<string, string>>();
+        foreach (var c in model.Combos.Where(c => c.Auto || !string.IsNullOrEmpty(c.Notes)))
+        {
+            var type = c.Lines.FirstOrDefault(l => l.Count >= 2 && l[0] == "TYPE") is { } t ? CsiProMax.E2k.E2kText.Unquote(t[1]) : "Linear Add";
+            var first = true;
+            foreach (var l in c.Lines.Where(l => l.Count >= 2 && l[0] is "LOADCASE" or "LOADCOMBO"))
+            {
+                rows.Add(new Dictionary<string, string>
+                {
+                    ["Name"] = c.Name, ["Type"] = first ? type : "", ["Is Auto"] = first ? (c.Auto ? "Yes" : "No") : "",
+                    ["Load Name"] = CsiProMax.E2k.E2kText.Unquote(l[1]), ["SF"] = CsiProMax.E2k.E2kText.Value(l, "SF") ?? "1", ["Notes"] = first ? c.Notes ?? "" : "",
+                });
+                first = false;
+            }
+        }
+        return rows;
+    }
+
     internal static string KeyOf(string table) => table.ToLowerInvariant() switch
     {
         "story definitions" => "Story",
