@@ -531,6 +531,21 @@ public static class ModelerFieldSteps
                     a => FieldContext.Expect(a["floors"]!.AsArray().Count == 2 && a["floors"]!.AsArray().All(f => m.AreaAssigns.Exists(x => x.Label + "@" + x.Story == f!.GetValue<string>() && x.Section == floor.Section)), "two floors with the section were expected: " + a.ToJsonString()),
                     "tool replace_floors, Edit > Edit Shells > Divide Shells into 2 by 1");
             }
+            {
+                var slabSec = m.ShellSections.FirstOrDefault(x => !x.IsWall && !x.IsDeck)?.Name;
+                var low = stories.Count > 2 ? stories[^2] : top;
+                ctx.Tool("add_template", $$"""{"kind":"2d_frame","type":"eccentric","top_story":{{Q(top)}},"bottom_story":{{Q(low)}},"bays":2,"bay_width":6,"gap_width":1,"columns":{{Q(section)}},"beams":{{Q(section)}},"braces":{{Q(section)}},"restraints":"pinned","x":{{N(maxX + 60)}},"y":{{N(maxY + 60)}},"angle":30}""",
+                    a => FieldContext.Expect(a["frames"]!.AsArray().Count == (low == top ? 1 : 2) * 9, "a 2-bay braced frame on each story was expected: " + a.ToJsonString()),
+                    "tool add_template, Edit > Add to Model from Template > 2D Frame");
+                ctx.Tool("add_template", $$"""{"kind":"2d_truss","type":"pratt","story":{{Q(top)}},"divisions":4,"length":2,"height":1.5,"chords":{{Q(section)}},"diagonals":{{Q(section)}},"verticals":{{Q(section)}},"x":{{N(maxX + 80)}},"y":{{N(maxY + 80)}},"angle":0}""",
+                    a => FieldContext.Expect(a["frames"]!.AsArray().Count == 4 * 3 + 5, "a 4-panel truss was expected: " + a.ToJsonString()),
+                    "tool add_template, Edit > Add to Model from Template > 2D Truss");
+                ctx.Refused("add_template", $$"""{"kind":"2d_wall","top_story":{{Q(top)}},"bottom_story":{{Q(top)}},"bays":1,"bay_width":3,"section":"No such wall"}""", "no wall section", "tool add_template says no to a wall section the model does not have");
+                if (slabSec is not null)
+                    ctx.Tool("add_template", $$$"""{"kind":"flat_slab","top_story":{{{Q(top)}}},"bottom_story":{{{Q(top)}}},"use":{"column":{{{Q(section)}}},"slab":{{{Q(slabSec)}}}},"quick":{"drop_panels":false,"restraints":"none"}}""",
+                        a => FieldContext.Expect(a["floors"]!.GetValue<int>() > 0, "no floor was added: " + a.ToJsonString()),
+                        "tool add_template, Edit > Add to Model from Template > 3D Flat Slab with the model's own sections");
+            }
             ctx.Tool("relabel_objects", "{}", a => FieldContext.Expect(a["relabelled"] is not null, "no count: " + a.ToJsonString()), "tool relabel_objects, Edit > Auto Relabel All");
         }
         finally
