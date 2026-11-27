@@ -1017,7 +1017,25 @@ public sealed class ScratchProgram : IScratchWindow
     }
 
     /// <summary>Whether the program holds <paramref name="file"/> (a text file opens under its own name or as the model it makes).</summary>
-    private bool Holds(string file) => OpenFileName() is var open && (open.Length == 0 || SameName(open, file));
+    private bool Holds(string file)
+    {
+        var open = OpenFileName();
+        if (open.Length == 0 || SameName(open, file)) return true;
+        var inFile = TextObjectCount(_program, file);
+        if (inFile == 0) return false;
+        int held;
+        try { held = Convert.ToInt32(Ask(TimeSpan.FromMinutes(1), "count the objects", m => Count(m, "AreaObj.Count") + Count(m, "FrameObj.Count"), $"{_program.Name} did not answer.")); }
+        catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { held = 0; }
+        return HoldsText(open, file, inFile, held);
+    }
+
+    /// <summary>
+    /// Whether a program that names <paramref name="open"/> holds the text file <paramref name="file"/>: ETABS 23.2 keeps
+    /// an imported .e2k or .$et as "(Untitled)" until it is saved, so its objects tell (0.4.70 full test, 2026-11-27: every
+    /// .e2k open failed on the name alone, though each had come in).
+    /// </summary>
+    internal static bool HoldsText(string open, string file, int inFile, int held) =>
+        open.Length == 0 || SameName(open, file) || (inFile > 0 && held > 0);
 
     /// <summary>The objects (frames and areas) an .e2k or .s2k holds; 0 for any other file.</summary>
     public static int TextObjectCount(CsiProgram program, string file)

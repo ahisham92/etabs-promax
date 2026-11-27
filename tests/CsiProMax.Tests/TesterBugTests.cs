@@ -938,6 +938,13 @@ static class TesterBugTests
             var main = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
             Check(main.IndexOf("args.Contains(\"--version\")", StringComparison.Ordinal) is var at and > 0 && at < main.IndexOf("Newer(args) is { } newerTest", StringComparison.Ordinal), "--version is answered before any window or hand-over");
         });
+        yield return ("field test: an imported .e2k that ETABS keeps as (Untitled) counts as opened when its objects came in", () =>
+        {
+            Check(CsiProMax.Assistant.ScratchProgram.HoldsText(@"C:\x\(Untitled)", @"C:\t\cpm-field-test.e2k", 120, 120), "an imported .e2k with its objects held is opened");
+            Check(!CsiProMax.Assistant.ScratchProgram.HoldsText(@"C:\x\(Untitled)", @"C:\t\cpm-field-test.e2k", 120, 0), "a blank (Untitled) model is not the file");
+            Check(!CsiProMax.Assistant.ScratchProgram.HoldsText(@"C:\x\(Untitled)", @"C:\t\model.edb", 0, 50), "an .EDB still has to be held by its name");
+            Check(CsiProMax.Assistant.ScratchProgram.HoldsText(@"C:\t\model.EDB", @"C:\t\model.edb", 0, 0), "the same name is held");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
