@@ -60,7 +60,16 @@ public static partial class ModelUnits
         return double.Parse(v.ToString("G15", Inv), Inv);
     }
 
-    private static string Text(double v) => v == 0 ? "0" : Round(v).ToString("G15", Inv);
+    // A converted number as text: rounded to 15 digits when that leaves a short number (a value coming back to its own
+    // units, 0.006349999999999999 m is 0.00635), else every digit, so that going on to other units and back loses
+    // nothing (0.00635 m is 0.020833333333333332 ft, and 0.0208333333333333 would come back as 0.00634999999999999).
+    private static string Text(double v)
+    {
+        if (v == 0) return "0";
+        var short15 = v.ToString("G15", Inv);
+        var digits = short15.Split('E')[0].Count(char.IsDigit) - short15.Split('E')[0].TakeWhile(c => c is '0' or '.' or '-').Count(char.IsDigit);
+        return digits <= 12 ? short15 : v.ToString("R", Inv);
+    }
 
     // The .e2k keywords by kind, as ETABS writes them (materials, sections, slabs, decks, tendons, rebar, design
     // preferences, analysis options, assignments).
@@ -134,7 +143,7 @@ public static partial class ModelUnits
         if (!Known(model.Units) || !Known(to)) throw new ArgumentException($"CSI ProMax does not know the units {model.Units.Force}, {model.Units.Length} or {to.Force}, {to.Length}.");
         var from = model.Units;
         double K(Dim d) => Factor(d, from, to);
-        double S(double v, Dim d) => d.IsNone ? v : Round(v * K(d));
+        double S(double v, Dim d) => d.IsNone ? v : double.Parse(Text(v * K(d)), Inv);
 
         foreach (var s in m.Stories)
         {
