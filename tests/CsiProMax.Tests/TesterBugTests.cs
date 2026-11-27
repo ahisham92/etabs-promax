@@ -647,6 +647,8 @@ static class TesterBugTests
             Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["SAP2000 26.3.0 Ultimate - Tower B"]), "a window with another model would be ended");
             Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["SAP2000 26.3.0 Ultimate - cpm-field-test", "Maintenance Expiring"]), "a process with a message that is not the scratch model's would be ended");
             Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), default, []), "a process would be ended although the test never asked for one");
+            Check(ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["ETABS Plus v23.2.0 - (Untitled)", "New Model Quick Templates"]), "its own process on the blank model it started at its end is not ended");
+            Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["ETABS Plus v23.2.0 - (Untitled)", "Save Model File As"]), "a process with another form of its own would be ended");
             // Ending a process is written in one place only, behind that rule.
             var kills = SourceText.Files("src").Where(f => f.Text.Contains(".Kill(", StringComparison.Ordinal)).Select(f => f.Path).ToList();
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
@@ -1000,6 +1002,11 @@ static class TesterBugTests
             Check(src.Contains("BlankDefaults, TimeSpan.FromMinutes(2))", StringComparison.Ordinal), "the blank-model item has no limit of its own");
             Check(src.Contains("if (!work.Wait(limit))", StringComparison.Ordinal), "an item is waited for without a limit");
             Check(!src.Contains("m.InitializeNewModel(); return m.File.NewBlank();", StringComparison.Ordinal), "the blank model is still started with no units");
+        });
+        yield return ("field test: a text model the program holds objects of is not opened again over its changed (Untitled) model (ETABS asked to save and waited)", () =>
+        {
+            var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+            Check(src.Contains("Math.Max(1, TextObjectCount(_program, file))", StringComparison.Ordinal), "a text file CSI ProMax cannot count is opened again although the program holds its objects");
         });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
