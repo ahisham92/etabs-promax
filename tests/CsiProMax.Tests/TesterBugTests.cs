@@ -975,6 +975,15 @@ static class TesterBugTests
             }
             finally { field.SetValue(null, null); File.Delete(stop); }
         });
+        yield return ("e2k: a table set's ETABS-internal ~LLRF pattern and case are not written (ETABS 23.2 ignores the lines with a box)", () =>
+        {
+            var text = "$ PROGRAM INFORMATION\r\n  PROGRAM  \"ETABS\"  VERSION \"23.2.0\"\r\n\r\n$ LOAD PATTERNS\r\n  LOADPATTERN \"DEAD\"  TYPE  \"Dead\"  SELFWEIGHT  1\r\n\r\n"
+                + "$ DATABASE TABLE NAMED SETS\r\n  DBTABLESET \"Test\"  EXPOSEALL  \"Yes\"\r\n  DBTABLESETLOADPATTERN \"Test\"  \"DEAD\"\r\n  DBTABLESETLOADPATTERN \"Test\"  \"~LLRF\"\r\n  DBTABLESETLOADCASE \"Test\"  \"~LLRF\"\r\n  DBTABLESETLOADCASE \"Test\"  \"DEAD\"\r\n\r\n  END\r\n";
+            var written = CsiProMax.E2k.E2kWriter.Write(CsiProMax.E2k.E2kReader.Read(text));
+            Check(!written.Contains("~LLRF", StringComparison.Ordinal), "~LLRF is still written");
+            Check(written.Contains("DBTABLESETLOADPATTERN \"Test\"  \"DEAD\"", StringComparison.Ordinal) || written.Contains("DBTABLESETLOADPATTERN", StringComparison.Ordinal), "the table set's own pattern went missing");
+            Check(written.Contains("DBTABLESETLOADCASE", StringComparison.Ordinal), "the table set's own case went missing");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));

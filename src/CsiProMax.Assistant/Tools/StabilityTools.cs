@@ -231,6 +231,9 @@ public static class StabilityTools
                 a.Joints.Add(new Joint(p.Name, p.Name, StoryAt(p.Z), p.X, p.Y, p.Z, r, springs.Contains(p.Name), diaphragms.GetValueOrDefault(p.Name)));
             }
 
+            // Active degrees of freedom (a plane frame solves UX UZ RY only).
+            if (api && CsiTools.Try(e, "read the active degrees of freedom", "Analyze.GetActiveDOF") is { } dof && ApiCall.Value(dof, "DOF") is JsonArray on && on.Count >= 6)
+                a.ActiveDof = on.Take(6).Select(v => v?.ToString() is "true" or "True").ToArray();
             if (api)
             {
                 Sections(e, a, frames.Select(f => f.Section).Concat(areas.Select(x => x.Section)));

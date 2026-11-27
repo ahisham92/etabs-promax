@@ -40,6 +40,12 @@ public sealed class AnalysisModel
     /// ends unless the member is meshed.
     /// </summary>
     public bool JoinsAtIntersections { get; set; } = true;
+    /// <summary>
+    /// The degrees of freedom the analysis solves for (Analyze > Set Analysis Options > Active Degrees of Freedom):
+    /// UX UY UZ RX RY RZ. A plane frame (UX UZ RY) has nothing to resist the others and needs nothing to: the program
+    /// leaves them out. Null when the program did not say (all six).
+    /// </summary>
+    public bool[]? ActiveDof { get; set; }
     /// <summary>Only the out-of-plane degrees of freedom count (SAFE: UZ, RX, RY); the program holds the others.</summary>
     public bool PlateOnly { get; set; }
     /// <summary>What the adapter could not read, said with the answer.</summary>

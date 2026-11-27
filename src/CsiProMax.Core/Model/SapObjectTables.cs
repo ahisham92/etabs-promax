@@ -36,14 +36,43 @@ public static class SapObjectTables
         ["Frame Offset Along Length Assignments"] = ("frame", false, ["Type", "LengthI", "LengthJ", "RigidFactor"]),
         ["Frame Hinge Assigns 00 - Hinge Distribution Type"] = ("frame", false, ["HgeDistrTyp", "IsHgeLenRel", "HgeLenRel", "HgeLenAbs", "IntgrType", "SpaceType", "MaxSpace", "NumHgeSpace", "HngAtEnds"]),
         ["Frame Hinge Assigns 02 - User Defined Properties"] = ("frame", true, ["HgeDistrTyp", "AssignProp", "GenHinge", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 03 - Auto Caltrans - Flexural Hinge"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "NumCurves", "NumPoints", "PFrom", "PCase", "PUser", "HingeLength", "Idealized", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 10 - Auto ASCE 41-13 - Concrete Beam"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "VFrom", "VCase", "VUser", "Conforming", "RatioFrom", "RatioUser", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 11 - Auto ASCE 41-13 - Concrete Column"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "PandVFrom", "PandVCase", "PUser", "V2User", "V3User", "FailureCond", "RatioFrom", "RatioUser", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 12 - Auto ASCE 41-13 - Steel Beam"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 13 - Auto ASCE 41-13 - Steel Column"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "PFrom", "PCase", "PUser", "DropLoad", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 14 - Auto ASCE 41-13 - Steel Brace"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 17 - Auto ASCE 41-17 - Concrete Beam"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "VFrom", "VCase", "VUser", "Conforming", "RatioFrom", "RatioUser", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 18 - Auto ASCE 41-17 - Concrete Column"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "PFrom", "PCaseGrav", "PCaseGravLt", "PUserGrav", "PUserGravLt", "ColBehavior", "ShrDmdOpt", "VyE2", "VyE3", "VyE2Ratio", "VyE3Ratio", "ShrRRatOpt", "UserShrRRat", "ShrRSpcOpt", "UserShrRSpc", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 19 - Auto ASCE 41-17 - Steel Beam"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 20 - Auto ASCE 41-17 - Steel Column"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "DOF", "PFrom", "PCase", "PUser", "DropLoad", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 21 - Auto ASCE 41-17 - Steel Brace"] = ("frame", true, ["HgeDistrTyp", "GenHinge", "BeyondE", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
         ["Frame Hinge Assigns 09 - Hinge Overwrites"] = ("frame", false, ["AutoDivide", "RelLength", "UseHngLenOW", "NoLoadDrop", "LimNegStiff"]),
         ["Frame Loads - Gravity"] = ("frame", true, ["Cable", "Tendon", "LoadPat", "CoordSys", "MultiplierX", "MultiplierY", "MultiplierZ"]),
         ["Frame Loads - Deformation"] = ("frame", true, ["Cable", "Tendon", "LoadPat", "IncludeU1", "IncludeU2", "IncludeU3", "IncludeR1", "IncludeR2", "IncludeR3", "U1", "U2", "U3", "R1", "R2", "R3"]),
         ["Frame Loads - Target Force"] = ("frame", true, ["Cable", "Tendon", "LoadPat", "IncludeP", "IncludeV2", "IncludeV3", "IncludeT", "IncludeM2", "IncludeM3", "P", "V2", "V3", "T", "M2", "M3", "RelLocP", "RelLocV2", "RelLocV3", "RelLocT", "RelLocM2", "RelLocM3"]),
         ["Frame Loads - Open Structure Wind"] = ("frame", true, ["Cable", "LoadPat", "CoordSys", "Type", "Dir", "DistType", "RelDistA", "RelDistB", "AbsDistA", "AbsDistB", "FOverLA", "FOverLB"]),
+        // Assign > Frame Loads > Auto Wave Loading Parameters and Open Structure Wind Parameters (SAP2000 26.3's forms).
+        ["Overwrites - Auto Wave Loads - Frame"] = ("frame", false, ["Cable", "LoadByWave", "LoadDisc", "MarineGrow", "DimForce2", "DimForce3", "DragCoeff", "InerCoeff", "Flooded", "LoadByWind", "ShapeCoeff", "IceThick", "ShieldFact"]),
+        ["Overwrites - Auto Wind Loads - Frame"] = ("frame", false, ["Cable", "LoadByWind", "IceThick", "Cf"]),
+        // The load tables the Modeler also has its own loads for (Native): a row it cannot hold as its own load (another
+        // coordinate system, a distributed moment, a joint pattern, a gradient, a curvature) is kept here, written into
+        // the same SAP2000 table beside the Modeler's own rows.
+        ["Joint Loads - Force" + Kept] = ("joint", true, ["LoadPat", "CoordSys", "F1", "F2", "F3", "M1", "M2", "M3"]),
+        ["Joint Loads - Ground Displacement" + Kept] = ("joint", true, ["LoadPat", "CoordSys", "U1", "U2", "U3", "R1", "R2", "R3"]),
+        ["Frame Loads - Distributed" + Kept] = ("frame", true, ["LoadPat", "CoordSys", "Type", "Dir", "DistType", "RelDistA", "RelDistB", "AbsDistA", "AbsDistB", "FOverLA", "FOverLB", "MOverLA", "MOverLB"]),
+        ["Frame Loads - Point" + Kept] = ("frame", true, ["LoadPat", "CoordSys", "Type", "Dir", "DistType", "RelDist", "AbsDist", "Force", "Moment"]),
+        ["Frame Loads - Temperature" + Kept] = ("frame", true, ["Cable", "Tendon", "LoadPat", "Type", "Temp", "TempGrad2", "TempGrad3", "JtPattern", "AutoBridge", "BridgeObj"]),
+        ["Frame Loads - Strain" + Kept] = ("frame", true, ["Cable", "Tendon", "LoadPat", "Component", "Strain", "Curvature", "JtPattern"]),
+        ["Area Loads - Uniform" + Kept] = ("area", true, ["LoadPat", "CoordSys", "Dir", "UnifLoad"]),
+        ["Area Loads - Temperature" + Kept] = ("area", true, ["LoadPat", "Type", "JtPattern", "Temp", "TempGrad3"]),
+        ["Area Loads - Strain" + Kept] = ("area", true, ["LoadPat", "Component", "Strain", "Curvature", "JtPattern"]),
         ["Area Auto Mesh Assignments"] = ("area", false, ["MeshType", "MeshGroup", "Number1", "Number2", "Max1", "Max2", "PtsFromLine", "PtsFromPt", "RotAngle", "GenMaxSize", "LocalEdge", "LocalFace", "SuppEdge", "SuppFace", "SubMesh", "SubMeshSize"]),
         ["Area Edge Constraint Assignments"] = ("area", true, ["Edge", "Constrained"]),
         ["Area Local Axes Assignments 2 - Advanced"] = ("area", false, ["LocalPlane", "PlOption1", "PlCoordSys", "CoordDir1", "CoordDir2", "PlVecJt1", "PlVecJt2", "PlVecX", "PlVecY", "PlVecZ"]),
+        ["Area Material Temperatures"] = ("area", false, ["JtPattern", "Temp"]),
+        ["Area Overwrites - Thickness"] = ("area", false, ["ThickOver", "ThickPat", "ThickPatSF", "Thick1", "Thick2", "Thick3", "Thick4"]),
+        ["Area Overwrites - Joint Offsets"] = ("area", false, ["OffsetOver", "OffsetPat", "OffsetPatSF", "Offset1", "Offset2", "Offset3", "Offset4"]),
         ["Area Rebar Ratio For Creep Analysis Assignments"] = ("area", false, ["UserRatio"]),
         ["Area Spring Assignments"] = ("area", true, ["Type", "Stiffness", "SimpleType", "LinkProp", "Face", "Dir1Type", "Dir", "NormalDir", "CoordSys", "VecX", "VecY", "VecZ", "Axis2Angle"]),
         ["Area Loads - Gravity"] = ("area", true, ["LoadPat", "CoordSys", "MultiplierX", "MultiplierY", "MultiplierZ"]),
@@ -54,14 +83,26 @@ public static class SapObjectTables
         ["Area Loads - Wind Pressure Coefficients"] = ("area", true, ["LoadPat", "Windward", "Cp", "DistType", "XComponent", "YComponent", "ZComponent"]),
     };
 
+    /// <summary>The load tables the Modeler also writes from its own loads keep their other rows under the table's name
+    /// with this after it, so they never mix with the Modeler's own load tables; they go into the same SAP2000 table.</summary>
+    public const string Kept = " (kept)";
+
+    public static bool IsNative(string table) => table.EndsWith(Kept, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The SAP2000 table a kept table's rows go into.</summary>
+    public static string SapName(string table) => IsNative(table) ? Name(table)[..^Kept.Length] : Name(table);
+
     /// <summary>The field that names the object in each kind's tables.</summary>
     public static string KeyField(string kind) => kind switch { "frame" => "Frame", "area" => "Area", _ => "Joint" };
+
+    /// <summary>SAP2000 26.3's auto hinge tables (Auto Hinge Assignment Data): Caltrans/idealized, ASCE 41-13 and 41-17.</summary>
+    public static readonly string[] AutoHinges = ["Frame Hinge Assigns 03 - Auto Caltrans - Flexural Hinge", "Frame Hinge Assigns 10 - Auto ASCE 41-13 - Concrete Beam", "Frame Hinge Assigns 11 - Auto ASCE 41-13 - Concrete Column", "Frame Hinge Assigns 12 - Auto ASCE 41-13 - Steel Beam", "Frame Hinge Assigns 13 - Auto ASCE 41-13 - Steel Column", "Frame Hinge Assigns 14 - Auto ASCE 41-13 - Steel Brace", "Frame Hinge Assigns 17 - Auto ASCE 41-17 - Concrete Beam", "Frame Hinge Assigns 18 - Auto ASCE 41-17 - Concrete Column", "Frame Hinge Assigns 19 - Auto ASCE 41-17 - Steel Beam", "Frame Hinge Assigns 20 - Auto ASCE 41-17 - Steel Column", "Frame Hinge Assigns 21 - Auto ASCE 41-17 - Steel Brace"];
 
     /// <summary>Tables the Modeler's own model also carries (a coarser way): S2kReader keeps SAP2000's row on the object too,
     /// and S2kWriter writes that row in place of the one it makes from the model.</summary>
     public static readonly string[] AlsoNative = ["Joint Added Mass Assignments", "Joint Spring Assignments 1 - Uncoupled", "Frame Offset Along Length Assignments",
-        "Frame Hinge Assigns 00 - Hinge Distribution Type", "Frame Hinge Assigns 02 - User Defined Properties", "Frame Hinge Assigns 09 - Hinge Overwrites"];
-
+        "Frame Hinge Assigns 00 - Hinge Distribution Type", "Frame Hinge Assigns 02 - User Defined Properties", "Frame Hinge Assigns 09 - Hinge Overwrites",
+        .. AutoHinges];
     public static bool Has(string table) => Tables.ContainsKey(table);
 
     /// <summary>The table's name as the catalogue spells it.</summary>

@@ -132,6 +132,14 @@ public static class FromStructural
         foreach (var p in m.LoadPatterns)
             a.Patterns.Add(new Pattern(p.Name, p.Type, p.SelfWeight, loaded.Contains(p.Name) || p.Extra.Count > 0));
 
+        // Active degrees of freedom (ANALYSIS OPTIONS: ACTIVEDOF "UX UZ RY" for a plane frame).
+        foreach (var raw in m.Passthrough.Where(p => p.Heading.Trim().Equals("ANALYSIS OPTIONS", StringComparison.OrdinalIgnoreCase)).SelectMany(p => p.Lines)
+                     .Concat(m.UnparsedLines.TryGetValue("ANALYSIS OPTIONS", out var opt) ? opt : []))
+            if (E2kText.Value(E2kText.Tokenize(raw), "ACTIVEDOF") is { Length: > 0 } dofs)
+            {
+                var on = dofs.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                a.ActiveDof = Dofs.Select(d => on.Contains(d, StringComparer.OrdinalIgnoreCase)).ToArray();
+            }
         ReadCases(m, a);
         ReadCombos(m, a);
         ReadMass(m, a);

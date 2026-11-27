@@ -702,6 +702,14 @@ public static class ModelerFieldSteps
         ctx.Tool("define_frame_shape", """{"name":"CPM-PIPE","shape":"Steel Pipe","material":"CPM-S355","dims":{"D":0.3,"TW":0.01}}""", null, "tool define_frame_shape, a pipe");
         ctx.Tool("define_frame_shape", """{"name":"CPM-ANGLE","shape":"Steel Angle","material":"CPM-S355","dims":{"D":0.1,"B":0.1,"TF":0.01,"TW":0.01}}""", null, "tool define_frame_shape, an angle");
         ctx.Refused("define_frame_shape", """{"name":"CPM-BAD","shape":"Steel Pipe","material":"CPM-S355","dims":{"D":0.3}}""", "needs TW", "tool define_frame_shape says no to a missing dimension");
+        // The shapes the .e2k has no line for, kept by their ETABS table fields (FrameTableShapes); the ETABS part reads them back.
+        var concTrap = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
+        ctx.Tool("define_frame_shape", """{"name":"CPM-TRAP","shape":"Concrete Trapezoid","material":""" + Q(concTrap) + ""","extras":{"t3":"0.6","t2":"0.4","t2b":"0.3","Color":"Red"}}""",
+            _ => FieldContext.Expect(modeler.Model.FrameSections.Find(s => s.Name == "CPM-TRAP")?.Shape == "Concrete Trapezoid", "CPM-TRAP is not a trapezoid in the model"), "tool define_frame_shape, a concrete trapezoid by its table fields");
+        ctx.Tool("define_frame_shape", """{"name":"CPM-NP","shape":"Nonprismatic","rows":[{"StartSect":"CPM-W","EndSect":"CPM-W","LengthType":"Proportional","Length":"1","EI33Var":"Parabolic","EI22Var":"Linear"},{"StartSect":"CPM-W","EndSect":"CPM-PIPE","LengthType":"Proportional","Length":"1","EI33Var":"Linear","EI22Var":"Linear"}]}""",
+            _ => FieldContext.Expect(CsiProMax.Model.FrameTableShapes.Rows(modeler.Model.FrameSections.Find(s => s.Name == "CPM-NP")!).Count == 2, "CPM-NP does not have its 2 segments"), "tool define_frame_shape, a nonprismatic section of 2 segments");
+        ctx.Tool("frame_section_to_sd", """{"name":"CPM-ANGLE","convert":false}""",
+            _ => FieldContext.Expect(modeler.Model.FrameSections.Find(s => s.Name == "SDCPM-ANGLE")?.Shape == "SD Section", "Copy to SD Section made no SDCPM-ANGLE"), "tool frame_section_to_sd, Copy to SD Section");
         var conc = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
         ctx.Tool("define_shell_type", """{"name":"CPM-DROP","kind":"slab","slab_type":"Drop","modeling":"ShellThick","thickness":0.3,"material":""" + Q(conc) + ""","modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool define_shell_type, a cracked drop panel");
         ctx.Tool("define_shell_type", """{"name":"CPM-RIB","kind":"slab","slab_type":"Ribbed","modeling":"ShellThin","thickness":0.1,"material":""" + Q(conc) + ""","overall_depth":0.4,"rib_width_top":0.15,"rib_width_bottom":0.125,"rib_spacing":0.9,"rib_direction":1}""", null, "tool define_shell_type, a ribbed slab");

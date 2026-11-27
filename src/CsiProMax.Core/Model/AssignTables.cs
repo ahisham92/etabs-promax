@@ -92,7 +92,7 @@ public static class AssignTables
         .Split('|').Select(f => f.Split('=')).Select(f => (f[0], f[1])).ToArray();
 
     /// <summary>The tables with a row per edge or corner of the object, not one row.</summary>
-    public static readonly string[] ManyRows = [JointForceSize, FrameTemperature, AreaTemperature, "Area Load Assignments - Non-uniform", "Area Load Assignments - Wind Pressure Coefficients", "Area Edge Release Assignments", "Area Assignments - Edge Releases", "Area Assignments - Thickness Overwrites", "Area Assignments - Wall Hinge - Auto Fiber PM3", "Area Assignments - Slab Rib Locations",
+    public static readonly string[] ManyRows = [JointForceSize, FrameTemperature, AreaTemperature, "Area Load Assignments - Non-uniform", "Area Load Assignments - Wind Pressure Coefficients", "Area Edge Release Assignments", "Area Assignments - Edge Releases", "Area Assignments - Thickness Overwrites", "Area Assignments - Insertion Point", "Area Assignments - Wall Hinge - Auto Fiber PM3", "Area Assignments - Slab Rib Locations",
         .. SapObjectTables.Tables.Where(t => t.Value.Many).Select(t => t.Key)];
 
     /// <summary>The kind of objects an assignment is for.</summary>

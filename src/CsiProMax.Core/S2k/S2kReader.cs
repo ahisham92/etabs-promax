@@ -205,6 +205,26 @@ public static partial class S2kReader
             areaJoints[name] = corners;
         }
 
+        // Assign > Area: stiffness modifiers, added mass, the typical local axis angle and the material overwrite
+        // (Area Section Assignments' MatProp), onto each area, so its forms show what the file has.
+        var areaAssignsByName = new Dictionary<string, AreaAssign>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (an, aw) in areaAt) if (m.AreaAssigns.Find(x => x.Label == aw.Label && x.Story == aw.Story) is { } aa) areaAssignsByName[an] = aa;
+        void AreaRow(AreaAssign a, string table, Dictionary<string, string> row) => AssignTables.Set(a, new Dictionary<string, List<Dictionary<string, string>>> { [table] = [row] });
+        foreach (var r in t.GetValueOrDefault("AREA SECTION ASSIGNMENTS") ?? [])
+            if (areaAssignsByName.TryGetValue(S(r, "Area"), out var aa) && S(r, "MatProp") is { Length: > 0 } mp && !mp.Equals("Default", StringComparison.OrdinalIgnoreCase))
+                AreaRow(aa, "Area Assignments - Material Overwrites", new() { ["Material"] = mp });
+        foreach (var r in Use("AREA STIFFNESS MODIFIERS"))
+            if (areaAssignsByName.TryGetValue(S(r, "Area"), out var aa))
+                PropertyDefs.SetModifiers(aa.Extra, PropertyDefs.ShellModifiers, new Dictionary<string, double>
+                {
+                    ["F11MOD"] = D(r, "f11", 1), ["F22MOD"] = D(r, "f22", 1), ["F12MOD"] = D(r, "f12", 1), ["M11MOD"] = D(r, "m11", 1), ["M22MOD"] = D(r, "m22", 1),
+                    ["M12MOD"] = D(r, "m12", 1), ["V13MOD"] = D(r, "v13", 1), ["V23MOD"] = D(r, "v23", 1), ["MMOD"] = D(r, "MassMod", 1), ["WMOD"] = D(r, "WeightMod", 1),
+                });
+        foreach (var r in Use("AREA ADDED MASS ASSIGNMENTS"))
+            if (areaAssignsByName.TryGetValue(S(r, "Area"), out var aa) && S(r, "MassPerArea").Length > 0) AreaRow(aa, "Area Assignments - Additional Mass", new() { ["AddedMass"] = S(r, "MassPerArea") });
+        foreach (var r in Use("AREA LOCAL AXES ASSIGNMENTS 1 - TYPICAL"))
+            if (areaAssignsByName.TryGetValue(S(r, "Area"), out var aa) && S(r, "Angle").Length > 0) AreaRow(aa, "Area Assignments - Local Axes", new() { ["Angle"] = S(r, "Angle") });
+
         // Joint assignments: supports and diaphragms.
         var pointAssigns = new Dictionary<(string, string), PointAssign>();
         PointAssign PointOf(string joint)
@@ -234,7 +254,7 @@ public static partial class S2kReader
         var notRun = Use("LOAD CASE DEFINITIONS").Where(r => S(r, "RunCase", "Yes").Equals("No", StringComparison.OrdinalIgnoreCase)).Select(r => S(r, "Case"))
             .Where(n => RunCases.List(m).Any(c => c.Name == n)).ToList();
         if (notRun.Count > 0) RunCases.SetNotRun(m, notRun);
-        Loads(m, Use, joints, frameAt, areaAt, Where, storyNames, notes);
+        Loads(m, Use, joints, frameAt, areaAt, Where, storyNames, notes, PointOf);
 
         // SAP2000's own load tables (every Load Pattern, Load Case and Load Combination field) go into its load forms.
         SapLoadTables.Read(m, t, known);
@@ -756,8 +776,27 @@ public static partial class S2kReader
 
     private static void Loads(StructuralModel m, Func<string, List<Dictionary<string, string>>> use, Dictionary<string, Xyz> joints,
         Dictionary<string, (string Label, string Story)> frameAt, Dictionary<string, (string Label, string Story)> areaAt,
-        Func<string, (int Level, PlanPoint Point)> where, List<string> stories, List<string> notes)
+        Func<string, (int Level, PlanPoint Point)> where, List<string> stories, List<string> notes, Func<string, PointAssign> pointOf)
     {
+        // A row the Modeler cannot hold as its own load (another coordinate system, a moment along the frame, a joint
+        // pattern, a gradient, a curvature) is kept on its object as SAP2000 has it (SapObjectTables, " (kept)").
+        static bool Global(Dictionary<string, string> r) => S(r, "CoordSys", "GLOBAL").Equals("GLOBAL", StringComparison.OrdinalIgnoreCase);
+        static bool Plain(Dictionary<string, string> r)
+        {
+            var cs = S(r, "CoordSys", "GLOBAL").ToUpperInvariant();
+            var dir = S(r, "Dir", "Gravity").ToUpperInvariant();
+            return cs == "GLOBAL" ? dir is "GRAVITY" or "X" or "Y" or "Z" : cs == "LOCAL" && dir is "1" or "2" or "3";
+        }
+        void Keep(Assign? a, string table, Dictionary<string, string> r, string key)
+        {
+            if (a is null) return;
+            a.Tables ??= new(StringComparer.OrdinalIgnoreCase);
+            var full = table + SapObjectTables.Kept;
+            var fields = SapObjectTables.Tables[full].Fields;
+            (a.Tables.TryGetValue(full, out var list) ? list : a.Tables[full] = []).Add(r.Where(kv => !kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase) && fields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                .ToDictionary(kv => fields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal));
+        }
+        LineAssign? FrameOf((string Label, string Story) f) => m.LineAssigns.Find(x => x.Label == f.Label && x.Story == f.Story);
         static string Dir(string sap) => sap.ToUpperInvariant() switch
         {
             "GRAVITY" => "GRAV", "X" => "X", "Y" => "Y", "Z" => "Z", "1" => "1", "2" => "2", "3" => "3",
@@ -767,7 +806,7 @@ public static partial class S2kReader
         foreach (var r in use("FRAME LOADS - DISTRIBUTED"))
         {
             if (!frameAt.TryGetValue(S(r, "Frame"), out var f)) continue;
-            if (S(r, "Type", "Force").Equals("Moment", StringComparison.OrdinalIgnoreCase)) { notes.Add($"A distributed moment on frame {S(r, "Frame")} has no place in the Modeler yet; left out."); continue; }
+            if (S(r, "Type", "Force").Equals("Moment", StringComparison.OrdinalIgnoreCase) || !Plain(r)) { Keep(FrameOf(f), "Frame Loads - Distributed", r, "Frame"); continue; }
             double a = D(r, "FOverLA"), b = D(r, "FOverLB", a);
             double from = D(r, "RelDistA", 0), to = D(r, "RelDistB", 1);
             if (S(r, "DistType").StartsWith("Abs", StringComparison.OrdinalIgnoreCase) && lengths.TryGetValue(f, out var len) && len > 0) { from = D(r, "AbsDistA") / len; to = D(r, "AbsDistB") / len; }
@@ -779,26 +818,42 @@ public static partial class S2kReader
         foreach (var r in use("FRAME LOADS - POINT"))
         {
             if (!frameAt.TryGetValue(S(r, "Frame"), out var f)) continue;
+            if (!Plain(r)) { Keep(FrameOf(f), "Frame Loads - Point", r, "Frame"); continue; }
             var rel = D(r, "RelDist", 0.5);
             if (S(r, "DistType").StartsWith("Abs", StringComparison.OrdinalIgnoreCase) && lengths.TryGetValue(f, out var len) && len > 0) rel = D(r, "AbsDist") / len;
             var moment = S(r, "Type").Equals("Moment", StringComparison.OrdinalIgnoreCase);
             m.LineLoads.Add(new LineLoad { Object = f.Label, Story = f.Story, Tokens = AnalysisDefs.LoadTokens("frame_point", S(r, "LoadPat"),
                 new Dictionary<string, double> { [moment ? "moment" : "value"] = D(r, "Force", D(r, "Moment")), ["distance"] = rel }, Dir(S(r, "Dir", "Gravity"))) });
         }
-        Temperatures(use("FRAME LOADS - TEMPERATURE"), "Frame", frameAt, "frame_temperature", (o, s, tk) => m.LineLoads.Add(new LineLoad { Object = o, Story = s, Tokens = tk }));
+        // A frame temperature by element is the Modeler's own; a gradient or a joint pattern is kept as SAP2000 has it.
+        var frameTemps = use("FRAME LOADS - TEMPERATURE");
+        foreach (var r in frameTemps.Where(r => !(S(r, "Type", "Temperature").Equals("Temperature", StringComparison.OrdinalIgnoreCase) && S(r, "JtPattern").Length == 0)))
+            if (frameAt.TryGetValue(S(r, "Frame"), out var f)) Keep(FrameOf(f), "Frame Loads - Temperature", r, "Frame");
+        Temperatures(frameTemps.Where(r => S(r, "Type", "Temperature").Equals("Temperature", StringComparison.OrdinalIgnoreCase) && S(r, "JtPattern").Length == 0).ToList(), "Frame", frameAt, "frame_temperature", (o, s, tk) => m.LineLoads.Add(new LineLoad { Object = o, Story = s, Tokens = tk }));
         foreach (var r in use("FRAME LOADS - STRAIN"))
             if (frameAt.TryGetValue(S(r, "Frame"), out var f))
-                m.LineLoads.Add(new LineLoad { Object = f.Label, Story = f.Story, Tokens = AnalysisDefs.LoadTokens("frame_strain", S(r, "LoadPat"), new Dictionary<string, double> { ["strain"] = D(r, "Value") }, S(r, "Component").Replace("Strain", "", StringComparison.OrdinalIgnoreCase)) });
+            {
+                var component = S(r, "Component", "Strain11");
+                if (S(r, "JtPattern").Length > 0 || !component.StartsWith("Strain", StringComparison.OrdinalIgnoreCase)) { Keep(FrameOf(f), "Frame Loads - Strain", r, "Frame"); continue; }
+                m.LineLoads.Add(new LineLoad { Object = f.Label, Story = f.Story, Tokens = AnalysisDefs.LoadTokens("frame_strain", S(r, "LoadPat"), new Dictionary<string, double> { ["strain"] = D(r, "Strain", D(r, "Value")) }, component[6..]) });
+            }
 
+        AreaAssign? AreaOf((string Label, string Story) x) => m.AreaAssigns.Find(y => y.Label == x.Label && y.Story == x.Story);
         foreach (var r in use("AREA LOADS - UNIFORM"))
         {
             if (!areaAt.TryGetValue(S(r, "Area"), out var a)) continue;
+            if (!Plain(r)) { Keep(AreaOf(a), "Area Loads - Uniform", r, "Area"); continue; }
             m.AreaLoads.Add(new AreaLoad { Object = a.Label, Story = a.Story, Tokens = AnalysisDefs.LoadTokens("shell_uniform", S(r, "LoadPat"), new Dictionary<string, double> { ["value"] = D(r, "UnifLoad") }, Dir(S(r, "Dir", "Gravity"))) });
         }
-        Temperatures(use("AREA LOADS - TEMPERATURE"), "Area", areaAt, "shell_temperature", (o, s, tk) => m.AreaLoads.Add(new AreaLoad { Object = o, Story = s, Tokens = tk }));
+        var areaTemps = use("AREA LOADS - TEMPERATURE");
+        bool PlainTemp(Dictionary<string, string> r) => S(r, "Type", "Temperature").Equals("Temperature", StringComparison.OrdinalIgnoreCase) && S(r, "JtPattern").Length == 0;
+        foreach (var r in areaTemps.Where(r => !PlainTemp(r)))
+            if (areaAt.TryGetValue(S(r, "Area"), out var a)) Keep(AreaOf(a), "Area Loads - Temperature", r, "Area");
+        Temperatures(areaTemps.Where(PlainTemp).ToList(), "Area", areaAt, "shell_temperature", (o, s, tk) => m.AreaLoads.Add(new AreaLoad { Object = o, Story = s, Tokens = tk }));
         foreach (var r in use("AREA LOADS - STRAIN"))
             if (areaAt.TryGetValue(S(r, "Area"), out var a))
-                m.AreaLoads.Add(new AreaLoad { Object = a.Label, Story = a.Story, Tokens = AnalysisDefs.LoadTokens("shell_strain", S(r, "LoadPat"), new Dictionary<string, double> { ["strain"] = D(r, "Value") }, S(r, "Component").Replace("Strain", "", StringComparison.OrdinalIgnoreCase)) });
+                if (S(r, "JtPattern").Length > 0 || !S(r, "Component", "Strain11").StartsWith("Strain", StringComparison.OrdinalIgnoreCase)) Keep(AreaOf(a), "Area Loads - Strain", r, "Area");
+                else m.AreaLoads.Add(new AreaLoad { Object = a.Label, Story = a.Story, Tokens = AnalysisDefs.LoadTokens("shell_strain", S(r, "LoadPat"), new Dictionary<string, double> { ["strain"] = D(r, "Strain", D(r, "Value")) }, S(r, "Component").Replace("Strain", "", StringComparison.OrdinalIgnoreCase)) });
 
         void Joint(string table, string kind, (string Sap, string Key)[] keys)
         {
@@ -806,6 +861,7 @@ public static partial class S2kReader
             {
                 var j = S(r, "Joint");
                 if (!joints.ContainsKey(j)) continue;
+                if (!Global(r)) { Keep(pointOf(j), table.Equals("JOINT LOADS - FORCE", StringComparison.OrdinalIgnoreCase) ? "Joint Loads - Force" : "Joint Loads - Ground Displacement", r, "Joint"); continue; }
                 var w = where(j);
                 var v = keys.Where(k => D(r, k.Sap) != 0).ToDictionary(k => k.Key, k => D(r, k.Sap));
                 m.PointLoads.Add(new PointLoad { Object = w.Point.Name, Story = stories[w.Level], Tokens = AnalysisDefs.LoadTokens(kind, S(r, "LoadPat"), v, "") });

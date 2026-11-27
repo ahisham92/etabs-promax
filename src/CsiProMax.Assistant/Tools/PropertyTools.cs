@@ -59,18 +59,43 @@ public static class PropertyTools
                 var mat = Core(() => link.Edit(m => PropertyDefs.SetMaterial(m, a.Need("name"), Was(a), a.Need("type"), a.Text("grade") is { Length: > 0 } g ? g : null, Values(a, "values", true), Texts(a), RowsOf(a))));
                 return new JsonObject { ["material"] = mat.Name, ["type"] = mat.Type };
             }, a => $"Define the material {a.Text("name")}"),
+        new("frame_section_to_sd",
+            "Define > Frame Sections > Convert to SD Section (convert true: the section itself becomes a Section Designer section, its members keep it) or Copy to SD Section (convert false: a new Section Designer section named SD + its name).",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"convert":{"type":"boolean"}}}""",
+            Ask.Changes, (a, e) =>
+            {
+                var link = Offline(e);
+                var convert = a.TryGetProperty("convert", out var c) && c.ValueKind == JsonValueKind.True;
+                var s = Core(() => link.Edit(m => FrameTableShapes.ToSd(m, a.Need("name"), convert)));
+                return new JsonObject { ["name"] = s.Name, ["shape"] = s.Shape };
+            }, a => $"Section Designer section from {a.Text("name")}"),
         new("define_frame_shape",
-            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod. dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. extras: the form's other fields, by the program's table field names (Color, Notes; concrete NotSizeType NotAutoFact NotUserSize RigidZone; steel FilletRad, tube CornerRad; MirrorAbt2 MirrorAbt3); given, they replace the ones it has. 'was': its name now; members keep it under a new name.",
-            """{"type":"object","required":["name","shape","material","dims"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
+            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod (with .e2k dims), and every other shape of the program's list by its table fields in extras (Filled Steel Tube/Pipe, BU I Cover Plate, Standard Joist Section, Custom Steel Joist, Steel Plate, Steel Castellated, Steel Cellular, Concrete Trapezoid, Concrete Encasement Rectangle/Circle, Precast I, Concrete Cross, Box, Pipe, Cold Formed C/Z/Hat, Buckling Restrained Brace, General, Nonprismatic (rows: one per segment), Auto Select (rows: IncludedSec one per section), SD Section, Composite Shear Wall). dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. extras: the form's other fields, by the program's table field names (Color, Notes; concrete NotSizeType NotAutoFact NotUserSize RigidZone; steel FilletRad, tube CornerRad; MirrorAbt2 MirrorAbt3); given, they replace the ones it has. 'was': its name now; members keep it under a new name.",
+            """{"type":"object","required":["name","shape"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}},"rows":{"type":"array","items":{"type":"object","additionalProperties":{"type":"string"}}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
                 var dims = Values(a, "dims", true); var mods = Values(a, "modifiers", true);
                 Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); return 0; });
                 CheckExtras(a, PropertyDefs.FrameExtraFields(a.Need("shape")), "A " + a.Need("shape") + " section");
+                var shape = a.Need("shape");
+                var fields = a.TryGetProperty("extras", out var ex0) && ex0.ValueKind == JsonValueKind.Object
+                    ? ex0.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()) : new Dictionary<string, string>();
+                if (FrameTableShapes.Is(shape))
+                {
+                    var rows = a.TryGetProperty("rows", out var rs) && rs.ValueKind == JsonValueKind.Array
+                        ? rs.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Object).Select(r => (IReadOnlyDictionary<string, string>)r.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString())).ToList() : null;
+                    var t = Core(() => link.Edit(m =>
+                    {
+                        var sec = FrameTableShapes.Set(m, a.Need("name"), Was(a), shape, a.Text("material"), fields, rows);
+                        if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.FrameModifiers, mods);
+                        return sec;
+                    }));
+                    return new JsonObject { ["section"] = t.Name, ["shape"] = t.Shape };
+                }
                 var s = Core(() => link.Edit(m =>
                 {
-                    var sec = PropertyDefs.SetShape(m, a.Need("name"), Was(a), a.Need("shape"), a.Need("material"), dims);
+                    var sec = PropertyDefs.SetShape(m, a.Need("name"), Was(a), shape, a.Need("material"), dims);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.FrameModifiers, mods);
                     if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
                         PropertyDefs.SetFrameExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
@@ -79,8 +104,8 @@ public static class PropertyTools
                 return new JsonObject { ["section"] = s.Name, ["shape"] = s.Shape, ["area"] = s.Area };
             }, a => $"Define the frame section {a.Text("name")}"),
         new("define_shell_type",
-            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25). extras: the form's other fields (NotSizeType NotAutoFact NotUserSize Color Notes; a wall's RigidZone; MatAngle and BendThick for SAP2000); given, they replace the ones it has.",
-            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
+            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); a Waffle slab takes the same with rib_spacing for the ribs parallel to the 1 axis and rib_spacing_2 for those parallel to the 2 axis; a Layered section may leave material empty (its layers carry the materials); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25). extras: the form's other fields (NotSizeType NotAutoFact NotUserSize Color Notes; a wall's RigidZone; MatAngle and BendThick for SAP2000); given, they replace the ones it has.",
+            """{"type":"object","required":["name","kind","thickness"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_spacing_2":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
@@ -90,8 +115,9 @@ public static class PropertyTools
                 CheckExtras(a, PropertyDefs.ShellExtraFields(wall), wall ? "A wall section" : "A slab section");
                 var s = Core(() => link.Edit(m =>
                 {
-                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"),
-                        a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1)) : null);
+                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Text("material", ""), a.Flag("one_way"),
+                        a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1),
+                            a.TryGetProperty("rib_spacing_2", out _) ? a.Number("rib_spacing_2") : null) : null);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
                     if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
                         PropertyDefs.SetShellExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
@@ -168,6 +194,22 @@ public static class PropertyTools
             "Assigns to slabs and walls (label@story) what Assign > Shell offers: modifiers (F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD) and spring (an area spring property, e.g. soil under a mat; \"\" takes it off); opening (Assign > Shell > Opening: true makes the area an opening, false a slab or wall again); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Area Assignments - Additional Mass\": [{\"AddedMass\": \"0.1\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
             """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"opening":{"type":"boolean"},"tables":{"type":"object"}}}""",
             Ask.Changes, AssignShells, a => "Assign shell data"),
+        new("reverse_objects",
+            "SAP2000's Assign > Area > Reverse Local 3 and Assign > Cable/Link > Reverse Connectivity: reverses the corner order of areas (label@story; kind area, the default), so the local 3 axis points the other way, or the I and J ends of cables and links (kind cable or link, objects by SAP2000 name). keep: \"global\" (default) keeps the assignments in the same global orientation (an area load along local 3 changes sign), \"local\" keeps them in the same local orientation.",
+            """{"type":"object","required":["objects"],"properties":{"kind":{"type":"string","enum":["area","cable","link"]},"objects":{"type":"array","items":{"type":"string"}},"keep":{"type":"string","enum":["global","local"]}}}""",
+            Ask.Changes, ReverseObjects, a => "Reverse local 3"),
+        new("assign_sap_object_data",
+            "SAP2000's Assign > Cable, Tendon, Solid and Link/Support items on those objects of a model opened from a .s2k (kind cable, tendon, solid or link; objects by SAP2000 name): tables, rows of SAP2000's own assignment tables by full table name, e.g. {\"Cable Section Assignments\": [{\"CableSect\": \"CAB1\"}]} (sap_object_data lists the tables and each object's rows; [] takes a table off).",
+            """{"type":"object","required":["kind","objects","tables"],"properties":{"kind":{"type":"string","enum":["cable","tendon","solid","link"]},"objects":{"type":"array","items":{"type":"string"}},"tables":{"type":"object"}}}""",
+            Ask.Changes, AssignSapObjects, a => $"Assign {a.Text("kind", "object")} data"),
+        new("sap_object_data",
+            "SAP2000's cables, tendons, solids and links of a model opened from a .s2k: each with its joints and where they are, SAP2000's assignment tables of each kind with their fields, and with objects (and kind) each object's rows.",
+            """{"type":"object","properties":{"kind":{"type":"string","enum":["cable","tendon","solid","link"]},"objects":{"type":"array","items":{"type":"string"}}}}""",
+            Ask.Never, (a, e) => SapObjectData(Offline(e).Model, a)),
+        new("switch_solid_faces",
+            "SAP2000's Assign > Solid > Switch Faces (Modify Solid Faces): the solids' corners renumbered so face and with (1 to 6) change places; move (default true) moves the face assignments (surface springs) with their face.",
+            """{"type":"object","required":["objects","face","with"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"face":{"type":"integer"},"with":{"type":"integer"},"move":{"type":"boolean"}}}""",
+            Ask.Changes, SwitchSolidFaces, a => "Switch solid faces"),
         new("assign_joint_data",
             "Assigns to joints (point@story) what Assign > Joint offers: restraint (any of UX UY UZ RX RY RZ; [] frees the joint) and spring (a point spring property; \"\" takes it off); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Joint Assignments - Additional Mass\": [{\"MassXY\": \"2\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
             """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"restraint":{"type":"array","items":{"type":"string"}},"spring":{"type":"string"},"tables":{"type":"object"}}}""",
@@ -389,6 +431,101 @@ public static class PropertyTools
         }));
     }
 
+    private static JsonNode ReverseObjects(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var m0 = link.Model;
+        if (a.Text("kind", "area") is "cable" or "link")
+        {
+            var kind = a.Text("kind");
+            var names = a.Texts("objects");
+            if (names.Count == 0) throw new ToolInputException("Give the objects.");
+            var have = SapOtherObjects.List(m0).Where(o => o.Kind == kind).Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+            if (names.FirstOrDefault(n => !have.Contains(n)) is { } missing) throw new ToolInputException($"There is no {kind} '{missing}'.");
+            return Core(() => link.Edit(m => { SapOtherObjects.Reverse(m, kind, names); return (JsonNode)new JsonObject { ["reversed"] = names.Count }; }));
+        }
+        var objects = Objects(a, (l, s) => m0.AreaAssigns.Exists(x => x.Label == l && x.Story == s), "area");
+        var global = a.Text("keep", "global") != "local";
+        // An area object is shared by every story that has its label: reversing it on some stories only would reverse it on all.
+        foreach (var label in objects.Select(o => o.Item1).Distinct())
+        {
+            var on = m0.AreaAssigns.Where(x => x.Label == label).Select(x => x.Story).ToList();
+            var picked = objects.Where(o => o.Item1 == label).Select(o => o.Item2).ToHashSet();
+            if (on.Exists(s => !picked.Contains(s))) throw new ToolInputException($"The area {label} is the same object on stories {string.Join(", ", on)}: select it on each of them to reverse it.");
+        }
+        return Core(() => link.Edit(m =>
+        {
+            foreach (var label in objects.Select(o => o.Item1).Distinct())
+            {
+                var area = m.Area(label) ?? throw new ArgumentException($"There is no area {label}.");
+                // SAP2000 keeps corner 1 and runs the others the other way round.
+                area.PointNames = [area.PointNames[0], .. Enumerable.Reverse(area.PointNames.Skip(1))];
+                if (area.StoriesBelow.Count == area.PointNames.Count) area.StoriesBelow = [area.StoriesBelow[0], .. Enumerable.Reverse(area.StoriesBelow.Skip(1))];
+                if (!global) continue;
+                foreach (var load in m.AreaLoads.Where(x => x.Object == label))
+                {
+                    var dir = E2k.E2kText.Value(load.Tokens, "DIR") ?? "";
+                    if (!dir.Trim('"').Equals("Local-3", StringComparison.OrdinalIgnoreCase) && !dir.Trim('"').Equals("3", StringComparison.Ordinal)) continue;
+                    for (var i = 0; i + 1 < load.Tokens.Count; i++)
+                        if (load.Tokens[i] is "FVAL" or "UNIFLOAD" && double.TryParse(load.Tokens[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                            load.Tokens[i + 1] = (-v).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+                }
+            }
+            return (JsonNode)new JsonObject { ["reversed"] = objects.Count };
+        }));
+    }
+
+    private static JsonNode AssignSapObjects(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var kind = a.Need("kind");
+        if (!SapOtherObjects.Kinds.Contains(kind)) throw new ToolInputException("kind is cable, tendon, solid or link.");
+        var names = a.Texts("objects");
+        if (names.Count == 0) throw new ToolInputException("Give the objects.");
+        var tables = AssignRows(a) ?? throw new ToolInputException("Give the tables to set.");
+        var have = SapOtherObjects.List(link.Model).Where(o => o.Kind == kind).Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+        if (names.FirstOrDefault(n => !have.Contains(n)) is { } missing) throw new ToolInputException($"There is no {kind} '{missing}' (only a model opened from a SAP2000 file has them).");
+        Core(() => { SapOtherObjects.Check(kind, tables); return 0; });
+        return Core(() => link.Edit(m => { SapOtherObjects.Set(m, kind, names, tables); return (JsonNode)new JsonObject { ["assigned"] = names.Count }; }));
+    }
+
+    private static JsonNode SapObjectData(StructuralModel m, JsonElement a)
+    {
+        var all = SapOtherObjects.List(m);
+        var o = new JsonObject
+        {
+            ["objects_by_kind"] = new JsonObject(SapOtherObjects.Kinds.Select(k => KeyValuePair.Create(k, (JsonNode?)new JsonArray(all.Where(x => x.Kind == k).Select(x => (JsonNode)new JsonObject
+            {
+                ["name"] = x.Name, ["joints"] = new JsonArray(x.Joints.Select(j => (JsonNode)j).ToArray()),
+                ["points"] = new JsonArray(x.Points.Select(p => (JsonNode)new JsonArray(p[0], p[1], p[2])).ToArray()),
+            }).ToArray())))),
+            ["tables"] = new JsonObject(SapOtherObjects.Tables.Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
+            {
+                ["kind"] = t.Value.Kind, ["many"] = t.Value.Many, ["fields"] = new JsonArray(t.Value.Fields.Select(f => (JsonNode)f).ToArray()),
+            }))),
+        };
+        if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty("objects", out _) && a.Text("kind", "") is { Length: > 0 } kind)
+            o["objects"] = new JsonArray(a.Texts("objects").Select(n => (JsonNode)new JsonObject
+            {
+                ["object"] = n, ["kind"] = kind,
+                ["tables"] = new JsonObject(SapOtherObjects.RowsOf(m, kind, n).Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonArray(t.Value.Select(r => (JsonNode)new JsonObject(r.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)))).ToArray())))),
+            }).ToArray());
+        return o;
+    }
+
+    private static JsonNode SwitchSolidFaces(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var names = a.Texts("objects");
+        if (names.Count == 0) throw new ToolInputException("Give the solids.");
+        var have = SapOtherObjects.List(link.Model).Where(o => o.Kind == "solid").Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+        if (names.FirstOrDefault(n => !have.Contains(n)) is { } missing) throw new ToolInputException($"There is no solid '{missing}' (only a model opened from a SAP2000 file has them).");
+        var face = (int)a.Number("face"); var with = (int)a.Number("with");
+        if (face is < 1 or > 6 || with is < 1 or > 6) throw new ToolInputException("A solid has faces 1 to 6.");
+        var move = !a.TryGetProperty("move", out var mv) || mv.ValueKind != JsonValueKind.False;
+        return Core(() => link.Edit(m => { SapOtherObjects.SwitchFaces(m, names, face, with, move); return (JsonNode)new JsonObject { ["switched"] = names.Count }; }));
+    }
+
     /// <summary>The tables argument: rows by table name; true and false become Yes and No, as the tables hold them.</summary>
     internal static Dictionary<string, List<Dictionary<string, string>>>? AssignRows(JsonElement a)
     {
@@ -484,8 +621,9 @@ public static class PropertyTools
                 ["dims"] = new JsonObject((PropertyDefs.Shape(s.Shape)?.Dims ?? ["D", "B"]).Where(d => s.Number(d) is not null).Select(d => KeyValuePair.Create(d, (JsonNode?)JsonValue.Create(s.Number(d)!.Value)))),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers)),
                 ["extras"] = new JsonObject(PropertyDefs.FrameExtras(s).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+                ["rows"] = FrameTableShapes.Is(s.Shape) && s.Tables is not null && s.Tables.TryGetValue(s.Shape, out var fr) && fr.Count > 1 ? JsonSerializer.SerializeToNode(fr) : null,
             }).ToArray()),
-            ["frame_extra_fields"] = new JsonObject(PropertyDefs.Shapes.Select(x => KeyValuePair.Create(x.Name, (JsonNode?)new JsonArray(PropertyDefs.FrameExtraFields(x.Name).Select(f => (JsonNode)f).ToArray())))),
+            ["frame_extra_fields"] = new JsonObject(PropertyDefs.Shapes.Select(x => x.Name).Concat(FrameTableShapes.All.Keys).Select(x => KeyValuePair.Create(x, (JsonNode?)new JsonArray(PropertyDefs.FrameExtraFields(x).Select(f => (JsonNode)f).ToArray())))),
             ["shell_sections"] = new JsonArray(m.ShellSections.Select(s => (JsonNode)new JsonObject
             {
                 ["name"] = s.Name, ["wall"] = s.IsWall, ["material"] = s.Material, ["thickness"] = s.Thickness,
@@ -497,7 +635,7 @@ public static class PropertyTools
                 } : null,
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
                 ["overall_depth"] = s.Number("OVERALLDEPTH"), ["rib_width_top"] = s.Number("SLABRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("SLABRIBWIDTHBOTTOM"),
-                ["rib_spacing"] = s.Number("SLABRIBSPACING"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
+                ["rib_spacing"] = s.Number("SLABRIBSPACING") ?? s.Number("SLABRIBSPACINGDIR1"), ["rib_spacing_2"] = s.Number("SLABRIBSPACINGDIR2"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers)),
                 ["extras"] = new JsonObject(PropertyDefs.ShellExtras(s).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             }).ToArray()),

@@ -30,8 +30,8 @@ public static class DefineTools
             """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"area":{"type":"number"},"diameter":{"type":"number"},"delete":{"type":"boolean"}}}""",
             Ask.Changes, RebarSize, a => $"Rebar size {a.Text("name")}"),
         new("define_frame_rebar",
-            "Define > Frame Sections > Modify/Show Rebar: a concrete section's reinforcement. TYPE Column or Beam. Column: LONGBARMATERIAL CONFINEBARMATERIAL PATTERN (R-n3-n2 or C-n) TRANSREINF (TIES or SPIRAL) DESIGNCHECK (DESIGN or CHECK) COVER LONGBARAREA CONFINEBARAREA CONFINEBARSPACING NUMCONFINEBARS3 NUMCONFINEBARS2. Beam: LONGBARMATERIAL CONFINEBARMATERIAL COVERTOP COVERBOTTOM ATI ABI ATJ ABJ. Only what is given changes.",
-            """{"type":"object","required":["section","values"],"properties":{"section":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":["string","number"]}}}}""",
+            "Define > Frame Sections > Modify/Show Rebar: a concrete section's reinforcement. TYPE Column or Beam. Column: LONGBARMATERIAL CONFINEBARMATERIAL PATTERN (R-n3-n2 or C-n) TRANSREINF (TIES or SPIRAL) DESIGNCHECK (DESIGN or CHECK) COVER LONGBARAREA CONFINEBARAREA CONFINEBARSPACING NUMCONFINEBARS3 NUMCONFINEBARS2. Beam: LONGBARMATERIAL CONFINEBARMATERIAL COVERTOP COVERBOTTOM ATI ABI ATJ ABJ. Only what is given changes. sizes: a column's bar sizes by name (BarSizeLong, BarSizeCorn, BarSizeConf; definition_data gives them as SIZE:...).",
+            """{"type":"object","required":["section","values"],"properties":{"section":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":["string","number"]}},"sizes":{"type":"object","additionalProperties":{"type":"string"}}}}""",
             Ask.Changes, FrameRebar, a => $"Rebar of {a.Text("section")}"),
         new("define_table_rows",
             "Define items kept as rows of the program's own definition tables (definition_data lists every table and its fields): generalized displacements, shell uniform load sets, auto construction sequence, walking vibrations, panel zone properties, frame release definitions, slab and wall layers, wall auto select lists and every hinge definition. Sets the rows of one definition by name; rows [] deletes it.",
@@ -131,9 +131,12 @@ public static class DefineTools
         if (!a.TryGetProperty("values", out var v) || v.ValueKind != JsonValueKind.Object) throw new ToolInputException("values is {keyword: value}.");
         var values = v.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString()! : p.Value.GetRawText(), StringComparer.Ordinal);
         if (values.Count == 0) throw new ToolInputException("Give what to change in values.");
+        var sizes = a.TryGetProperty("sizes", out var z) && z.ValueKind == JsonValueKind.Object
+            ? z.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : throw new ToolInputException($"sizes.{p.Name} is a bar size's name.")) : null;
         return Core(() => link.Edit(m =>
         {
             DefineTables.SetRebar(m, section, values);
+            if (sizes is not null) DefineTables.SetBarSizes(m, section, sizes);
             return (JsonNode)new JsonObject { ["section"] = section, ["rebar"] = Obj(DefineTables.Rebar(m, section)!) };
         }));
     }
@@ -165,7 +168,7 @@ public static class DefineTools
         var m = Offline(e).Model;
         var sections = new JsonObject();
         foreach (var s in m.FrameSections)
-            if (DefineTables.Rebar(m, s.Name) is { } r) sections[s.Name] = Obj(r);
+            if (DefineTables.Rebar(m, s.Name) is { } r) sections[s.Name] = Obj(new Dictionary<string, string>(r).Concat(DefineTables.BarSizes(s).Select(kv => KeyValuePair.Create("SIZE:" + kv.Key, kv.Value))).ToDictionary());
         var tables = new JsonObject();
         // The shear wall overwrites only for the code the shear wall design has now (each code has its own table).
         var walls = ProgramForms.Designs(m.Target).Any(d => d.Kind == "shear_wall") ? ProgramForms.OverwriteTables(m.Target, "shear_wall", ProgramForms.Code(m, "shear_wall") is { Length: > 0 } wc ? wc : ProgramForms.Codes(m.Target, "shear_wall").FirstOrDefault() ?? "") : [];

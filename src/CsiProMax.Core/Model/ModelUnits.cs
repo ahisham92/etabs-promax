@@ -81,7 +81,7 @@ public static partial class ModelUnits
         ["R33"] = Dim.Len, ["R22"] = Dim.Len, ["COVER"] = Dim.Len, ["COVERTOP"] = Dim.Len, ["COVERBOTTOM"] = Dim.Len, ["COVERBOT"] = Dim.Len,
         ["CONFINEBARSPACING"] = Dim.Len, ["SLABTHICKNESS"] = Dim.Len, ["WALLTHICKNESS"] = Dim.Len, ["DECKSLABDEPTH"] = Dim.Len, ["DECKRIBDEPTH"] = Dim.Len,
         ["DECKRIBWIDTHTOP"] = Dim.Len, ["DECKRIBWIDTHBOTTOM"] = Dim.Len, ["DECKRIBSPACING"] = Dim.Len, ["DECKSHEARTHICKNESS"] = Dim.Len,
-        ["SLABRIBWIDTHTOP"] = Dim.Len, ["SLABRIBWIDTHBOTTOM"] = Dim.Len, ["SLABRIBSPACING"] = Dim.Len, ["OVERALLDEPTH"] = Dim.Len,
+        ["SLABRIBWIDTHTOP"] = Dim.Len, ["SLABRIBWIDTHBOTTOM"] = Dim.Len, ["SLABRIBSPACING"] = Dim.Len, ["SLABRIBSPACINGDIR1"] = Dim.Len, ["SLABRIBSPACINGDIR2"] = Dim.Len, ["OVERALLDEPTH"] = Dim.Len,
         ["SHEARSTUDDIAM"] = Dim.Len, ["SHEARSTUDHEIGHT"] = Dim.Len, ["MEMBRANETHICKNESS"] = Dim.Len, ["BENDINGTHICKNESS"] = Dim.Len, ["DIA"] = Dim.Len,
         ["ANCHORSLIP"] = Dim.Len, ["LENGTHOFFI"] = Dim.Len, ["LENGTHOFFJ"] = Dim.Len, ["MAXSTASPC"] = Dim.Len, ["FLOORMESHMAXSIZE"] = Dim.Len,
         ["WALLMESHMAXSIZE"] = Dim.Len, ["MERGETOL"] = Dim.Len, ["MINLONGSPACING"] = Dim.Len, ["MAXLONGSPACING"] = Dim.Len, ["MINTRANSSPACING"] = Dim.Len,
@@ -165,6 +165,11 @@ public static partial class ModelUnits
         foreach (var d in m.Materials.Cast<Definition>().Concat(m.FrameSections).Concat(m.ShellSections))
         {
             foreach (var line in d.Lines) Tokens(line, k => NotInDefinitions.Contains(k) ? Dim.None : KeywordDim(k), K);
+            if (d is FrameSection fs && FrameTableShapes.SdSource(fs) is { } sd)
+            {
+                Tokens(sd, k => NotInDefinitions.Contains(k) ? Dim.None : KeywordDim(k), K);
+                fs.Tables![FrameTableShapes.SdSourceTable][0]["Line"] = string.Join(" ", sd);
+            }
             Tables(d.Tables, K);
         }
         foreach (var a in m.PointAssigns.Cast<Assign>().Concat(m.LineAssigns).Concat(m.AreaAssigns))
@@ -282,7 +287,7 @@ public static partial class ModelUnits
             foreach (var row in rows)
                 foreach (var key in row.Keys.ToList())
                 {
-                    var d = FieldDim(key);
+                    var d = FrameTableShapes.FieldDim(key, row) ?? FieldDim(key);
                     if (d.IsNone || !double.TryParse(row[key], NumberStyles.Float, Inv, out var v)) continue;
                     row[key] = Text(v * k(d));
                 }

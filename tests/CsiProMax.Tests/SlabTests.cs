@@ -166,6 +166,16 @@ static class SlabTests
             Refused(link, "set_punching_overwrite", new { point = "17", story = "Story1", reinforcement = new { type = "Ties" } }, "yield stress");
             Refused(link, "draw_opening", new { name = "A9", story = "Story1", points = new[] { new[] { 0.0, 0 }, new[] { 1.0, 1 } } }, "3 corners");
             Refused(link, "define_shell_type", new { kind = "slab", name = "RIB2", slab_type = "Ribbed", thickness = 4, material = "4000Psi" }, "ribs");
+            // A waffle slab (ETABS 23.2's Slab Property Data, Type Waffle): both spacings; a layered slab has no material of its own.
+            Run(link, "define_shell_type", new { kind = "slab", name = "WAF", slab_type = "Waffle", thickness = 4, material = "4000Psi", overall_depth = 8, rib_width_top = 6, rib_width_bottom = 6, rib_spacing = 36, rib_spacing_2 = 30 });
+            var waf = m.ShellSections.Single(x => x.Name == "WAF");
+            Check(waf.Get("SLABTYPE") == "Waffle" && waf.Number("SLABRIBSPACINGDIR1") == 36 && waf.Number("SLABRIBSPACINGDIR2") == 30 && waf.Number("SLABRIBPARALLELTOAXIS") is null, "the waffle's two spacings: " + string.Join(" ", waf.Lines[0]));
+            var wafOut = Run(link, "property_definitions", new { });
+            Check(wafOut.ToJsonString().Contains("\"rib_spacing_2\":30"), "property_definitions gives the second spacing");
+            Refused(link, "define_shell_type", new { kind = "slab", name = "WAF2", slab_type = "Waffle", thickness = 4, material = "4000Psi" }, "waffle");
+            Run(link, "define_shell_type", new { kind = "slab", name = "LAY", modeling = "Layered", thickness = 9 });
+            Check(m.ShellSections.Single(x => x.Name == "LAY").Get("MATERIAL") is null, "a layered slab has no material on its line");
+            Refused(link, "define_shell_type", new { kind = "slab", name = "THIN", thickness = 4 }, "material");
             Refused(link, "draw_tendon", new { name = "T8", story = "Story1", points = new[] { new[] { 0.0, 30 }, new[] { 384.0, 30 } }, spans = new object[] { new { length = 384, depth_left = 5, depth_low = 9, depth_right = 5 } },
                 section = "Tendon1", jacking = new { transfer_pattern = "PT-TRANSFER", final_pattern = "PT-FINAL", stress = 216000 }, losses = new { method = "Percent", stressing = 60, long_term = 50 } }, "100");
 
