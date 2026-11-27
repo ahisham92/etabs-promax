@@ -180,6 +180,10 @@ static class PackSpeedTests
             m.Locked = true;
             m.ResultTables["Joint Displacements"] = new(["Joint", "OutputCase", "Ux"], [["1", "Dead", "0.1"], ["2", "Dead", "0.2"]]);
             m.ResultTables["Concrete Frame Design - Summary"] = new(["Story", "Label", "Status"], [["S1", "C1", "OK"]]);
+            // ETABS 23.2 lists every code's design preferences as empty, the codes not in use too, and gives each a row
+            // of defaults (0.4.73 full test: 249 counted as lost): what the program lists as empty is not the model's.
+            m.ResultTables["Composite Beam Design Preferences - AISC 360-05"] = new(["Item", "Value"], [["Phi", "0.9"]]);
+            m.ListedEmpty.Add("Composite Beam Design Preferences - AISC 360-05");
             var built = Pack.Build(m, [], [], [], null, null);
             var none = Pack.Missing(m, built.Content, [], []);
             Check(none.Count == 0, "nothing lost: " + string.Join("; ", none));

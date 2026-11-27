@@ -148,6 +148,7 @@ public static class CsiFieldSteps
                 });
             // ETABS's Define > Load Patterns and Define > Load Cases forms of the Engine, read back from ETABS field by field.
             if (program.Key == CsiProgram.Etabs.Key) EtabsFormRoundTrip.Check(ctx);
+            if (program.Key == CsiProgram.Etabs.Key) EtabsDefineRoundTrip.Check(ctx);
             // Assign > Frame, Shell and Joint > Additional Mass and Frame > Output Stations, kept by the Modeler as rows of ETABS's
             // assignment tables: in ETABS put in through its tables after opening the .e2k; in SAP2000 the mass by the .s2k's
             // tables and the stations by its API after the file opens.
