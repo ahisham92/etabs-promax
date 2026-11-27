@@ -71,12 +71,15 @@ public static class ScratchDialogs
         {
             if (MayClose(title) && Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
             else if (program is not null && IsProgramBox(title, program) && IsDialog(window) && Button(window, "No") is { } no && IsWindowEnabled(no)
-                     && LongWords(window).ToList() is var asked && IsReiterateQuestion(asked)
+                     && LongWords(window).ToList() is var asked && (IsReiterateQuestion(asked) || IsBridgeDataQuestion(asked))
                      && PostMessageW(no, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                 // ETABS 23's steel design by the Direct Analysis Method asks whether to analyse and design again when the
                 // stiffness reduction factors changed; it held the 0.4.59 full test 10 minutes. The test's own design is
                 // one pass: No.
-                closed.Add($"{title}: asked whether to reiterate the analysis and design (No)");
+                // SAP2000 26.3 Plus, opening the .sdb it had just made from the Modeler's .s2k, asks whether to save the file
+                // under a new name after removing its bridge data; it held the 0.4.61 full test's SAP2000 part 25 minutes.
+                // The scratch file is the test's own: No, and the open goes on.
+                closed.Add(IsBridgeDataQuestion(asked) ? $"{title}: asked whether to save the file with its bridge data removed under a new name (No)" : $"{title}: asked whether to reiterate the analysis and design (No)");
             else if (program is not null && IsProgramBox(title, program) && IsDialog(window) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
                      && LongWords(window).ToList() is var words && !words.Any(w => w.Contains("licen", StringComparison.OrdinalIgnoreCase))
                      && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
@@ -143,6 +146,15 @@ public static class ScratchDialogs
     {
         var all = string.Join(" ", words);
         return all.Contains("reiterate analysis and design", StringComparison.OrdinalIgnoreCase) && !all.Contains("licen", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>SAP2000's question on opening a file whose bridge data its licence cannot keep ("This model file has been
+    /// modified to remove bridge-related data. Do you want to save this file with a new name?"). Never a licence message.</summary>
+    public static bool IsBridgeDataQuestion(IEnumerable<string> words)
+    {
+        var all = string.Join(" ", words);
+        return all.Contains("remove bridge-related data", StringComparison.OrdinalIgnoreCase) && all.Contains("new name", StringComparison.OrdinalIgnoreCase)
+            && !all.Contains("licen", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Waits until <paramref name="file"/> can be opened by this process alone (no program holds it), at most <paramref name="most"/>.</summary>

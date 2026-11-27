@@ -97,10 +97,12 @@ public static class FieldTest
         /// <summary>Called with each step's outcome as it is recorded: "ok ...", "FAIL ...: why", "not tested ...: why".</summary>
         public Action<string>? Outcome { get; init; }
 
-        /// <summary>The most one program's part may take before the test gives up on it and goes on.</summary>
         /// <summary>Open the Viewer in a browser without a window and check its screen, for each program's scratch model.</summary>
         public bool Viewer { get; init; } = true;
-        public TimeSpan ScratchLimit { get; init; } = TimeSpan.FromMinutes(45);
+        /// <summary>The most one program's part may take before the test gives up on it and goes on. ETABS 23.2's part
+        /// writes the pack four times at about 9 minutes each and needed about 50 minutes (0.4.60 and 0.4.61 full tests
+        /// gave up at 45 while it was still working).</summary>
+        public TimeSpan ScratchLimit { get; init; } = TimeSpan.FromMinutes(80);
     }
 
     /// <summary>What a field test found, and the files it saved.</summary>
