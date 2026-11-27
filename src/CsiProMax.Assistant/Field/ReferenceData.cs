@@ -72,6 +72,7 @@ public static class ReferenceData
         new("SAP2000's own values for an area edge release and a joint panel zone", p => p.Key == "sap2000", EdgeReleaseAndPanelZone),
         // Opens two small files of the Modeler's in the scratch window, then the scratch model again.
         new("whether the program imports the Modeler's files that carry the model after END TABLE DATA", p => p.Key is "sap2000" or "safe", ImportsCarriedModel),
+        new("the program's own forms, pictured beside the Engine's (Modeler window\\Form pictures\\Engine forms side by side.html)", null, ReferenceForms.Gather),
         // Last: it replaces the scratch model in the scratch window with a new blank one (never saved).
         new("the program's defaults, from a new blank model", null, BlankDefaults),
     ];

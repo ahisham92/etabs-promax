@@ -608,32 +608,48 @@ public static class ModelerCheck
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { return []; }
     }
 
+    /// <summary>The forms the last full window check pictured, by program: the ones ReferenceForms opens in each program.</summary>
+    public static IReadOnlyList<(string Path, string Act, string Target)> LastForms { get; private set; } = [];
+
     /// <summary>
-    /// A picture of every form of the Engine, one browser screenshot each, by program and menu, with a page that lays
-    /// them out beside the program's own picture of the same form where the test's reference folder has one
-    /// ("Reference forms\program\Menu - Item.png"), so the two can be compared side by side (Ahmed 2026-11-27).
+    /// A picture of every form of the Engine, one browser screenshot each, by program and menu, and the page that lays
+    /// them out beside the program's own picture of the same form (ReferenceForms, "Reference forms\program\Menu - Item.png"),
+    /// so the two can be compared side by side (Ahmed 2026-11-27).
     /// </summary>
     public static IReadOnlyList<string> FormPictures(string browser, string profile, string address, IReadOnlyList<(string Path, string Act, string Target)> forms, string folder)
     {
         var made = new List<string>();
+        LastForms = forms;
         if (forms.Count == 0) return made;
         Directory.CreateDirectory(folder);
-        var rows = new StringBuilder();
         foreach (var (path, act, target) in forms)
         {
-            var name = string.Concat((target + " - " + path.Replace(" > ", " - ", StringComparison.Ordinal).TrimEnd('.')).Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
-            var picture = Path.Combine(folder, name + ".png");
+            var picture = Path.Combine(folder, target + " - " + ReferenceForms.FileName(path) + ".png");
             ViewerCheck.Browse(browser, profile, 60, "--screenshot=" + picture, "--window-size=1400,900", "--virtual-time-budget=9000", address + "#cpmform=" + Uri.EscapeDataString(target) + "|" + Uri.EscapeDataString(act));
-            if (!File.Exists(picture) || new FileInfo(picture).Length < 2000) continue;
-            made.Add(picture);
-            var theirs = Path.Combine(folder, "..", "Reference forms", target, path.Replace(" > ", " - ", StringComparison.Ordinal).TrimEnd('.') + ".png");
-            rows.Append("<tr><td>").Append(WebUtility.HtmlEncode(target)).Append("</td><td>").Append(WebUtility.HtmlEncode(path)).Append("</td><td><img src=\"").Append(Uri.EscapeDataString(name + ".png"))
-                .Append("\"></td><td>").Append(File.Exists(theirs) ? "<img src=\"" + new Uri(Path.GetFullPath(theirs)).AbsoluteUri + "\">" : "(no picture of the program's own form yet)").Append("</td></tr>\n");
+            if (File.Exists(picture) && new FileInfo(picture).Length > 2000) made.Add(picture);
+        }
+        WritePage(folder);
+        return made;
+    }
+
+    /// <summary>Writes "Engine forms side by side.html" in <paramref name="folder"/>: each form the Engine pictured, with
+    /// the program's own picture of it beside it when there is one.</summary>
+    public static void WritePage(string folder)
+    {
+        if (LastForms.Count == 0 || !Directory.Exists(folder)) return;
+        var rows = new StringBuilder();
+        foreach (var (path, _, target) in LastForms)
+        {
+            var mine = target + " - " + ReferenceForms.FileName(path) + ".png";
+            if (!File.Exists(Path.Combine(folder, mine))) continue;
+            var theirs = Path.Combine("..", "Reference forms", target, ReferenceForms.FileName(path) + ".png");
+            var has = File.Exists(Path.Combine(folder, theirs));
+            rows.Append("<tr><td>").Append(WebUtility.HtmlEncode(target)).Append("</td><td>").Append(WebUtility.HtmlEncode(path)).Append("</td><td><img src=\"").Append(Uri.EscapeDataString(mine))
+                .Append("\"></td><td>").Append(has ? "<img src=\"../Reference%20forms/" + Uri.EscapeDataString(target) + "/" + Uri.EscapeDataString(ReferenceForms.FileName(path) + ".png") + "\">" : "(the program's own form was not pictured: see Reference forms\\" + WebUtility.HtmlEncode(target) + "\\not pictured.md)").Append("</td></tr>\n");
         }
         File.WriteAllText(Path.Combine(folder, "Engine forms side by side.html"),
             "<!doctype html><meta charset=\"utf-8\"><title>Engine forms side by side</title><style>body{font:13px Segoe UI,sans-serif}td{vertical-align:top;padding:4px;border-bottom:1px solid #ccc}img{max-width:700px}</style>"
             + "<h1>Engine forms side by side</h1><table><tr><th>Program</th><th>Menu</th><th>CSI ProMax Engine</th><th>The program's own form</th></tr>\n" + rows + "</table>", new UTF8Encoding(false));
-        return made;
     }
 
     /// <summary>

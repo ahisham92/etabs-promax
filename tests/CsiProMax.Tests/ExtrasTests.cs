@@ -484,6 +484,9 @@ static class ExtrasTests
             var dom = "<html><script type=\"application/json\" id=\"cpm-selfcheck\">{\"items\":[],\"forms\":[{\"path\":\"Define > Load Patterns...\",\"act\":\"m:patterns\",\"target\":\"sap2000\"}]}</script></html>";
             var forms = CsiProMax.Assistant.ModelerCheck.Forms(dom);
             Check(forms.Count == 1 && forms[0].Act == "m:patterns" && forms[0].Target == "sap2000", "the forms the check opened are not read back");
+            Check(CsiProMax.Assistant.ReferenceForms.PathFor("sap2000", "Define > Frame Sections...").SequenceEqual(["Define", "Section Properties", "Frame Sections"]) && CsiProMax.Assistant.ReferenceForms.PathFor("etabs", "Define > Load Patterns...").SequenceEqual(["Define", "Load Patterns"]), "the program's menu path for an Engine form");
+            Check(CsiProMax.Assistant.ReferenceForms.FileName("Define > Functions > Response Spectrum...") == "Define - Functions - Response Spectrum", "the picture's file name");
+            Check(CsiProMax.Assistant.ReferenceData.Items.Any(i => i.Name.StartsWith("the program's own forms", StringComparison.Ordinal)), "the field test does not picture the program's own forms");
         });
         yield return ("Ahmed 2026-11-27: Design > View/Revise Overwrites is each code's overwrite table of the program (ETABS 23.2, SAP2000 26.3), the selected frames' rows; SAP2000's go into its .s2k and come back", () =>
         {
