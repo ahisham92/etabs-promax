@@ -80,6 +80,14 @@ public static class ModelerCheck
         },
         // The Analyze and Draw toggles and forms of the program's own menus: run here without starting the program or
         // changing the model.
+        // The Edit items that change the model at once: done, then undone, so the check's model stays as it was.
+        ...Object.fromEntries(["m:ete:cut", "m:ete:join", "m:ete:reverse", "m:ete:relabel", "m:ete:splitEdges", "m:ete:mergeShells", "m:ete:userMesh", "m:ete:gridAtJoints"].map(k => [k, async it => {
+          const was = hm.state && hm.state.rev; await act(it.act); await wait(900);
+          const changed = hm.state && hm.state.rev !== was, said = document.getElementById("hint").textContent;
+          if (changed) { await hmRun("undo", null, true); await wait(400); }
+          closeDialogs();
+          return {ok: (changed ? "changed the model, then undone: " : "") + said.slice(0, 160)};
+        }])),
         "m:etn:alive": async it => {
           await act(it.act); const on = ticked(it.act); await act(it.act); const off = !ticked(it.act);
           return on && off ? {ok: "Model Alive ticks on and off (no change made meanwhile, so no run)"} : {fail: "Model Alive does not tick on and off"};
@@ -856,7 +864,7 @@ public static class ModelerCheck
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL", "m:etf:p3dTxt", "m:etf:p3dStr"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL", "m:etf:p3dTxt", "m:etf:p3dStr", "m:ete:beamsToSlab", "m:ete:convertMesh", "m:ete:divLinks", "m:ete:revLinks", "m:ete:removeJoints", "m:ete:reverseWall", "m:ete:wallOpenings", "m:ete:wallCurve"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             // The program (23.2) greys a design's result items until that design has run, and Start Design/Check until the model is analysed (Design/01-07 pictures).
             if (offNow(it.act) && (/^m:etg:(interactive|info|beam|null|change|reset|verify|passed|delete|copy|paste):/.test(it.act) || /^m:etc:(interactive|info|passed|delete)/.test(it.act) || (it.act === "eng:design" && program === "etabs" && !engine.res))) return {ok: "greyed out until the design has run, as the program greys it"};
             // SAFE's slab design overwrites (only checked under SAFE: the 23.2 Design menu pictured for the other program has no slab design) wait for the SAFE forms thread: the Engine keeps no SAFE assignment table rows yet.
@@ -892,7 +900,7 @@ public static class ModelerCheck
     /// Serves the live Modeler page on a scratch model and checks it in <paramref name="browser"/> (Edge or Chrome when
     /// null). <paramref name="chat"/>: the page as a window with the AI chat on serves it (a chat with nothing in it), or off.
     /// </summary>
-    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 420, bool pictures = false)
+    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 600, bool pictures = false)
     {
         browser ??= ViewerCheck.FindBrowser();
         if (browser is null) return new ViewerCheck.Result([], [], "no Edge or Chrome was found on this PC to open the Modeler's window in");

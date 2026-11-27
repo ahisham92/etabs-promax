@@ -108,6 +108,29 @@ public static class EditableTables
             }
             if (fields.Length == 0) throw new EtabsException($"{program} gave no fields for the table '{key}' (answer {read}), so it cannot {what}.");
 
+            // A table ETABS edits by its objects' unique names (its editing read has UniqueName, no Story and Label: Concrete
+            // Slab Design Overwrites, Frame Floor Meshing Option, Composite Column Design Overwrites) takes a row given by
+            // story and label under the object's unique name. Sent with Story and Label as extra columns, every row went
+            // in twice, the program's own row and one with no unique name, which it skipped ("Frame object is not
+            // defined; record skipped", 0.4.73 saved-4 and Ex002, "12 of 24" read).
+            var byLabel = keyField.Split('|') is var kf && kf.Length == 2 && kf.Contains("Story", StringComparer.OrdinalIgnoreCase) && kf.Contains("Label", StringComparer.OrdinalIgnoreCase);
+            if (byLabel && fields.Contains("UniqueName", StringComparer.OrdinalIgnoreCase)
+                && !fields.Contains("Label", StringComparer.OrdinalIgnoreCase) && !fields.Contains("Story", StringComparer.OrdinalIgnoreCase))
+            {
+                rows = rows.Select(r =>
+                {
+                    string Get(string k) => r.FirstOrDefault(kv => kv.Key.Equals(k, StringComparison.OrdinalIgnoreCase)).Value ?? "";
+                    var unique = Get("UniqueName").Trim();
+                    if (unique.Length == 0) unique = (string?)UniqueNameOf(m, key, Get("Label"), Get("Story")) ?? "";
+                    if (unique.Length == 0) return r;
+                    var o = r.Where(kv => !kv.Key.Equals("Story", StringComparison.OrdinalIgnoreCase) && !kv.Key.Equals("Label", StringComparison.OrdinalIgnoreCase) && !kv.Key.Equals("UniqueName", StringComparison.OrdinalIgnoreCase))
+                        .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+                    o["UniqueName"] = unique;
+                    return (IReadOnlyDictionary<string, string>)o;
+                }).ToList();
+                if (rows.All(r => r.ContainsKey("UniqueName"))) keyField = "UniqueName";
+            }
+
             // The rows as read, to put back when the apply is refused and takes rows with it (SAP2000 26, 0.4.22 field test).
             var readFields = fields.ToArray();
             var readRows = Enumerable.Range(0, records).Select(r => data.Skip(r * readFields.Length).Take(readFields.Length).Select(v => v ?? "").ToArray())
@@ -160,10 +183,12 @@ public static class EditableTables
                 if (at >= 0 && names2.Contains(KeyOfRow(row))) before.TryAdd(KeyOfRow(row), row);
                 else kept.Add(row);
             }
+            var replaced = new List<string[]>();
             foreach (var given in rows)
             {
                 // A row already there for this name keeps the fields not given (its GUID, its self weight).
                 var row = before.Remove(KeyOfGiven(given), out var old) ? old.ToArray() : Enumerable.Repeat("", fields.Length).ToArray();
+                if (old is not null) replaced.Add(old);
                 foreach (var (field, value) in given)
                 {
                     var i = Array.FindIndex(fields, f => string.Equals(f, field, StringComparison.OrdinalIgnoreCase));
@@ -194,7 +219,10 @@ public static class EditableTables
                         foreach (var r in kept) if (i < r.Length && r[i].Trim().Length == 0) r[i] = "0";
                 if (e.Program.Key == CsiProgram.Etabs.Key)
                 foreach (var i in Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
-                             && !fields[i].Equals("UniqueName", StringComparison.OrdinalIgnoreCase) && kept.Count > 0 && kept.All(r => i < r.Length && r[i].Trim().Length == 0)))
+                             && !fields[i].Equals("UniqueName", StringComparison.OrdinalIgnoreCase) && kept.Count > 0 && kept.All(r => i < r.Length && r[i].Trim().Length == 0)
+                             // ...unless a row there has a value in it that the given rows make blank: left out, ETABS would
+                             // keep its value (a slab design overwrite's blank rebar material came back DefaultRebar_500, 0.4.73).
+                             && replaced.All(r => i >= r.Length || r[i].Trim().Length == 0)))
                     drop.Add(i);
                 if (drop.Count > 0 && drop.Count < fields.Length)
                 {
@@ -230,6 +258,28 @@ public static class EditableTables
                 throw;
             }
         })!;
+    }
+
+    /// <summary>The unique name of the object a table row names by label and story: an area for a slab, wall or shell
+    /// table, a point for a joint or point table, else a frame first; null when the program knows none.</summary>
+    internal static string? UniqueNameOf(dynamic m, string table, string label, string story)
+    {
+        if (label.Trim().Length == 0) return null;
+        var t = table.ToLowerInvariant();
+        string[] order = t.Contains("joint") || t.Contains("point") ? ["point", "frame", "area"]
+            : t.Contains("slab") || t.Contains("area") || t.Contains("shell") || t.Contains("wall") ? ["area", "frame", "point"]
+            : ["frame", "area", "point"];
+        foreach (var kind in order)
+        {
+            try
+            {
+                string name = "";
+                dynamic obj = kind == "point" ? m.PointObj : kind == "area" ? m.AreaObj : m.FrameObj;
+                if (Convert.ToInt32(obj.GetNameFromLabel(label.Trim(), story.Trim(), ref name)) == 0 && !string.IsNullOrEmpty(name)) return name;
+            }
+            catch (Exception) { /* no such object of this kind, or no such call: try the next kind */ }
+        }
+        return null;
     }
 
     /// <summary>

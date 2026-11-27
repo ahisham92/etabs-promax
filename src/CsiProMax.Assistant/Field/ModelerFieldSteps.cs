@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
+using CsiProMax.Model;
 
 namespace CsiProMax.Assistant;
 
@@ -473,8 +474,9 @@ public static class ModelerFieldSteps
             }, "tool move_objects, Edit > Move, with the section and loads");
             var lineLoads = m.LineLoads.Where(l => l.Story == top && Q(l.Object + "@" + top) == name).ToList();
             m.LineLoads.RemoveAll(l => lineLoads.Contains(l) && !string.Equals(CsiProMax.E2k.E2kText.Unquote(CsiProMax.E2k.E2kText.Value(l.Tokens, "TYPE") ?? ""), "UNIFF", StringComparison.OrdinalIgnoreCase));
+            var parts = new List<string>();
             ctx.Tool("divide_frames", $$"""{"objects":[{{name}}],"parts":3}""",
-                a => FieldContext.Expect(a["parts"]!.AsArray().Count == 3 && a["parts"]!.AsArray().All(p => m.LineAssigns.Exists(x => x.Label + "@" + x.Story == p!.GetValue<string>() && x.Section == beam.Section)), "three beams with the section were expected: " + a.ToJsonString()),
+                a => { parts = a["parts"]!.AsArray().Select(p => p!.GetValue<string>()).ToList(); FieldContext.Expect(a["parts"]!.AsArray().Count == 3 && a["parts"]!.AsArray().All(p => m.LineAssigns.Exists(x => x.Label + "@" + x.Story == p!.GetValue<string>() && x.Section == beam.Section)), "three beams with the section were expected: " + a.ToJsonString()); },
                 "tool divide_frames, Edit > Divide Frames into 3");
             {
                 var first = modeler.Model.LineAssigns.Where(x => x.Story == top && modeler.Model.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam).Select(x => (x, l: modeler.Model.Line(x.Label)!)).FirstOrDefault();
@@ -487,6 +489,49 @@ public static class ModelerFieldSteps
                 }
             }
             if (column is not null) ctx.Refused("divide_frames", $$"""{"objects":[{{Q(column.Label + "@" + column.Story)}}],"parts":2}""", "divides beams", "tool divide_frames says no to a column");
+            // The rest of the Edit menu (ETABS 23.2 pictures): radial and mirror Replicate, Join, Reverse, Merge Joints, Align,
+            // the Edit Shells reshapes and Auto Relabel All.
+            static string N(double v) => v.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (parts.Count == 3)
+            {
+                ctx.Tool("join_frames", $$"""{"objects":[{{Q(parts[0])}},{{Q(parts[1])}}]}""",
+                    a => FieldContext.Expect(a["frames"]!.AsArray().Count == 1 && m.LineAssigns.Exists(x => x.Label + "@" + x.Story == a["frames"]![0]!.GetValue<string>() && x.Section == beam.Section), "one beam with the section was expected: " + a.ToJsonString()),
+                    "tool join_frames, Edit > Edit Frames > Join Frames joins two parts back");
+                var lastPart = parts[2]; var lp = m.Line(lastPart.Split('@')[0]);
+                var (wasI, wasJ) = (lp?.PointI, lp?.PointJ);
+                ctx.Tool("reverse_frames", $$"""{"objects":[{{Q(lastPart)}}]}""",
+                    a => { var r = m.Line(a["reversed"]![0]!.GetValue<string>().Split('@')[0])!; FieldContext.Expect(r.PointI == wasJ && r.PointJ == wasI, "the ends did not change round: " + a.ToJsonString()); },
+                    "tool reverse_frames, Edit > Edit Frames > Reverse Frame Connectivity");
+                var rp = m.Line(lastPart.Split('@')[0]) is { } rl ? m.Point(rl.PointI) : null;
+                if (rp is not null)
+                    ctx.Tool("align_joints", $$"""{"mode":"x","joints":[[{{N(rp.X)}},{{N(rp.Y)}},{{Q(top)}}]],"value":{{N(rp.X + 0.5)}}}""",
+                        a => FieldContext.Expect(a["aligned"]!.GetValue<int>() == 1, "one joint should have moved: " + a.ToJsonString()),
+                        "tool align_joints, Edit > Align Joints to X-Ordinate moves the joint and its beam's end");
+            }
+            if (column is not null)
+                ctx.Tool("replicate_objects", $$"""{"objects":[{{Q(column.Label + "@" + column.Story)}}],"mode":"radial","cx":{{N(minX - 20)}},"cy":{{N(minY - 20)}},"angle":180,"number":1}""",
+                    a => FieldContext.Expect(a["made"]!.AsArray().Count == 1, "one radial copy was expected: " + a.ToJsonString()),
+                    "tool replicate_objects, Edit > Replicate radial");
+            if (column is not null)
+                ctx.Tool("replicate_objects", $$"""{"objects":[{{Q(column.Label + "@" + column.Story)}}],"mode":"mirror","x1":{{N(minX - 30)}},"y1":0,"x2":{{N(minX - 30)}},"y2":1,"skip":["Frames:Hinges"]}""",
+                    a => FieldContext.Expect(a["made"]!.AsArray().Count == 1, "one mirrored copy was expected: " + a.ToJsonString()),
+                    "tool replicate_objects, Edit > Replicate mirror, with Replicate Assigns options");
+            {
+                var p1 = m.PointAt(maxX + 40, maxY + 40); var p2 = m.PointAt(maxX + 40.00001, maxY + 40);
+                ctx.Tool("merge_joints", $$"""{"joints":[{{Q(p1.Name)}},{{Q(p2.Name)}}],"tolerance":0.001}""",
+                    a => FieldContext.Expect(a["merged"]!.GetValue<int>() == 1 && m.Point(p2.Name) is null, "the two joints were not merged: " + a.ToJsonString()),
+                    "tool merge_joints, Edit > Merge Joints");
+            }
+            var floor = m.AreaAssigns.FirstOrDefault(x => m.Area(x.Label) is { Kind: not CsiProMax.Model.AreaKind.Wall } fa && fa.StoriesBelow.All(b => b == 0));
+            if (floor is not null)
+            {
+                var pts = m.Area(floor.Label)!.PointNames.Select(n => m.Point(n)!).ToList();
+                var (x0, x1, y0, y1) = (pts.Min(p => p.X), pts.Max(p => p.X), pts.Min(p => p.Y), pts.Max(p => p.Y)); var xm = (x0 + x1) / 2;
+                ctx.Tool("replace_floors", $$"""{"objects":[{{Q(floor.Label + "@" + floor.Story)}}],"outlines":[[[{{N(x0)}},{{N(y0)}}],[{{N(xm)}},{{N(y0)}}],[{{N(xm)}},{{N(y1)}}],[{{N(x0)}},{{N(y1)}}]],[[{{N(xm)}},{{N(y0)}}],[{{N(x1)}},{{N(y0)}}],[{{N(x1)}},{{N(y1)}}],[{{N(xm)}},{{N(y1)}}]]]}""",
+                    a => FieldContext.Expect(a["floors"]!.AsArray().Count == 2 && a["floors"]!.AsArray().All(f => m.AreaAssigns.Exists(x => x.Label + "@" + x.Story == f!.GetValue<string>() && x.Section == floor.Section)), "two floors with the section were expected: " + a.ToJsonString()),
+                    "tool replace_floors, Edit > Edit Shells > Divide Shells into 2 by 1");
+            }
+            ctx.Tool("relabel_objects", "{}", a => FieldContext.Expect(a["relabelled"] is not null, "no count: " + a.ToJsonString()), "tool relabel_objects, Edit > Auto Relabel All");
         }
         finally
         {
