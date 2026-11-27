@@ -440,7 +440,17 @@ public static class CsiFieldSteps
             analysed = Read(ctx, "whether the model is analysed", () => link.Info().Locked, false);
         }
         var none = analysed ? "" : " (no analysis: it must still answer)";
-        T("analysis_status", "{}", a => FieldContext.Expect(!analysed || Int(a["finished"]) > 0, "the model is analysed and no case is finished: " + a.ToJsonString()));
+        var status = T("analysis_status", "{}", a => FieldContext.Expect(!analysed || Int(a["finished"]) > 0, "the model is analysed and no case is finished: " + a.ToJsonString()));
+        // Analyze > Set Load Cases to Run (Ahmed 2026-11-27): a case set not to run leaves the program's run list, then
+        // every case runs again (the Engine's Run sets the same flags before it analyses).
+        if (offered.Contains("set_run_cases"))
+        {
+            var one = (status?["cases"] as JsonArray)?.Select(c => c?["case"]?.ToString()).LastOrDefault(c => c is { Length: > 0 }) ?? "Dead";
+            T("set_run_cases", JsonSerializer.Serialize(new { all = true, not_run = new[] { one } }), a =>
+                FieldContext.Expect(a["set_to_run"] is JsonArray r && !r.Any(x => x?.ToString() == one), $"{one} should not be set to run: " + Cut(a.ToJsonString())), "tool set_run_cases leaves a case out");
+            T("set_run_cases", """{"all":true}""", a =>
+                FieldContext.Expect(a["set_to_run"] is JsonArray r && r.Any(x => x?.ToString() == one), $"{one} should run again: " + Cut(a.ToJsonString())), "tool set_run_cases runs every case again");
+        }
         if (offered.Contains("joint_displacements"))
         {
             var results = analysed ? (Action<JsonNode, string>)((a, key) => FieldContext.Expect(Int(a["rows"]) > 0 || a[key] is JsonArray { Count: > 0 }, "no results after the analysis: " + Cut(a.ToJsonString()))) : null;

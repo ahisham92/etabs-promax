@@ -17,7 +17,7 @@ static class ExtrasTests
     static OfflineEtabs Frame() => new(Templates.ConcreteFrame("Extras", [6, 5], [4], 3, 3.2));
 
     static JsonObject Run(ICsiLink link, string tool, object args) =>
-        (JsonObject)ExtraTools.All.Concat(PropertyTools.All).Concat(ModelerTools.All).Concat(DefineTools.All).Single(x => x.Name == tool).Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
+        (JsonObject)ExtraTools.All.Concat(PropertyTools.All).Concat(ModelerTools.All).Concat(DefineTools.All).Concat(CaseTools.All).Single(x => x.Name == tool).Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
 
     static void Refused(OfflineEtabs link, string tool, object args, string says)
     {
@@ -442,6 +442,32 @@ static class ExtrasTests
             Check(read.DefinitionTables?.GetValueOrDefault("Preferences - Dimensional")?.Single()["MergeTol"] == "0.002" && read.DefinitionTables?.GetValueOrDefault("Options - Colors - Display")?.Single()["ColorBeams"] is null, "the .s2k's preferences do not come back");
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             Check(html.Contains("\"m:oform:\" + i", StringComparison.Ordinal) && html.Contains("hmProgForm(+a.slice(6), \"options\")", StringComparison.Ordinal) && html.Contains("Assign ${word} Colors", StringComparison.Ordinal), "the Options menu does not open the forms");
+        });
+        yield return ("Ahmed 2026-11-27: Analyze > Set Load Cases to Run (ETABS 23.2, SAP2000 26.3, SAFE): the cases left out are kept, go into SAP2000's .s2k as RunCase=No and come back, and the Run sets the program's flags", () =>
+        {
+            var link = Frame();
+            var cases = RunCases.List(link.Model);
+            Check(cases.Count >= 2 && cases.All(c => c.Run), "every case should run until it is set not to: " + cases.Count);
+            var off = cases[0].Name;
+            var r = Run(link, "set_load_cases_to_run", new { not_run = new[] { off } });
+            Check(!RunCases.Runs(link.Model, off) && RunCases.NotRun(link.Model).Count == 1 && r["not_run"]!.AsArray().Single()!.GetValue<string>() == off, "the case was not set not to run");
+            var a = Run(link, "analysis_definitions", new { });
+            Check(a["cases_to_run"]!.AsArray().Any(c => c!["name"]!.GetValue<string>() == off && !c["run"]!.GetValue<bool>()), "analysis_definitions does not show the case as not run");
+            Refused(link, "set_load_cases_to_run", new { not_run = new[] { "NO SUCH CASE" } }, "no load case");
+            link.Model.Target = "sap2000";
+            var text = CsiProMax.S2k.S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(text.Contains("RunCase=No", StringComparison.Ordinal) && text.Contains("RunCase=Yes", StringComparison.Ordinal), "the .s2k does not carry RunCase=No");
+            var read = CsiProMax.S2k.S2kReader.Read(text, "Run").Model;
+            Check(!RunCases.Runs(read, off) && RunCases.NotRun(read).Count == 1, "the .s2k's RunCase=No did not come back");
+            link.Model.Target = "etabs";
+            Run(link, "set_load_cases_to_run", new { all = true });
+            Check(RunCases.NotRun(link.Model).Count == 0 && link.Model.Kept?.ContainsKey(RunCases.NotRunKept) != true, "Run All did not set every case to run");
+            Run(link, "set_load_cases_to_run", new { all = false, run = new[] { off } });
+            Check(RunCases.Runs(link.Model, off) && RunCases.NotRun(link.Model).Count == cases.Count - 1, "Do Not Run All then one case");
+            Check(CsiTools.Every.Any(t => t.Name == "set_run_cases"), "no live tool sets the program's run flags");
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "EngineRun.cs")).Contains("ctx.Tool(\"set_run_cases\"", StringComparison.Ordinal), "the Engine's Run does not set the cases to run");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            Check(html.Contains("[\"Set Load Cases to Run...\", \"m:runCases\"]", StringComparison.Ordinal) && html.Contains("Run/Do Not Run Case", StringComparison.Ordinal) && html.Contains("Run/Do Not Run All", StringComparison.Ordinal), "the Analyze menu has no Set Load Cases to Run form");
         });
         yield return ("Ahmed 2026-11-27: Design > View/Revise Overwrites is each code's overwrite table of the program (ETABS 23.2, SAP2000 26.3), the selected frames' rows; SAP2000's go into its .s2k and come back", () =>
         {

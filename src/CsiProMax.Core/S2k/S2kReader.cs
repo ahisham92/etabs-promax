@@ -214,6 +214,10 @@ public static partial class S2kReader
         // Groups, constraints, springs, links, hinges, the mass source and moving loads.
         Extras(m, Use, t, joints, j => { var w = Where(j); return w.Point.Name + "@" + storyNames[w.Level]; }, frameAt, areaAt, storyNames, notes);
         Combos(m, Use, notes);
+        // Analyze > Set Load Cases to Run: the cases the file has RunCase=No for (once every case, moving ones too, is in).
+        var notRun = Use("LOAD CASE DEFINITIONS").Where(r => S(r, "RunCase", "Yes").Equals("No", StringComparison.OrdinalIgnoreCase)).Select(r => S(r, "Case"))
+            .Where(n => RunCases.List(m).Any(c => c.Name == n)).ToList();
+        if (notRun.Count > 0) RunCases.SetNotRun(m, notRun);
         Loads(m, Use, joints, frameAt, areaAt, Where, storyNames, notes);
 
         // SAP2000's hinge definitions go into the Modeler's own hinge forms (DefineTables.SapHinges).

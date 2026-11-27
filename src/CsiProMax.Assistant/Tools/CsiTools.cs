@@ -119,6 +119,11 @@ public static class CsiTools
             "Which load cases are set to run and whether each has run (finished, not run, could not start, not finished), and whether the model is locked by its results.",
             """{"type":"object","properties":{}}""", Ask.Never, (_, e) => AnalysisStatus(e)),
 
+        new("set_run_cases",
+            "Analyze > Set Load Cases to Run in the open program: all true sets every case to run (false none) first, then run lists cases to run and not_run cases to leave out. Returns the cases now set to run.",
+            """{"type":"object","properties":{"all":{"type":"boolean"},"run":{"type":"array","items":{"type":"string"}},"not_run":{"type":"array","items":{"type":"string"}}}}""",
+            Ask.Changes, SetRunCases, a => "Set the load cases to run"),
+
         new("unlock_model",
             "Unlocks the analysed model so it can be changed. This deletes the analysis and design results (they come back when the analysis runs again). The engineer is always asked first.",
             """{"type":"object","properties":{}}""", Ask.Always, (_, e) => Unlock(e), _ => "Unlock the model (its results are deleted)"),
@@ -936,6 +941,21 @@ public static class CsiTools
             var run = ApiCall.Value(flags, "Run") as JsonArray;
             result["set_to_run"] = Arr(names.Where((_, i) => run is not null && i < run.Count && run[i] is JsonValue rv && rv.TryGetValue<bool>(out var flag) && flag));
         }
+        return result;
+    }
+
+    private static JsonNode SetRunCases(JsonElement a, ICsiLink e)
+    {
+        static List<string> Given(JsonElement a, string key) =>
+            a.ValueKind == JsonValueKind.Object && a.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Array ? v.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList() : [];
+        var problems = new JsonArray();
+        if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty("all", out var all) && all.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            Call(e, "set every case to run", "Analyze.SetRunCaseFlag", D(("Name", ""), ("Run", all.GetBoolean()), ("All", true)));
+        foreach (var (name, run) in Given(a, "run").Select(n => (n, true)).Concat(Given(a, "not_run").Select(n => (n, false))))
+            try { Call(e, $"set the case {name} {(run ? "to run" : "not to run")}", "Analyze.SetRunCaseFlag", D(("Name", name), ("Run", run), ("All", false))); }
+            catch (Exception ex) when (ex is ToolInputException or EtabsException) { problems.Add((JsonNode)$"{name}: {ex.Message}"); }
+        var result = (JsonObject)AnalysisStatus(e);
+        if (problems.Count > 0) result["problems"] = problems;
         return result;
     }
 
