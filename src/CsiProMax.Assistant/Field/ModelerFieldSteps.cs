@@ -258,6 +258,9 @@ public static class ModelerFieldSteps
         ctx.Refused("run_analysis", "{}", "cannot analyse", "tool run_analysis says no in the Modeler");
         ctx.Refused("run_design", "{}", "cannot analyse or design", "tool run_design says no in the Modeler");
 
+        // ETABS's Frame/Wall Nonlinear Hinges forms, read back in the scratch ETABS (EtabsHingeRoundTrip.Check).
+        EtabsHingeRoundTrip.Define(ctx);
+
         // The files the programs open.
         var saved = ctx.Tool("save_model_as", $$"""{"name":"{{ModelName}}","folder":{{folder}}}""", a =>
         {
@@ -520,6 +523,8 @@ public static class ModelerFieldSteps
         ctx.Tool("define_function", """{"name":"CPM-RS","kind":"spectrum","from":"code","code":"ASCE 7-16","values":{"Ss":"1.0","S1":"0.4","SiteClass":"D"}}""", a => FieldContext.Expect(Int(a["points"]) > 50, "the spectrum has few points: " + a.ToJsonString()), "tool define_function, the ASCE 7-16 spectrum");
         ctx.Tool("define_function", """{"name":"CPM-TH","kind":"history","from":"sine","period":0.5,"cycles":4,"amplitude":0.2}""", a => FieldContext.Expect(Int(a["points"]) == 65, "4 cycles of 16 steps: " + a.ToJsonString()), "tool define_function, a sine history");
         ctx.Refused("define_function", """{"name":"CPM-BAD","kind":"spectrum","points":[[1,1],[0.5,1]]}""", "must go up", "tool define_function says no to periods that go back");
+        // ETABS's own function forms' tables, read back by ETABS's scratch part (EtabsFunctionRoundTrip.Check).
+        EtabsFunctionRoundTrip.Define(ctx);
         if (!modeler.Model.LoadCases.Exists(c => c.Name == "Modal"))
             ctx.Tool("define_load_case", """{"name":"Modal","type":"Modal - Eigen","max_modes":12}""", null, "tool define_load_case, the modal case");
         ctx.Tool("define_load_case", """{"name":"CPM-RSX","type":"Response Spectrum","modal_case":"Modal","modal_combo":"CQC","dir_combo":"SRSS","damping":0.05,"eccentricity":0.05,"loads":[{"accel":"U1","factor":9.80665,"function":"CPM-RS"}]}""", null, "tool define_load_case, a response spectrum case");
