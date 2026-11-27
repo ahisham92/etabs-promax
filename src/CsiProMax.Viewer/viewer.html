@@ -5808,7 +5808,7 @@ async function hmSapCableDistributed() {
       <div>${sapLdOpts("cdO")}<fieldset><legend>Uniform Load</legend><input id="cdV" value="0" style="width:90px"> <span class="u" id="cdU">${unitOf("Force")}</span></fieldset></div></div>
     <button id="cdR" class="reset">Reset Form to Default Values</button></div>`,
     sapOkCloseApply(async d => { const t = q(d, "#cdT").value;
-      return sapLdSet(d, "Cable Loads - Distributed", names, q(d, "#cdP").value, q(d, "[name=cdO]:checked").value, [{CoordSys: q(d, "#cdC").value, Type: t, Dir: q(d, "#cdD").value, [t === "Moment" ? "MOverL" : "FOverL"]: sapLdNum(d, "#cdV")}]); }), {width: 600});
+      return sapLdSet(d, "Cable Loads - Distributed", names, q(d, "#cdP").value, q(d, "[name=cdO]:checked").value, [{CoordSys: q(d, "#cdC").value, Type: t, Dir: q(d, "#cdD").value, [t === "Moment" ? "MOverL" : "FOverL"]: sapLdNum(d, "#cdV")}]); }), {width: 690});
   const syncDir = () => { const c = q(d, "#cdC").value, was = q(d, "#cdD").value, list = c === "Local" ? ["1", "2", "3"] : sapGravDirs; q(d, "#cdD").innerHTML = opts(list, list.includes(was) ? was : c === "Local" ? "1" : "Gravity"); };
   q(d, "#cdC").onchange = syncDir; q(d, "#cdT").onchange = () => q(d, "#cdU").textContent = unitOf(q(d, "#cdT").value);
   q(d, "#cdR").onclick = () => { q(d, "#cdC").value = "GLOBAL"; q(d, "#cdD").innerHTML = ""; syncDir(); q(d, "#cdT").value = "Force"; q(d, "#cdU").textContent = unitOf("Force"); q(d, "#cdV").value = "0"; q(d, "[name=cdO][value=replace]").checked = true; };
