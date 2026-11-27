@@ -96,14 +96,26 @@ public static class DefineTables
     }
 
     /// <summary>True for a table of SAP2000's own (written to the .s2k as it is), not one of ETABS's.</summary>
-    public static bool IsSap(string table) => SapHinges.ContainsKey(table);
+    public static bool IsSap(string table) => SapHinges.ContainsKey(table) || SapLoadTables.Has(table);
 
     /// <summary>Sets the rows of one definition (by its name) in a table; no rows takes the definition out of it.</summary>
     public static void Set(StructuralModel m, string table, string name, IReadOnlyList<Dictionary<string, string>> rows)
     {
+        // SAP2000's own load tables (Define > Load Patterns, Load Cases, Load Combinations): SapLoadTables.
+        if (SapLoadTables.Full(table) is { } sapLoad) { Set(m, sapLoad, SapLoadTables.Fields[sapLoad].Select(f => (f, f)).ToArray(), name, rows); return; }
         if (!Tables.TryGetValue(table, out var fields)) throw new ArgumentException($"There is no definition table '{table}'. The tables: {string.Join(", ", Tables.Keys)}.");
+        Set(m, Tables.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase)), fields, name, rows);
+    }
+
+    /// <summary>The name of a definition table as the model keeps it (SAP2000's load tables too), or null.</summary>
+    public static string? FullName(string table) => SapLoadTables.Full(table) ?? Tables.Keys.FirstOrDefault(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The key field (the definition's name) of a definition table.</summary>
+    public static string KeyField(string table) => SapLoadTables.Full(table) is { } t ? SapLoadTables.Fields[t][0] : Tables[table][0].Key;
+
+    private static void Set(StructuralModel m, string full, (string Key, string Label)[] fields, string name, IReadOnlyList<Dictionary<string, string>> rows)
+    {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Give the definition's name.");
-        var full = Tables.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
         var key = fields[0].Key;
         foreach (var row in rows)
             foreach (var f in row.Keys)
