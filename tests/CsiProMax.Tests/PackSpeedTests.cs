@@ -200,6 +200,28 @@ static class PackSpeedTests
             Check(lost.Any(l => l.Contains("1 of 2 rows")), "a row lost is named: " + string.Join("; ", lost));
             Check(lost.Any(l => l.Contains("fields Ux")), "a field lost is named: " + string.Join("; ", lost));
         });
+        yield return ("pack complete: design tables ETABS lists as empty but gives rows are read (codes not in use left out), and model summaries the program cannot import go with the inputs", () =>
+        {
+            var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
+            m.AddFrame(0, 0, 0, 0, 0, 3, "B1");
+            m.Locked = true;
+            m.ResultTables["Concrete Beam Design Summary - ACI 318-19"] = new(["Story", "Label", "Status"], [["S1", "B1", "OK"]]);
+            m.ResultTables["Concrete Beam Design - Flexural Stress Check - Long Term"] = new(["Story", "Label", "Stress"], [["S1", "B1", "1.2"], ["S1", "B1", "1.3"]]);
+            m.ListedEmpty.Add("Concrete Beam Design - Flexural Stress Check - Long Term");
+            var built = Pack.Build(m, [], [], [], null, null);
+            Check(built.Content["tables"]!["Concrete Beam Design - Flexural Stress Check - Long Term"] is not null, "the stress check listed as empty is in the pack");
+            var lost = Pack.Missing(m, built.Content, [], []);
+            Check(lost.Count == 0, "nothing lost: " + string.Join("; ", lost));
+            built.Content["tables"]!.AsObject().Remove("Concrete Beam Design - Flexural Stress Check - Long Term");
+            ((System.Text.Json.Nodes.JsonObject)built.Content["manifest"]!["read_rows"]!).Remove("Concrete Beam Design - Flexural Stress Check - Long Term");
+            Check(Pack.Missing(m, built.Content, [], []).Any(l => l.Contains("Flexural Stress Check")), "left out, it is named as lost");
+            TableName T(string n, bool empty, int import = -1) => new(n, n, empty, import);
+            var read = Pack.DesignListedEmpty([T("Concrete Beam Design Summary - ACI 318-19", false), T("Concrete Beam Design Summary - Hong Kong CP2013", true),
+                T("Concrete Joint Design Summary - ACI 318-19", true), T("Steel Frame Design Summary - AISC 360-16", true)]).Select(t => t.Name).ToList();
+            Check(read.SequenceEqual(["Concrete Joint Design Summary - ACI 318-19"]), "only the code in use, of a family with data: " + string.Join(", ", read));
+            Check(PackTables.Kind(T("Frame Assignments - Summary", false, 0)) == "input" && PackTables.Kind(T("Material List by Section Property", false, 0)) == "input", "model summaries go with the inputs");
+            Check(PackTables.Kind(T("Frame Assignments - Section Properties", false, 1)) is null, "an importable assignment table is not added");
+        });
         yield return ("pack memory: a large table goes into the pack and its Viewer page in parts, written as it goes, and reads back whole", () =>
         {
             var old = Pack.PartRows;

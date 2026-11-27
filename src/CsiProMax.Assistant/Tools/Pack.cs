@@ -233,6 +233,7 @@ public static class Pack
         foreach (var name in UsualTables)
             if (known.FirstOrDefault(t => !t.Empty && (ResultTools.Norm(t.Name) == ResultTools.Norm(name) || ResultTools.Norm(t.Key) == ResultTools.Norm(name))) is { } t) wanted.Add(t);
         wanted.AddRange(known.Where(t => !t.Empty && (DesignResults.IsDesignTable(t.Name) || DesignResults.IsWallTable(t.Name))));
+        wanted.AddRange(DesignListedEmpty(known));
         wanted.AddRange(known.Where(t => !t.Empty && ProgramTools.PackTable(e.Program, t.Name)));
         foreach (var name in extraTables)
         {
@@ -291,6 +292,7 @@ public static class Pack
         var read = content["manifest"]?["read_rows"] as JsonObject;
         var parts = (content["manifest"]?["notes"] as JsonArray ?? []).Select(n => n?.ToString() ?? "").Where(n => n.Contains("at a time", StringComparison.Ordinal)).ToList();
         var lost = new List<string>();
+        var readEmpty = DesignListedEmpty(e.Tables()).Select(t => t.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var t in e.Tables().DistinctBy(t => t.Key))
         {
             var kind = PackTables.Kind(t);
@@ -299,7 +301,7 @@ public static class Pack
             // A table the program lists as empty is not the model's (the pack leaves it out the same way): ETABS 23.2 lists
             // the design preferences of every code not in use as empty and still gives each its row of defaults, and
             // reading all 249 of them counted them as lost and took the field test's pack past 3 minutes (0.4.73).
-            if (held is null && t.Empty) continue;
+            if (held is null && t.Empty && !readEmpty.Contains(t.Key)) continue;
             if (held is not null && held["left_out"] is { } cut) { lost.Add($"'{t.Name}': {cut} rows left out"); continue; }
             // A table read a load case at a time is not read whole again to count it: its rows came from the program.
             if (held is not null && parts.Any(n => n.Contains($"'{t.Name}'", StringComparison.Ordinal))) continue;
@@ -322,6 +324,32 @@ public static class Pack
             if (gone.Count > 0) lost.Add($"'{t.Name}': fields {string.Join(", ", gone)} not in the pack");
         }
         return lost;
+    }
+
+    /// <summary>
+    /// Design tables the program lists as empty that are read all the same: ETABS 23.2 listed "Concrete Beam Design -
+    /// Flexural Stress Check - Long Term / Normal / Transfer" as empty and gave 708 rows each (0.4.73 full test), so the
+    /// pack left real design results out. Read: every such table of a design family that has data, unless it is of a
+    /// design code other than the ones that family's tables with data are of (ETABS lists a table per code, all codes).
+    /// </summary>
+    internal static IReadOnlyList<TableName> DesignListedEmpty(IReadOnlyList<TableName> known)
+    {
+        var with = known.Where(t => !t.Empty && DesignResults.IsDesignTable(t.Name)).ToList();
+        var codes = with.GroupBy(t => DesignResults.FamilyOf(t.Name)!.Key)
+            .ToDictionary(g => g.Key, g => g.Select(t => CodeOf(t.Name)).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase));
+        return known.Where(t => t.Empty && DesignResults.FamilyOf(t.Name) is { } f && codes.TryGetValue(f.Key, out var used)
+                && (CodeOf(t.Name) is not { } code || used.Count == 0 || used.Contains(code)))
+            .DistinctBy(t => t.Key).ToList();
+    }
+
+    /// <summary>The design code a table is named for: its last " - " part when that has a figure in it ("ACI 318-19",
+    /// "Hong Kong CP2013", "Eurocode 2-2004"), else none ("Long Term").</summary>
+    internal static string? CodeOf(string table)
+    {
+        var at = table.LastIndexOf(" - ", StringComparison.Ordinal);
+        if (at < 0) return null;
+        var last = table[(at + 3)..].Trim();
+        return last.Any(char.IsDigit) ? last : null;
     }
 
     /// <summary>

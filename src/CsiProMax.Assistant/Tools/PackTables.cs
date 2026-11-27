@@ -73,7 +73,10 @@ public static class PackTables
         if (DesignResults.IsWallTable(t.Name)) return "result";
         if (IsMeshTable(n)) return "result";
         var input = InputWords.Any(w => n.Contains(w, StringComparison.Ordinal));
-        if (Verdict.IsInputTable(t.Name)) return input ? "input" : null;
+        // A table the program cannot import is what it makes of the model ("Frame Assignments - Summary", "Material List
+        // by Section Property"): the pack carries it with the inputs, so that what comes back is all the program offers
+        // (0.4.73 real-model round trip: the Engine's pack had none of them).
+        if (Verdict.IsInputTable(t.Name)) return input || t.Import == 0 ? "input" : null;
         if (DesignResults.IsDesignTable(t.Name)) return "result";
         if (input) return "input";
         if (t.Import == 0) return "result";
