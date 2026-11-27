@@ -4963,7 +4963,7 @@ function hmDefineMenu() {
   const tab = (label, ...tables) => [label, "m:dt:" + tables.join("|")];
   if (program === "sap2000") return [["Materials...", "m:materials"],
     ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Tendon Sections...", "m:ex:tendonsections"], tab("Cable Sections...", "Cable Section Definitions"), 0, ["Area Sections...", "m:shellSections"], 0, tab("Solid Properties...", "Solid Property Definitions"), 0,
-      ["Reinforcement Bar Sizes...", "m:rebarSizes"], 0, ["Link/Support Properties...", "m:links"], tab("Frequency Dep. Link Props...", "Link Frequency Dependent Properties 01 - General", "Link Frequency Dependent Properties 02 - Details"), 0, ["Hinge Properties...", "m:sapHinges"]]], 0,
+      ["Reinforcement Bar Sizes...", "m:rebarSizes"], 0, ["Link/Support Properties...", "m:links"], ["Frequency Dep. Link Props...", "m:sapFreqLinks"], 0, ["Hinge Properties...", "m:sapHinges"]]], 0,
     tab("Foundation Properties...", "Foundation Property Definitions"), tab("Foundation Assemblies...", "Foundation Assemblies 1 - Definitions", "Foundation Assemblies 2 - Connection Points"), 0, ["Mass Source...", "m:mass"], 0, ["Coordinate Systems/Grids...", "m:grids"], 0,
     ["Joint Constraints...", "m:ex:constraints"], tab("Joint Patterns...", "Joint Pattern Definitions"), 0,
     ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."), 0, fns, 0, ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0,
@@ -5019,7 +5019,8 @@ async function modelAct(a) {
     case "program": return hmProgram();
     case "open": return hmOpen();
     case "materials": return hmMaterials();
-    case "sapHinges": { const d = listForm("Frame Hinge Properties", "Hinge Types", sapHinges.map(x => x[0]), [["Modify/Show Hinge Property...", n => { const x = sapHinges.find(h => h[0] === n); if (x) { d.close(); hmDefineTable(x[1].map(sapHingeTable).join("|")); } }]], n => { const x = sapHinges.find(h => h[0] === n); if (x) { d.close(); hmDefineTable(x[1].map(sapHingeTable).join("|")); } }); return; }
+    case "sapHinges": return hmSapHingeProps();
+    case "sapFreqLinks": return hmSapFreqLinks();
     case "frameSections": return hmFrameSections();
     case "shellSections": return hmShellSections();
     case "wallSections": return hmShellSections("wall");
@@ -5159,6 +5160,205 @@ const sapHingeTable = n => "Hinges Def " + n + " - " + sapHingeNames[n];
 const sapHinges = [["Deformation Controlled (P, V, T, M)", ["01", "02", "03", "04"]], ["Force Controlled", ["01", "05"]], ["Interacting (P-M2-M3, M2-M3)", ["01", "06", "07", "08", "09"]],
   ["Interacting, Force Controlled", ["01", "10"]], ["Interaction Surface", ["01", "11", "12"]], ["Fiber (P-M2-M3)", ["01", "13", "14"]], ["Hysteresis Parameters", ["01", "15", "16", "17"]],
   ["Concrete Parametric P-M2-M3", ["01", "18a", "18b", "18c", "18d", "18e"]], ["Steel Parametric P-M2-M3", ["01", "19a", "19b", "19c", "19d", "19e"]]];
+// ---- SAP2000: Define > Section Properties > Hinge Properties, as SAP2000 26.3 shows them: Define Hinge Properties,
+// Default For Added Hinges, Hinge Property Data and Frame Hinge Property Data. Kept as SAP2000's Hinges Def rows. ----
+const sapHingeTypes = ["Axial P", "Shear V2", "Shear V3", "Torsion T", "Moment M2", "Moment M3", "Interacting P-M2", "Interacting P-M3", "Interacting M2-M3", "Interacting P-M2-M3", "Fiber P-M2-M3", "Fiber P-M3", "Parametric Concrete P-M2-M3", "Parametric Steel P-M2-M3"];
+const sapHingeDof = t => t.replace(/^(Axial|Shear|Torsion|Moment|Interacting) /, "");
+const sapHingePts = ["E-", "D-", "C-", "B-", "A", "B", "C", "D", "E"];
+const sapHingeHys = ["Isotropic", "Kinematic", "Takeda", "Pivot", "Concrete", "BRB Hardening", "Degrading"];
+const sapHingeDefaults = {Steel: {pts: [[-0.2, -8], [-0.2, -6], [-1.25, -6], [-1, 0], [0, 0], [1, 0], [1.25, 6], [0.2, 6], [0.2, 8]], ac: [2, 4, 6]},
+  Concrete: {pts: [[-0.2, -0.04], [-0.2, -0.02], [-1.1, -0.02], [-1, 0], [0, 0], [1, 0], [1.1, 0.02], [0.2, 0.02], [0.2, 0.04]], ac: [0.003, 0.012, 0.015]}};
+async function hmSapHingeProps() {
+  const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  const T = n => ((dd.tables[sapHingeTable(n)] || {}).rows || []);
+  const over = T("01");
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmSapHingeProps(); };
+  let showGen = false, details = false;
+  const shown = () => over.filter(r => showGen || !/^y/i.test(r.AssignHinge || "")).map(r => r.HingeName);
+  const d = dialog("Define Hinge Properties", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Defined Hinge Props</legend><select id="hmList" size="14" style="width:100%;height:auto;min-width:150px"></select><div id="hD" class="kv" style="max-width:220px"></div></fieldset>
+    <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="hA">Add New Property...</button><button id="hC">Add Copy of Property...</button><button id="hM">Modify/Show Property...</button><button id="hX">Delete Property</button></div>
+    <label style="display:block;margin-top:14px"><input type="checkbox" id="hDet"> Show Hinge Details</label><label style="display:block"><input type="checkbox" id="hGen"> Show Generated Props</label></fieldset></div>`, [["OK"], ["Cancel"]], {width: 480});
+  const list = q(d, "#hmList");
+  const paint = () => { const ns = shown(), v = list.value; list.innerHTML = ns.map(n => `<option>${esc(n)}</option>`).join(""); if (ns.includes(v)) list.value = v; else if (ns.length) list.selectedIndex = 0;
+    ["#hC", "#hM", "#hX"].forEach(x => q(d, x).disabled = !list.value);
+    const r = over.find(x => x.HingeName === list.value); q(d, "#hD").textContent = details && r ? `${r.DOFType || ""}, ${r.Behavior || ""}${/^y/i.test(r.AssignHinge || "") ? ", generated" : ""}` : ""; };
+  list.onchange = paint; list.ondblclick = () => list.value && one(list.value);
+  q(d, "#hDet").onchange = () => { details = q(d, "#hDet").checked; paint(); };
+  q(d, "#hGen").onchange = () => { showGen = q(d, "#hGen").checked; paint(); };
+  q(d, "#hA").onclick = () => { const x = dialog("Default For Added Hinges", `<fieldset style="margin:0"><legend>Use Defaults For</legend>${["Steel", "Concrete", "User Defined"].map((k, i) => `<label style="display:block"><input type="radio" name="hdU" value="${k}" ${i ? "" : "checked"}> ${k}</label>`).join("")}</fieldset>`,
+    [["OK", x => { const u = q(x, "[name=hdU]:checked").value; setTimeout(() => one(null, false, u)); }], ["Cancel"]], {width: 260}); };
+  q(d, "#hC").onclick = () => list.value && one(list.value, true);
+  q(d, "#hM").onclick = () => list.value && one(list.value);
+  q(d, "#hX").onclick = async () => { const n = list.value; if (!n) return;
+    for (const k of Object.keys(sapHingeNames)) if (T(k).some(r => r.HingeName === n)) { const j = await hmRun("define_table_rows", {table: sapHingeTable(k), name: n, rows: []}, true); if (!j.ok) return hmSay(j.error, true); }
+    again(); };
+  paint();
+  // Hinge Property Data: name, Force Controlled (Brittle) / Deformation Controlled (Ductile), the hinge type.
+  function one(n, copy, use) {
+    const o = n ? over.find(r => r.HingeName === n) || {} : {};
+    let k = 1; while (over.some(r => r.HingeName === "FH" + k)) k++;
+    const t0 = sapHingeTypes.find(t => sapHingeDof(t) === o.DOFType || t === o.DOFType) || "Axial P", force = /^force/i.test(o.Behavior || "");
+    const own = {};
+    for (const key of Object.keys(sapHingeNames)) { const rs = T(key).filter(r => r.HingeName === n); if (rs.length) own[key] = rs.map(r => Object.assign({}, r)); }
+    const h = dialog("Hinge Property Data", `<fieldset style="margin:0 0 6px"><legend>Hinge Property Name</legend><input id="hN" style="width:100%" value="${esc(!n ? "FH" + k : copy ? n + " copy" : n)}" ${n && !copy ? "disabled" : ""}></fieldset>
+      <fieldset style="margin:0"><legend>Hinge Type</legend><label style="display:block"><input type="radio" name="hB" value="Force Controlled" ${force ? "checked" : ""}> Force Controlled  (Brittle)</label><label style="display:block"><input type="radio" name="hB" value="Deformation Controlled" ${force ? "" : "checked"}> Deformation Controlled  (Ductile)</label>
+      <select id="hT" style="width:100%;margin:4px 0"></select><button id="hMS" style="width:100%">Modify/Show Hinge Property...</button></fieldset>`,
+      [["OK", async h => {
+        const nm = q(h, "#hN").value.trim(); if (!nm) { formError(h, "Give it a name."); return false; }
+        if ((!n || copy) && over.some(r => r.HingeName === nm)) { formError(h, "There is one named " + nm + " already."); return false; }
+        const type = q(h, "#hT").value, beh = q(h, "[name=hB]:checked").value, dof = /^(Fiber|Parametric)/.test(type) ? type : sapHingeDof(type);
+        const keep = ["01", "15", "16", "17", ...keysOf(type, beh)]; Object.keys(own).forEach(x => { if (!keep.includes(x)) delete own[x]; });
+        seed(type, beh);
+        own["01"] = [{AssignHinge: "No", DOFType: dof, Behavior: beh}];
+        for (const key of Object.keys(sapHingeNames)) {
+          const rows = (own[key] || []).map(r => { const c = Object.assign({}, r); delete c.HingeName; if ("DOFType" in c || ["02", "03", "04", "05"].includes(key)) c.DOFType = dof; if (!c.AssignHinge) c.AssignHinge = "No"; return c; });
+          if (!rows.length && !(n && !copy && T(key).some(r => r.HingeName === n))) continue;
+          const j = await hmRun("define_table_rows", {table: sapHingeTable(key), name: nm, rows}, true); if (!j.ok) { formError(h, j.error); return false; }
+        }
+        again();
+      }], ["Cancel"]], {width: 300});
+    const paintT = () => { const f = q(h, "[name=hB]:checked").value === "Force Controlled", list = f ? sapHingeTypes.slice(0, 10) : sapHingeTypes, v = q(h, "#hT").value || t0; q(h, "#hT").innerHTML = opts(list, list.includes(v) ? v : list[0]); };
+    h.querySelectorAll("[name=hB]").forEach(r => r.onchange = paintT); paintT();
+    function keysOf(type, beh) {
+      return beh === "Force Controlled" ? (/^Interacting/.test(type) ? ["10"] : ["05"]) : /^Interacting/.test(type) ? ["06", "07", "08", "09", "11", "12"] : /^Fiber/.test(type) ? ["13", "14"]
+        : /^Parametric Concrete/.test(type) ? ["18a", "18b", "18c", "18d", "18e"] : /^Parametric Steel/.test(type) ? ["19a", "19b", "19c", "19d", "19e"] : ["02", "03", "04"];
+    }
+    // A new hinge's first rows: the defaults the Default For Added Hinges choice gives.
+    function seed(type, beh) {
+      const def = sapHingeDefaults[use === "Concrete" ? "Concrete" : "Steel"];
+      if (beh === "Deformation Controlled" && !/^(Interacting|Fiber|Parametric)/.test(type)) {
+        if (own["02"] && own["02"].length) return;
+        own["02"] = [{Symmetric: "Yes", BeyondE: "Drops To Zero", FDType: /^(Moment|Torsion)/.test(type) ? "Moment-Rotation" : "Force-Displacement", UseYldForce: use === "User Defined" ? "No" : "Yes", UseYldDispl: use === "Steel" ? "Yes" : "No", HysType: "Isotropic"}];
+        own["03"] = sapHingePts.map((p, i) => ({FDPoint: p, Force: String(def.pts[i][0]), Displ: String(def.pts[i][1])}));
+        own["04"] = ["IO", "LS", "CP"].map((p, i) => ({ACPoint: p, ACPos: String(def.ac[i]), ACNeg: String(-def.ac[i])}));
+      }
+    }
+    q(h, "#hMS").onclick = () => {
+      const type = q(h, "#hT").value, beh = q(h, "[name=hB]:checked").value, nm = q(h, "#hN").value.trim() || "FH";
+      if (beh === "Deformation Controlled" && !/^(Interacting|Fiber|Parametric)/.test(type)) { seed(type, beh); return hmSapHingeDeform(nm, type, own); }
+      hmSapHingeRows(nm, type, keysOf(type, beh), own, dd);
+    };
+  }
+}
+// Frame Hinge Property Data for one non-interacting deformation-controlled hinge (P, V2, V3, T, M2, M3).
+function hmSapHingeDeform(name, type, own) {
+  const g = own["02"][0], mom = /^(Moment|Torsion)/.test(type), pts = sapHingePts.map(p => { const r = own["03"].find(x => x.FDPoint === p) || {}; return [+(r.Force || 0), +(r.Displ || 0)]; });
+  const ac = ["IO", "LS", "CP"].map(p => { const r = own["04"].find(x => x.ACPoint === p) || {}; return [+(r.ACPos || 0), +(r.ACNeg || 0)]; });
+  const col = {"E-": "#e00", "D-": "#e0e", "C-": "#0dd", "B-": "#0c0", A: "#fff", B: "#0c0", C: "#0dd", D: "#e0e", E: "#e00"};
+  const ssType = mom ? ["Moment - Rotation", "Moment - Curvature"] : ["Force - Displacement", "Stress - Strain"], ssVal = mom ? ["Moment-Rotation", "Moment-Curvature"] : ["Force-Displacement", "Stress-Strain"];
+  const sf = (k, v) => `<input id="${k}" type="number" step="any" style="width:70px" value="${esc(v ?? "")}">`;
+  const pre = mom ? "MR" : "FD";
+  const d = dialog(`Frame Hinge Property Data for ${esc(name)} - ${esc(type)}`, `<div class="menubar" style="margin:-4px 0 4px"><span id="hEd" style="padding:2px 6px;cursor:default">Edit</span></div><div style="display:flex;gap:10px"><div style="flex:1">
+    <fieldset style="margin:0 0 6px"><legend>Displacement Control Parameters</legend><div style="display:flex;gap:8px;align-items:flex-start"><div style="max-height:170px;overflow-y:auto"><table style="border-collapse:collapse;font-size:11px"><tr><th>Point</th><th>${mom ? "Moment/SF" : "Force/SF"}</th><th>${mom ? "Rotation/SF" : "Disp/SF"}</th></tr>
+      ${sapHingePts.map((p, i) => `<tr><td style="background:${col[p]};text-align:center;width:34px">${p}</td><td><input data-pf="${i}" type="number" step="any" style="width:70px" value="${pts[i][0]}"></td><td><input data-pd="${i}" type="number" step="any" style="width:70px" value="${pts[i][1]}"></td></tr>`).join("")}</table></div>
+      <div><canvas id="hPl" width="90" height="80" style="border:1px solid #999;background:#fff"></canvas><label style="display:block;margin-top:6px"><input type="checkbox" id="hSy" ${/^no/i.test(g.Symmetric || "") ? "" : "checked"}> Symmetric</label></div></div></fieldset>
+    <fieldset style="margin:0 0 6px"><legend>Load Carrying Capacity Beyond Point E</legend><label style="display:block"><input type="radio" name="hBe" value="Drops To Zero" ${/extrap/i.test(g.BeyondE || "") ? "" : "checked"}> Drops To Zero</label><label style="display:block"><input type="radio" name="hBe" value="Is Extrapolated" ${/extrap/i.test(g.BeyondE || "") ? "checked" : ""}> Is Extrapolated</label></fieldset>
+    <fieldset style="margin:0 0 6px"><legend>Scaling for ${mom ? "Moment and Rotation" : "Force and Disp"}</legend><div style="display:grid;grid-template-columns:1fr 70px 70px 70px;gap:3px 6px;align-items:center"><span></span><span></span><span style="text-align:center">Positive</span><span style="text-align:center">Negative</span>
+      <label><input type="checkbox" id="hYF" ${/^y/i.test(g.UseYldForce || "") ? "checked" : ""}> Use Yield ${mom ? "Moment" : "Force"}</label><span>${mom ? "Moment SF" : "Force SF"}</span>${sf("hFp", g[pre + "PosForSF"] ?? g[pre + "PosMoSF"])}${sf("hFn", g[pre + "NegForSF"] ?? g[pre + "NegMoSF"])}
+      <label><input type="checkbox" id="hYD" ${/^y/i.test(g.UseYldDispl || "") ? "checked" : ""}> Use Yield ${mom ? "Rotation" : "Disp"}</label><span>${mom ? "Rotation SF" : "Disp SF"}</span>${sf("hDp", g[pre + "PosDisSF"] ?? g[pre + "PosRoSF"])}${sf("hDn", g[pre + "NegDisSF"] ?? g[pre + "NegRoSF"])}<span style="padding-left:20px">(Steel Objects Only)</span></div></fieldset>
+    <fieldset style="margin:0"><legend>Acceptance Criteria (Plastic ${mom ? "Rotation" : "Disp"}/SF)</legend><div style="display:grid;grid-template-columns:16px 1fr 80px 80px;gap:3px 6px;align-items:center"><span></span><span></span><span style="text-align:center">Positive</span><span style="text-align:center">Negative</span>
+      ${[["#0e0", "Immediate Occupancy"], ["#0dd", "Life Safety"], ["#e00", "Collapse Prevention"]].map(([c, l], i) => `<span style="background:${c};height:12px"></span><span>${l}</span><input data-acp="${i}" type="number" step="any" value="${ac[i][0]}"><input data-acn="${i}" type="number" step="any" value="${ac[i][1]}">`).join("")}</div>
+      <label style="display:block;margin-top:4px"><input type="checkbox" id="hSAC"> Show Acceptance Criteria on Plot</label></fieldset></div>
+    <div style="width:220px"><fieldset style="margin:0 0 6px"><legend>Type</legend><label style="display:block"><input type="radio" name="hTy" value="0" ${/stress|curv/i.test(g.FDType || "") ? "" : "checked"}> ${ssType[0]}</label><label style="display:block"><input type="radio" name="hTy" value="1" ${/stress|curv/i.test(g.FDType || "") ? "checked" : ""}> ${ssType[1]}</label>
+      <div style="display:grid;grid-template-columns:1fr 80px;gap:3px;align-items:center;padding-left:18px"><span>Hinge Length</span><input id="hLen" type="number" step="any" value="${esc(g.SSRelLen ?? g.SSAbsLen ?? "")}"><label><input type="checkbox" id="hRel" ${/^abs/i.test(g.LengthType || "") ? "" : "checked"}> Relative Length</label><span></span></div></fieldset>
+      <fieldset style="margin:0"><legend>Hysteresis Type And Parameters</legend><div style="display:grid;grid-template-columns:90px 1fr;gap:3px;align-items:center"><span>Hysteresis Type</span><select id="hHy">${opts(sapHingeHys, g.HysType || "Isotropic")}</select></div><div id="hHp" style="margin-top:4px"></div></fieldset></div></div>`,
+    [["OK", d => {
+      read(); const sym = q(d, "#hSy").checked, ty = +q(d, "[name=hTy]:checked").value;
+      Object.assign(g, {Symmetric: sym ? "Yes" : "No", BeyondE: q(d, "[name=hBe]:checked").value, FDType: ssVal[ty], UseYldForce: q(d, "#hYF").checked ? "Yes" : "No", UseYldDispl: q(d, "#hYD").checked ? "Yes" : "No", HysType: q(d, "#hHy").value});
+      const put = (k, id) => { const v = q(d, id).value; if (v === "" || q(d, id).disabled) delete g[k]; else g[k] = String(+v); };
+      const F = mom ? ["MRPosMoSF", "MRNegMoSF", "MRPosRoSF", "MRNegRoSF"] : ["FDPosForSF", "FDNegForSF", "FDPosDisSF", "FDNegDisSF"];
+      put(F[0], "#hFp"); put(F[1], "#hFn"); put(F[2], "#hDp"); put(F[3], "#hDn");
+      if (ty === 1) { g.LengthType = q(d, "#hRel").checked ? "Relative" : "Absolute"; g[q(d, "#hRel").checked ? "SSRelLen" : "SSAbsLen"] = String(+q(d, "#hLen").value || 0); delete g[q(d, "#hRel").checked ? "SSAbsLen" : "SSRelLen"]; }
+      d.querySelectorAll("[data-pv]").forEach(i => g[i.dataset.pv] = String(+i.value || 0));
+      if (q(d, "#hHy").value !== "Pivot") ["PivotAlpha1", "PivotAlpha2", "PivotBeta1", "PivotBeta2", "PivotEta"].forEach(x => delete g[x]);
+      own["03"] = sapHingePts.map((p, i) => ({FDPoint: p, Force: String(pts[i][0]), Displ: String(pts[i][1])}));
+      own["04"] = ["IO", "LS", "CP"].map((p, i) => ({ACPoint: p, ACPos: String(ac[i][0]), ACNeg: String(ac[i][1])}));
+    }], ["Cancel"]], {width: 700});
+  const read = () => { d.querySelectorAll("[data-pf]").forEach(i => pts[+i.dataset.pf][0] = +i.value || 0); d.querySelectorAll("[data-pd]").forEach(i => pts[+i.dataset.pd][1] = +i.value || 0);
+    d.querySelectorAll("[data-acp]").forEach(i => ac[+i.dataset.acp][0] = +i.value || 0); d.querySelectorAll("[data-acn]").forEach(i => ac[+i.dataset.acn][1] = +i.value || 0);
+    if (q(d, "#hSy").checked) { for (let i = 0; i < 4; i++) { pts[i][0] = -pts[8 - i][0]; pts[i][1] = -pts[8 - i][1]; } ac.forEach(a => a[1] = -a[0]); } };
+  const paint = () => {
+    read(); const sym = q(d, "#hSy").checked, ty = +q(d, "[name=hTy]:checked").value;
+    d.querySelectorAll("[data-pf],[data-pd]").forEach(i => { const k = +(i.dataset.pf ?? i.dataset.pd); i.disabled = sym && k < 4; i.value = pts[k][i.dataset.pf != null ? 0 : 1]; });
+    d.querySelectorAll("[data-acn]").forEach(i => { i.disabled = sym; i.value = ac[+i.dataset.acn][1]; });
+    q(d, "#hFp").disabled = q(d, "#hYF").checked; q(d, "#hFn").disabled = q(d, "#hYF").checked || sym; q(d, "#hDp").disabled = q(d, "#hYD").checked; q(d, "#hDn").disabled = q(d, "#hYD").checked || sym;
+    q(d, "#hLen").disabled = q(d, "#hRel").disabled = ty === 0;
+    const hy = q(d, "#hHy").value;
+    q(d, "#hHp").innerHTML = hy === "Pivot" ? `<div style="display:grid;grid-template-columns:1fr 80px;gap:3px;align-items:center">${[["PivotAlpha1", "Alpha 1"], ["PivotAlpha2", "Alpha 2"], ["PivotBeta1", "Beta 1"], ["PivotBeta2", "Beta 2"], ["PivotEta", "Eta"]].map(([f, l]) => `<span>${l}</span><input data-pv="${f}" type="number" step="any" value="${esc(g[f] ?? (/Alpha|Beta/.test(f) ? 10 : 0))}">`).join("")}</div>`
+      : /^(Isotropic|Kinematic|Takeda)$/.test(hy) ? `<p class="kv" style="text-align:center;margin:2px">No Parameters Are Required For This Hysteresis Type</p>` : `<p class="kv" style="text-align:center;margin:2px">Parameters for this type are in Hinges Def ${hy === "Concrete" ? "15" : hy === "BRB Hardening" ? "16" : "17"} (Define > Hinge Properties > ${hy})</p>`;
+        const c = q(d, "#hPl"), x = c.getContext("2d"), W = c.width, H = c.height; x.clearRect(0, 0, W, H);
+    x.strokeStyle = "#ddd"; for (let i = 1; i < 6; i++) { x.beginPath(); x.moveTo(i * W / 6, 0); x.lineTo(i * W / 6, H); x.stroke(); x.beginPath(); x.moveTo(0, i * H / 6); x.lineTo(W, i * H / 6); x.stroke(); }
+    const mx = Math.max(...pts.map(p => Math.abs(p[1])), 1e-9), my = Math.max(...pts.map(p => Math.abs(p[0])), 1e-9), X = v => W / 2 + v / mx * (W / 2 - 6), Y = v => H / 2 - v / my * (H / 2 - 6);
+    x.strokeStyle = "#000"; x.beginPath(); pts.forEach((p, i) => i ? x.lineTo(X(p[1]), Y(p[0])) : x.moveTo(X(p[1]), Y(p[0]))); x.stroke();
+    pts.forEach((p, i) => { x.fillStyle = col[sapHingePts[i]] === "#fff" ? "#000" : col[sapHingePts[i]]; x.beginPath(); x.arc(X(p[1]), Y(p[0]), 2.5, 0, 7); x.fill(); });
+    if (q(d, "#hSAC").checked) [["#0e0", 0], ["#0dd", 1], ["#e00", 2]].forEach(([cc, i]) => { x.strokeStyle = cc; const B = pts[5][1]; [B + ac[i][0], -(B + Math.abs(ac[i][1]))].forEach(v => { x.beginPath(); x.moveTo(X(v), 0); x.lineTo(X(v), H); x.stroke(); }); });
+  };
+  d.querySelectorAll("input,select").forEach(i => i.addEventListener("change", paint));
+  q(d, "#hEd").onclick = () => { const m = dialog("Edit", `<button id="eC" style="width:100%">Copy Table</button><button id="eP" style="width:100%;margin-top:4px">Paste Table</button>`, [["Close"]], {width: 200});
+    q(m, "#eC").onclick = () => { read(); navigator.clipboard && navigator.clipboard.writeText(pts.map((p, i) => `${sapHingePts[i]}\t${p[0]}\t${p[1]}`).join("\n")).catch(() => {}); m.close(); };
+    q(m, "#eP").onclick = async () => { try { const t = await navigator.clipboard.readText(); t.trim().split(/\r?\n/).forEach((l, i) => { const c = l.split("\t"); if (i < 9 && c.length >= 3) pts[i] = [+c[1] || 0, +c[2] || 0]; }); } catch (e) {} m.close(); q(d, "#hSy").checked = false; paint(); }; };
+  paint();
+  return d;
+}
+// The other hinge types' data: each Hinges Def table the type fills, as its rows for this hinge.
+function hmSapHingeRows(name, type, keys, own, dd) {
+  const tabs = keys.map(k => [k, sapHingeNames[k]]);
+  let at = 0;
+  const d = dialog(`Frame Hinge Property Data for ${esc(name)} - ${esc(type)}`, `<div id="hTabs" style="display:flex;gap:2px;flex-wrap:wrap;margin-bottom:6px"></div><div id="hBody" style="max-height:420px;overflow:auto"></div><div style="margin-top:4px"><button id="hAdd">Add Row</button> <button id="hDel">Delete Row</button></div>`,
+    [["OK", () => { save(); }], ["Cancel"]], {width: 760});
+  const fieldsOf = k => (((dd.tables || {})[sapHingeTable(k)] || {}).fields || []).map(f => f[0]).filter(f => f !== "HingeName" && f !== "AssignHinge");
+  const save = () => { const k = tabs[at][0]; own[k] = [...d.querySelectorAll("#hBody tr[data-r]")].map(tr => { const r = {}; tr.querySelectorAll("[data-f]").forEach(i => { if (i.value !== "") r[i.dataset.f] = i.value; }); return r; }).filter(r => Object.keys(r).length); };
+  const paint = () => {
+    q(d, "#hTabs").innerHTML = tabs.map(([k, l], i) => `<button data-t="${i}" style="${i === at ? "font-weight:bold" : ""}">${esc(l.replace(/^.* - /, ""))}</button>`).join("");
+    d.querySelectorAll("[data-t]").forEach(b => b.onclick = () => { save(); at = +b.dataset.t; paint(); });
+    const k = tabs[at][0], fs = fieldsOf(k), rows = own[k] && own[k].length ? own[k] : [{}];
+    q(d, "#hBody").innerHTML = `<table style="font-size:11px;border-spacing:2px"><tr>${fs.map(f => `<th>${esc(f)}</th>`).join("")}</tr>${rows.map(r => `<tr data-r>${fs.map(f => `<td><input data-f="${f}" style="width:72px" value="${esc(r[f] ?? "")}"></td>`).join("")}</tr>`).join("")}</table>`;
+  };
+  q(d, "#hAdd").onclick = () => { save(); const k = tabs[at][0]; own[k] = (own[k] || []).concat([{}]); paint(); };
+  q(d, "#hDel").onclick = () => { save(); const k = tabs[at][0]; if (own[k] && own[k].length) own[k].pop(); paint(); };
+  paint();
+  return d;
+}
+// SAP2000 26.3's Define Frequency Dependent Links (NULL built in) and its property data: per direction, the stiffness
+// and damping at each frequency. Kept as SAP2000's Link Frequency Dependent Properties 01/02 rows.
+async function hmSapFreqLinks() {
+  const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  const G = "Link Frequency Dependent Properties 01 - General", D = "Link Frequency Dependent Properties 02 - Details";
+  const gen = (dd.tables[G] || {}).rows || [], det = (dd.tables[D] || {}).rows || [];
+  const names = ["NULL", ...gen.map(r => r.Link).filter(n => n !== "NULL")];
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmSapFreqLinks(); };
+  const one = n => {
+    const g = Object.assign({Color: "Cyan"}, gen.find(r => r.Link === n) || {}), rows = det.filter(r => r.Link === n).map(r => Object.assign({}, r));
+    let k = 1; while (names.includes("FD" + k)) k++;
+    const d = dialog("Frequency Dependent Link Property Data", `<div style="display:grid;grid-template-columns:120px 1fr auto;gap:5px 8px;align-items:center;margin-bottom:6px"><b>Property Name</b><input id="fN" value="${esc(n || "FD" + k)}" ${n ? "disabled" : ""}><span>Display <button id="fC" style="width:22px;height:16px;padding:0"></button></span><span>Property Notes</span><span></span><button id="fNo">Modify/Show...</button></div>
+      <fieldset style="margin:0"><legend>Frequency Dependent Properties</legend><div id="fT" style="max-height:300px;overflow:auto"></div><div style="margin-top:4px"><button id="fAdd">Add</button> <button id="fDel">Delete</button></div></fieldset>`,
+      [["OK", async d => {
+        read(); const nm = q(d, "#fN").value.trim(); if (!nm || nm === "NULL") { formError(d, "Give it a name."); return false; }
+        if (!n && names.includes(nm)) { formError(d, "There is one named " + nm + " already."); return false; }
+        const out = rows.map(r => { const c = Object.assign({}, r); delete c.Link; return c; });
+        let j = await hmRun("define_table_rows", {table: D, name: nm, rows: out}, true); if (!j.ok) { formError(d, j.error); return false; }
+        const gg = Object.assign({}, g); delete gg.Link; j = await hmRun("define_table_rows", {table: G, name: nm, rows: [gg]}, true); if (!j.ok) { formError(d, j.error); return false; }
+        again(); }], ["Cancel"]], {width: 640});
+    const F = [["Frequency", "Frequency"], ["K", "Stiffness"], ["C", "Damping"], ["TransRotK", "Coupled Stiffness"], ["TransRotC", "Coupled Damping"]];
+    const fld = (r, f) => f.length === 1 ? ((r.DOF || "U1")[0] === "R" ? "Rot" : "Trans") + f : f;
+    const read = () => d.querySelectorAll("#fT tr[data-i]").forEach(tr => { const r = rows[+tr.dataset.i]; const dof = q(tr, "[data-dof]").value; ["TransK", "RotK", "TransC", "RotC"].forEach(x => delete r[x]); r.DOF = dof;
+      tr.querySelectorAll("[data-f]").forEach(i => { r[fld(r, i.dataset.f)] = String(+i.value || 0); }); });
+    const paint = () => { q(d, "#fT").innerHTML = `<table style="font-size:11px;border-spacing:2px"><tr><th>Direction</th>${F.map(f => `<th>${f[1]}</th>`).join("")}</tr>${rows.map((r, i) => `<tr data-i="${i}"><td><select data-dof>${opts(["U1", "U2", "U3", "R1", "R2", "R3"], r.DOF || "U1")}</select></td>${F.map(([f]) => `<td><input data-f="${f}" type="number" step="any" style="width:90px" value="${esc(r[fld(r, f)] ?? 0)}"></td>`).join("")}</tr>`).join("")}</table>`; };
+    q(d, "#fAdd").onclick = () => { read(); rows.push({DOF: "U1", Frequency: "0"}); paint(); };
+    q(d, "#fDel").onclick = () => { read(); rows.pop(); paint(); };
+    q(d, "#fC").style.background = matColorCss(g.Color); q(d, "#fC").onclick = () => hmColor(g.Color, c => { g.Color = c; q(d, "#fC").style.background = matColorCss(c); });
+    q(d, "#fNo").onclick = () => dialog("Frequency Dependent Link Property Notes", `<textarea id="nT" rows="5" maxlength="255" style="width:100%;box-sizing:border-box">${esc(g.Notes || "")}</textarea><p class="kv" style="margin:4px 0 0">Note: Notes are limited to 255 characters maximum.</p>`, [["OK", x => { g.Notes = q(x, "#nT").value; }], ["Cancel"]], {width: 420});
+    paint(); return d;
+  };
+  const d = listForm("Define Frequency Dependent Links", "Properties", names, [
+    ["Add New Property...", () => one(null)],
+    ["Modify/Show Property...", n => n && n !== "NULL" && one(n)],
+    ["Delete Property", async n => { if (!n || n === "NULL") return; for (const t of [D, G]) { const j = await hmRun("define_table_rows", {table: t, name: n, rows: []}, true); if (!j.ok) return hmSay(j.error, true); } again(); }],
+  ], n => n !== "NULL" && one(n));
+  const list = q(d, "#hmList"), en = () => d.querySelectorAll("[data-a]").forEach((b, i) => { if (i) b.disabled = !list.value || list.value === "NULL"; });
+  list.addEventListener("change", en); en();
+  return d;
+}
 function hmDefineTableItems() {
   return [...defTables.map(([label, tables, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:dt:" + tables.join("|")])),
     only(["etabs"], ["Hinge Definitions", hingeKinds.map(k => [k + "...", "m:dt:Hinge Definitions - " + k])]),
