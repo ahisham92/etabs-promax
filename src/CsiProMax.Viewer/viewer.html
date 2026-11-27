@@ -1814,9 +1814,9 @@ function matrices(p, w, h) {
   const persp = c.persp && p.mode === "3d";
   let eye, proj;
   if (persp) {
-    const dist = c.hh / Math.tan(FOV / 2);
+    const fov = c.fov || FOV, dist = c.hh / Math.tan(fov / 2);
     eye = sub(c.target, mul(d, dist));
-    proj = perspM(FOV, asp, Math.max(R * 0.002, dist * 0.01), dist + R * 3 + off);
+    proj = perspM(fov, asp, Math.max(R * 0.002, dist * 0.01), dist + R * 3 + off);
   } else {
     const D = R * 3 + off + c.hh;
     eye = sub(c.target, mul(d, D));
@@ -2180,19 +2180,21 @@ function buildColours() {
 
 // ---- what each window shows ----
 const tol = () => Math.max(size * 1e-5, 1e-6);
-function elevationOf(name) { const s = stories.find(s => s.name === name); return s ? s.elevation : null; }
+function elevationOf(name) { const s = stories.find(s => s.name === name); return s ? s.elevation : typeof etv !== "undefined" && name in etv.zPlanes ? etv.zPlanes[name] : null; }
 function onLine(q, line) { return Math.abs((line.dir === "X" ? q[0] : q[1]) - line.at) <= tol() * 10; }
 function shown(o, p) {
   if (hidden.kind.has(o.kind) || hidden.section.has(o.type + ":" + o.section) || hidden.objs.has(o.id)) return false;
   if (o.type === "a" && !opt.fill) return false;
+  if (!etvInLimits(o) || !etvCutKeeps(p, o)) return false;
   if (p.mode === "plan") {
+    if (p.story in etv.zPlanes) { const z = etv.zPlanes[p.story], t = tol() * 10; return o.type === "f" ? Math.abs(Math.max(o.a[2], o.b[2]) - z) <= t : (o.pts || []).every(q => Math.abs(q[2] - z) <= t); }
     if (o.type === "f") { const z = elevationOf(p.story); return o.story ? o.story === p.story : z !== null && Math.abs(Math.max(o.a[2], o.b[2]) - z) <= tol() * 10; }
     return o.story === p.story;
   }
   if (p.mode === "elev") return !p.line || (o.type === "f" ? onLine(o.a, p.line) && onLine(o.b, p.line) : o.pts.every(q => onLine(q, p.line)));
   return true;
 }
-function paneSig(p) { return [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", opt.fill, [...hidden.kind].join(), [...hidden.section].join(), hidden.objs.size, selVersion, hover, objRows].join("|"); }
+function paneSig(p) { return [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", etvSig(), p.cut ? p.cut.dir + p.cut.at + p.cut.side : "", opt.fill, [...hidden.kind].join(), [...hidden.section].join(), hidden.objs.size, selVersion, hover, objRows].join("|"); }
 let selVersion = 0;
 function uploadObjects(p) {
   // The window's colours and flags: shown (1), selected (2), under the pointer (4).
@@ -2422,12 +2424,12 @@ function drawScene(p, M, R, dpr, mode) {
   // mode 0 draws for the eye, mode 1 draws object numbers for picking.
   const T = theme(), extrude = opt.extrude && opt.sections && (res.mode !== "forces" || res.fExtrude && etrOn()), see = !(extrude || opt.extrudeA && opt.sections) || opt.see || p.mode !== "3d";
   const contourOn = (res.mode === "contour" || res.mode === "shell") && contour;
-  const L = unitv(add(add(mul(M.d, -0.55), mul(M.up, 0.75)), mul(M.right, -0.35)));
+  const L = etvLight(M, unitv(add(add(mul(M.d, -0.55), mul(M.up, 0.75)), mul(M.right, -0.35))));
   gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); gl.disable(gl.BLEND);
   const solids = (buf, alpha, noContour) => {
     if (!buf || !buf.count) return;
     const pr = prog.solid; setCommon(pr, M, R, dpr, mode);
-    gl.uniform3fv(pr.u.uLight, L); gl.uniform3fv(pr.u.uFwd, M.d); gl.uniform1f(pr.u.uAlpha, alpha); gl.uniform1f(pr.u.uAmb, T.dark ? 0.38 : 0.46);
+    gl.uniform3fv(pr.u.uLight, L); gl.uniform3fv(pr.u.uFwd, M.d); gl.uniform1f(pr.u.uAlpha, alpha); gl.uniform1f(pr.u.uAmb, etvAmbient(T.dark ? 0.38 : 0.46));
     gl.uniform1i(pr.u.uContour, contourOn && !(noContour && areas.length) ? 1 : 0);
     const eS = etrOn() && res.mode === "shell" && res.etrS; if (pr.u.uCLine) gl.uniform1f(pr.u.uCLine, eS && eS.lines ? eS.lw : 0); if (pr.u.uCFill) gl.uniform1i(pr.u.uCFill, eS && !eS.fill ? 0 : 1);
     if (contourOn) { const bands = bandSet(); gl.uniform2f(pr.u.uRange, contour.lo, contour.hi); gl.uniform1i(pr.u.uNB, bands.length); const flatB = new Float32Array(36); bands.forEach((c, i) => flatB.set(rgb(c), i * 3)); gl.uniform3fv(pr.u.uBands, flatB); }
@@ -2851,7 +2853,7 @@ function drawReactions(p, g, to, T, given) {
 function drawAxes(p, g, M, T, h) {
   // The global axes at the global origin, as the program draws them: red X, green Y and blue Z arrows, named in plan.
   // When the origin is out of the window they stand in its corner instead.
-  const z = p.mode === "plan" ? (elevationOf(p.story) ?? 0) : stories.length ? stories[0].elevation : 0, at = M.to([0, 0, z]);
+  const z = p.mode === "plan" ? (elevationOf(p.story) ?? 0) : stories.length ? stories[0].elevation : 0, A = p.axesAt, at = M.to(A ? [A[0], A[1], p.mode === "plan" ? z : A[2]] : [0, 0, z]);
   const w = p.R ? p.R.w : 1e9, inside = at[3] && at[0] > 4 && at[1] > 4 && at[0] < w - 4 && at[1] < h - 4;
   const o = inside ? [at[0], at[1]] : [38, h - 38], L = p.mode === "3d" ? 30 : 38;
   g.lineWidth = 1.6; g.setLineDash([]); g.font = "bold 13px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.lineCap = "butt";
@@ -3160,7 +3162,7 @@ function wire(p) {
     let act;
     if (e.button === 1) { act = e.shiftKey ? "orbit" : "pan"; if (performance.now() - lastMid < 350) { fit(p); act = "none"; } lastMid = performance.now(); e.preventDefault(); }
     else if (e.button === 2) act = p.mode === "3d" && !e.shiftKey ? "orbit" : "pan";
-    else act = tool.startsWith("d:") ? "draw" : tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : tool === "iline" ? "iline" : e.altKey && p.mode === "3d" ? "orbit" : "box";
+    else act = tool.startsWith("measure:") ? "measure" : tool === "walk" ? "walk" : tool.startsWith("d:") ? "draw" : tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : tool === "iline" ? "iline" : e.altKey && p.mode === "3d" ? "orbit" : "box";
     drag = {x, y, x0: x, y0: y, sx: e.clientX, sy: e.clientY, moved: false, act, button: e.button, ctrl: e.ctrlKey || e.metaKey || e.shiftKey};
     hideTip();
   });
@@ -3173,6 +3175,7 @@ function wire(p) {
     if (!drag.moved) return;
     if (drag.act === "iline") { p.iline = [[drag.x0, drag.y0], [x, y]]; draw(); }
     else if (drag.act === "pan") panBy(p, dx, dy);
+    else if (drag.act === "walk") etvWalk(p, dx, dy);
     else if (drag.act === "orbit") orbitBy(p, dx, dy);
     else if (drag.act === "box" || drag.act === "rubberzoom") {
       const rb = $("rubber"), l = Math.min(e.clientX, drag.sx), t = Math.min(e.clientY, drag.sy);
@@ -3185,6 +3188,8 @@ function wire(p) {
     const [x, y] = local(e), d = drag; drag = null; $("rubber").style.display = "none";
     if (!d || !P) return;
     if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); return; }
+    if (d.act === "measure") { if (!d.moved && d.button === 0) etvMeasureClick(p, x, y, false); else if (d.button === 2) etv.measure = null; return; }
+    if (d.act === "walk") return;
     if (d.act === "iline") { p.iline = null; if (d.moved) { const n = lineSelect(p, [d.x0, d.y0], [x, y]); $("hint").textContent = n + " objects crossed by the line selected."; } else draw(); return; }
     if (!d.moved && d.button === 2 && tool.startsWith("d:") && hm.chain.length) { hm.chain = []; draw(); return; }
     if (!d.moved) {
@@ -3204,7 +3209,7 @@ function wire(p) {
       else boxSelect(p, r, x < d.x0, true);
     }
   });
-  cv.addEventListener("dblclick", e => { const [x, y] = local(e); if (tool.startsWith("d:")) { if (drawKind() === "floor") drawClick(p, x, y, true); return; } const {j, id} = pickAt(p, x, y, 5); if (j) return jointInfo(j); if (id) infoWindow(id); });
+  cv.addEventListener("dblclick", e => { const [x, y] = local(e); if (tool.startsWith("measure:")) { if (etv.measure && etv.measure.kind === "area" && etv.measure.pts.length > 3) { etv.measure.pts.pop(); etvMeasureClick(p, x, y, true); } return; } if (tool === "walk") return; if (tool.startsWith("d:")) { if (drawKind() === "floor") drawClick(p, x, y, true); return; } const {j, id} = pickAt(p, x, y, 5); if (j) return jointInfo(j); if (id) infoWindow(id); });
   cv.addEventListener("pointerleave", () => { $("coords").textContent = ""; hideTip(); if (hover) { hover = 0; draw(); } });
   cv.addEventListener("contextmenu", e => e.preventDefault());
   cv.addEventListener("auxclick", e => e.preventDefault());
@@ -3440,7 +3445,7 @@ function syncNav() {
 }
 function setMode(p, mode) {
   if (!p) return;
-  p.mode = mode; p.sig = ""; p.diagSig = null;
+  p.mode = mode; p.sig = ""; p.diagSig = null; p.cut = null;
   if (mode === "elev" && !p.line) p.line = grids.Y[0] || allLines()[0] || null;
   if (mode !== "plot") { p.cam = {...p.cam, ...planeCam(p), persp: mode === "3d" ? p.cam.persp : false}; p.vis = null; p.cam = fitCam(p, p.cam); }
   syncTools(); draw();
@@ -5975,6 +5980,8 @@ function modelerMenus(m) {
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
     only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0, ["Snap and Story Options...", "m:drawHelp"]];
   if (etnOn()) m.Draw = etnDrawMenu();
+  if (etnOn()) m.Select = etsSelectMenu();
+  if (etnOn()) m.View = etvViewMenu();
   // ETABS 23.2's own Assign menu, item for item (hmEtabsAssignMenu); SAP2000's and SAFE's below.
   if (program === "etabs") m.Assign = hmEtabsAssignMenu(); else
   // SAP2000's Assign menu has no top-level section or restraint items: they are in its Joint, Frame and Area submenus.
@@ -6688,9 +6695,360 @@ document.addEventListener("keydown", e => {
   const a = Object.keys(keys).find(x => keys[x] === k); if (!a) return;
   e.preventDefault(); e.stopImmediatePropagation(); act(a);
 }, true);
+// ---- ETABS 23.2's Select menu (pictures in field/reference-forms/etabs/Select): Select and Deselect with the same
+// submenus (Pointer/Window, Intersecting Line, Object Type, Properties, Labels, Groups, Stories, All), Invert
+// Selection, Get Previous Selection and Clear Selection. Each list form has Select, Deselect and Close; property and
+// unique-name lists have a Filter with Clear Filter, label lists a Story box ("All"). ----
+const etsObjs = () => frames.concat(areas).filter(o => !o.other || o.other === "link");
+const etsJointStory = n => { const q = pointXyz.get(String(n)); if (!q) return ""; const s = stories.find(x => Math.abs(x.elevation - q[2]) < 1e-6); return s ? s.name : ""; };
+const etsLabel = n => String(n).replace(/@.*$/, "");
+const etsKinds = [["Joints", "joint"], ["Columns", "column"], ["Beams", "beam"], ["Braces", "brace"], ["Null Lines", "nullframe"], ["Walls", "wall"], ["Floors", "floor"], ["Null Areas", "nullarea"], ["Openings", "opening"], ["Links", "link"], ["Null Links", "nulllink"]];
+function etsApply(on, objIds, jointNames) {
+  if (on && (sel.size || selJ.size)) prevSel = {f: [...sel], j: [...selJ]};
+  for (const id of objIds || []) on ? sel.add(id) : sel.delete(id);
+  for (const n of jointNames || []) on ? selJ.add(String(n)) : selJ.delete(String(n));
+  selChanged();
+  hmSay(`${sel.size} objects and ${selJ.size} joints selected.`);
+}
+// One list form: pick names, then Select or Deselect what they name; the form stays open (Close closes it).
+function etsList(title, legend, names, pick, o) {
+  o = o || {};
+  const storyBox = o.story ? `<fieldset><legend>Select at This Story Level</legend><div class="g2"><span>Story</span><select id="esS">${opts(["All", ...stories.slice().reverse().map(s => s.name)], "All")}</select></div></fieldset>` : "";
+  const filterBox = o.filter ? `<fieldset><legend>Filter</legend><div style="display:flex;gap:6px"><input id="esF" style="flex:1"><button id="esC">Clear Filter</button></div></fieldset>` : "";
+  const d = dialog(title, `${storyBox}${filterBox}<fieldset><legend>${esc(legend)}</legend><select id="esL" multiple size="16" style="width:100%;min-width:240px">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select></fieldset>`,
+    [["Select", x => { go(x, true); return false; }, true], ["Deselect", x => { go(x, false); return false; }, true], ["Close"]], {width: 360, float: true});
+  const go = (x, on) => { const chosen = [...q(x, "#esL").selectedOptions].map(op => op.value); if (!chosen.length) return hmSay("Pick at least one in the list.", true); const st = o.story ? q(x, "#esS").value : "All"; Promise.resolve(pick(chosen, st)).then(r => etsApply(on, r.ids, r.joints)); };
+  if (o.filter) { const f = q(d, "#esF"), paint = () => { const t = f.value.toLowerCase(); q(d, "#esL").innerHTML = names.filter(n => n.toLowerCase().includes(t)).map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join(""); }; f.oninput = paint; q(d, "#esC").onclick = () => { f.value = ""; paint(); }; }
+  const l = q(d, "#esL"); if (l.options.length) l.options[0].selected = true;
+  return d;
+}
+const etsOnStory = (o, st) => st === "All" || o.story === st;
+// What an object's assignments say (pier, spandrel, groups, springs, panel zone), asked of the model once per form.
+async function etsInfo() {
+  const names = etsObjs().map(o => o.name).concat(points.map(p => { const s = etsJointStory(p[0]); return s ? etsLabel(p[0]) + "@" + s : ""; }).filter(Boolean));
+  const j = await hmPost({tool: "property_definitions", args: {objects: names}}).catch(() => null);
+  return new Map(((j && j.ok && j.result.objects) || []).map(x => [x.object, x]));
+}
+const etsJointsOf = info => (pred) => points.filter(p => { const s = etsJointStory(p[0]); const x = info.get(etsLabel(p[0]) + "@" + s); return x && pred(x); }).map(p => String(p[0]));
+async function etsForm(what) {
+  const defs = await hmDefs(), objs = etsObjs(), byKind = k => objs.filter(o => k === "floor" ? o.kind === "floor" || o.kind === "ramp" : o.kind === k);
+  const ids = list => list.map(o => o.id);
+  switch (what) {
+    case "type": return etsList("Select by Object Type", "Object Type", etsKinds.map(k => k[0]), chosen => {
+      const ks = chosen.map(c => etsKinds.find(k => k[0] === c)[1]);
+      return {ids: ids(objs.filter(o => ks.some(k => k === "floor" ? o.kind === "floor" || o.kind === "ramp" : o.kind === k))), joints: ks.includes("joint") ? points.map(p => String(p[0])) : []};
+    });
+    case "material": { const mats = (defs.materials || []).map(m => m.name || m); return etsList("Select by Material Property", "Material Properties", mats, chosen => ({ids: ids(objs.filter(o => chosen.includes(sectionMat.get(o.section) || ((defs.frame_sections || []).concat(defs.shell_sections || []).find(s => s.name === o.section) || {}).material)))}), {filter: true}); }
+    case "frame": return etsList("Select by Frame Property", "Frame Properties", ["None", ...(defs.frame_sections || []).map(s => s.name)].sort((a, b) => a.localeCompare(b)), chosen => ({ids: ids(frames.filter(o => chosen.includes(o.section || "None")))}), {filter: true});
+    case "slab": case "deck": case "wall": { const word = {slab: "Slab", deck: "Deck", wall: "Wall"}[what], list = (defs.shell_sections || []).filter(s => s.kind === what).map(s => s.name); return etsList(`Select by ${word} Property`, `${word} Properties`, list, chosen => ({ids: ids(areas.filter(o => chosen.includes(o.section)))}), {filter: true}); }
+    case "link": { const pd = (await hmRun("property_definitions", {}, true)).result || {links: []}; return etsList("Select by Link/Support Property", "Link/Support Properties", (pd.links || []).map(l => l.name), chosen => ({ids: ids(frames.filter(o => o.kind === "link" && chosen.includes(o.section)))}), {filter: true}); }
+    case "pspring": case "lspring": case "aspring": {
+      const kind = {pspring: "point", lspring: "line", aspring: "area"}[what], pd = (await hmRun("property_definitions", {}, true)).result || {springs: []}, list = (pd.springs || []).filter(s => !s.kind || s.kind === kind).map(s => s.name);
+      return etsList(`Select by ${{point: "Point", line: "Line", area: "Area"}[kind]} Spring Property`, `${{point: "Point", line: "Line", area: "Area"}[kind]} Springs`, list, async chosen => {
+        const info = await etsInfo();
+        if (kind === "point") return {joints: etsJointsOf(info)(x => x.kind === "joint" && chosen.includes(x.spring))};
+        return {ids: ids((kind === "line" ? frames : areas).filter(o => chosen.includes((info.get(o.name) || {}).spring)))};
+      }, {filter: true});
+    }
+    case "panel": {
+      const info = await etsInfo(), pz = x => { for (const [t, rows] of Object.entries(x.tables || {})) if (/panel zone/i.test(t)) for (const r of [].concat(rows)) { const v = r && (r.Property || r.PZProp || r.PanelZone); if (v) return String(v); } return ""; };
+      const list = [...new Set([...info.values()].filter(x => x.kind === "joint").map(pz).filter(Boolean))];
+      return etsList("Select by Panel Zone Property", "Panel Zones", list, chosen => ({joints: etsJointsOf(info)(x => x.kind === "joint" && chosen.includes(pz(x)))}), {filter: true});
+    }
+    case "pier": case "spandrel": {
+      const info = await etsInfo(), list = [...new Set([...info.values()].map(x => x[what]).filter(Boolean))].sort();
+      return etsList(`Select by ${what === "pier" ? "Pier" : "Spandrel"} Label`, `${what === "pier" ? "Pier" : "Spandrel"} Labels`, list, (chosen, st) => ({ids: ids(objs.filter(o => etsOnStory(o, st) && chosen.includes((info.get(o.name) || {})[what])))}), {story: true});
+    }
+    case "jlabel": return etsList("Select by Joint Label", "Joint Labels", [...new Set(points.map(p => etsLabel(p[0])))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true})), (chosen, st) => ({joints: points.filter(p => chosen.includes(etsLabel(p[0])) && (st === "All" || etsJointStory(p[0]) === st)).map(p => String(p[0]))}), {story: true});
+    case "flabel": return etsList("Select by Frame Label", "Frame Labels", [...new Set(frames.map(o => etsLabel(o.name)))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true})), (chosen, st) => ({ids: ids(frames.filter(o => etsOnStory(o, st) && chosen.includes(etsLabel(o.name))))}), {story: true});
+    case "slabel": return etsList("Select by Shell Label", "Shell Labels", [...new Set(areas.map(o => etsLabel(o.name)))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true})), (chosen, st) => ({ids: ids(areas.filter(o => etsOnStory(o, st) && chosen.includes(etsLabel(o.name))))}), {story: true});
+    case "jname": return etsList("Select by Joint Unique Names", "Joint Unique Names", points.map(p => String(p[0])), chosen => ({joints: chosen}), {filter: true});
+    case "fname": return etsList("Select by Frame Unique Names", "Frame Unique Names", frames.filter(o => o.kind !== "link").map(o => o.name), chosen => ({ids: ids(frames.filter(o => chosen.includes(o.name)))}), {filter: true});
+    case "sname": return etsList("Select by Shell Unique Names", "Shell Unique Names", areas.map(o => o.name), chosen => ({ids: ids(areas.filter(o => chosen.includes(o.name)))}), {filter: true});
+    case "lname": return etsList("Select by Link Unique Names", "Link Unique Names", frames.filter(o => o.kind === "link").map(o => o.name), chosen => ({ids: ids(frames.filter(o => chosen.includes(o.name)))}), {filter: true});
+    case "groups": {
+      const sd = (await hmRun("structure_definitions", {}, true)).result || {groups: []}, list = ["All", ...(sd.groups || []).map(g => g.name).filter(n => !/^all$/i.test(n))];
+      return etsList("Select by Groups", "Groups", list, async chosen => {
+        if (chosen.includes("All")) return {ids: ids(objs), joints: points.map(p => String(p[0]))};
+        const info = await etsInfo(), inG = x => (x.groups || []).some(g => chosen.includes(g));
+        return {ids: ids(objs.filter(o => inG(info.get(o.name) || {}))), joints: etsJointsOf(info)(x => x.kind === "joint" && inG(x))};
+      });
+    }
+    case "stories": return etsList("Select by Stories", "Stories", stories.slice().reverse().map(s => s.name), chosen => ({ids: ids(objs.filter(o => chosen.includes(o.story))), joints: points.filter(p => chosen.includes(etsJointStory(p[0]))).map(p => String(p[0]))}));
+  }
+}
+function etsSub(de) {
+  const p = de ? "m:ets:" : "m:ets:";
+  const f = k => p + k;
+  return [["Pointer/Window", "t:select"], ["Intersecting Line", "t:iline", de ? "" : "Shift+Ctrl+L"], 0,
+    ["Object Type...", f("type")], 0,
+    ["Properties", [["Material Properties...", f("material")], 0, ["Frame Sections...", f("frame")], ["Slab Sections...", f("slab")], ["Deck Sections...", f("deck")], ["Wall Sections...", f("wall")], 0, ["Link/Support Properties...", f("link")], 0, ["Point Springs...", f("pspring")], ["Line Springs...", f("lspring")], ["Area Springs...", f("aspring")], 0, ["Panel Zones...", f("panel")]]], 0,
+    ["Labels", [["Pier Labels...", f("pier")], ["Spandrel Labels...", f("spandrel")], 0, ["Joint Labels...", f("jlabel")], ["Frame Labels...", f("flabel")], ["Shell Labels...", f("slabel")], 0, ["Joint Unique Names...", f("jname")], ["Frame Unique Names...", f("fname")], ["Shell Unique Names...", f("sname")], ["Link Unique Names...", f("lname")]]], 0,
+    ["Groups...", f("groups"), de ? "" : "Ctrl+G"], 0, ["Stories...", f("stories")], 0, ["All", de ? "selNone" : "selAll", de ? "" : "Ctrl+A"]];
+}
+function etsSelectMenu() {
+  return [["Select", etsSub(false)], ["Deselect", etsSub(true)], 0, ["Invert Selection", "selInvert", "Ctrl+K"], 0, ["Get Previous Selection", "selPrev", "Ctrl+J", !prevSel.f.length && !prevSel.j.length], 0, ["Clear Selection", "selNone", "Ctrl+Q", !sel.size && !selJ.size]];
+}
+// Ctrl+K, Ctrl+J, Ctrl+Q and Ctrl+G as ETABS has them.
+document.addEventListener("keydown", e => {
+  if (program !== "etabs" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || (e.target.closest && e.target.closest("input, textarea, select"))) return;
+  const a = {k: "selInvert", j: "selPrev", q: "selNone", g: "m:ets:groups"}[e.key.toLowerCase()]; if (!a) return;
+  e.preventDefault(); act(a);
+});
+// ---- ETABS View menu, read from the 23.2 pictures (field/reference-forms/etabs/View) ----
+var etv = {limits: null, zPlanes: {}, lastHidden: [], measure: null, cutSide: "Left"};
+const etvKey = k => "cpm-etabs-" + k + ":" + ((P && P.manifest && (P.manifest.model || P.manifest.name)) || "model");
+function etvUserElev() { try { return JSON.parse(localStorage.getItem(etvKey("elevations")) || "[]"); } catch { return etvUserElev.mem || []; } }
+function etvUserElevSave(list) { etvUserElev.mem = list; try { localStorage.setItem(etvKey("elevations"), JSON.stringify(list)); } catch {} }
+function etvDx() { try { return JSON.parse(localStorage.getItem("cpm-etabs-directx") || "null"); } catch { return null; } }
+const etvDxDefault = {dir: true, dPlan: 0, dElev: 0, amb: 0.3, spec: true, sPlan: 0, sElev: 0, power: 10, aa: true, ms: true, nFrames: true, nShells: true, step: 0, near: 0.05, far: 0.95};
+const etvM = v => v / (L(1) || 1);
+function etvSig() { const l = etv.limits; return (l && !l.ignore ? [l.x0, l.x1, l.y0, l.y1, l.top, l.bot].join(",") : "") + "|" + Object.keys(etv.zPlanes).length; }
+function etvInLimits(o) {
+  // Set Building View Limits: an object shows when all of it lies inside the plan box and the story range.
+  const l = etv.limits; if (!l || l.ignore) return true;
+  const pts = o.type === "f" ? [o.a, o.b] : o.pts || [], t = tol() * 10, zt = elevationOf(l.top), zb = elevationOf(l.bot);
+  return pts.every(q => q[0] >= l.x0 - t && q[0] <= l.x1 + t && q[1] >= l.y0 - t && q[1] <= l.y1 + t && (zt === null || q[2] <= zt + t) && (zb === null || q[2] >= zb - t));
+}
+function etvCutKeeps(p, o) {
+  // Set Elevation View with 3D Section Cut: the 3-D view keeps the part on one side of the elevation.
+  const c = p.cut; if (!c || p.mode !== "3d") return true;
+  const i = c.dir === "X" ? 0 : 1, t = tol() * 10, pts = o.type === "f" ? [o.a, o.b] : o.pts || [];
+  return pts.every(q => c.side === "Left" ? q[i] >= c.at - t : q[i] <= c.at + t);
+}
+function etvViewMenu() {
+  const p = panes[active], anySel = sel.size || selJ.size, anyHidden = hidden.objs.size || hidden.kind.size || hidden.section.size;
+  return [["Set 3D View...", "m:etv:3d", "Shift+Ctrl+F3"], ["Set Plan View...", "m:etv:plan", "Shift+Ctrl+F1"], ["Set Elevation View...", "m:etv:elev", "Shift+Ctrl+F2"], 0,
+    ["Set Building View Limits...", "m:etv:limits"], 0,
+    ["Set Display Options...", "dlg:display", "Ctrl+W"], 0,
+    ["Rubber Band Zoom", "t:zoom", "F2"], ["Restore Full View", "fitActive", "F3"], ["Previous Zoom", "zprev"], ["Zoom In One Step", "zin", "Shift+F2"], ["Zoom Out One Step", "zout", "Shift+F3"], 0,
+    ["Pan", "t:pan", "F10", !(p && p.camPrev)], ["Walk", "t:walk"], 0,
+    ["Measure", [["Measure Line", "t:measure:line"], ["Measure Angle", "t:measure:angle"], ["Measure Area", "t:measure:area"]]], 0,
+    ["Set Grid System Visibility...", "o:grid", "Ctrl+D"], ["Show Axes", "o:axes"], ["Change Axes Location...", "m:etv:axes"], 0,
+    ["Show Selected Objects Only", "m:etv:only", "Shift+Ctrl+J", !anySel], ["Invert Visibility of Objects", "m:etv:invert", "", !anyHidden], ["Make Selected Objects Invisible", "m:etv:hide", "", !sel.size],
+    ["Restore Visibility of Previous Selection", "m:etv:restore", "", !etv.lastHidden.length], ["Show All Objects", "showAll", "Shift+Ctrl+A", !anyHidden], 0,
+    ["Refresh Window", "m:etv:refreshW", "Shift+Ctrl+W"], ["Refresh View", "m:etv:refreshV", "Shift+Ctrl+V"], 0,
+    ["Show Rendered View (Ray Tracing)", "m:etv:render", "", true], ["DirectX View Settings", "m:etv:dx"]];
+}
+function etvHide(ids) { if (!ids.length) return; etv.lastHidden = ids.slice(); ids.forEach(id => hidden.objs.add(id)); hiddenVersion++; sel.clear(); selJ.clear(); selChanged(); }
+function etvAct(a) {
+  const p = panes[active], all = frames.concat(areas);
+  if (a === "3d") return etvView3d();
+  if (a === "plan") return etvPlanView();
+  if (a === "elev") return etvElevView();
+  if (a === "limits") return etvLimits();
+  if (a === "axes") return etvAxes();
+  if (a === "dx") return etvDxForm();
+  if (a === "hide") return etvHide([...sel]);
+  if (a === "only") { const keep = new Set(sel); for (const f of frames) if (selJ.has(f.j1) && selJ.has(f.j2)) keep.add(f.id); return etvHide(all.filter(o => !keep.has(o.id) && !hidden.objs.has(o.id)).map(o => o.id)); }
+  if (a === "invert") { const was = new Set(hidden.objs), kind = new Set(hidden.kind), secs = new Set(hidden.section); hidden.objs.clear(); hidden.kind.clear(); hidden.section.clear(); for (const o of all) if (!(was.has(o.id) || kind.has(o.kind) || secs.has(o.type + ":" + o.section))) hidden.objs.add(o.id); hiddenVersion++; buildTree(); return selChanged(); }
+  if (a === "restore") { for (const id of etv.lastHidden) hidden.objs.delete(id); const ids = etv.lastHidden; etv.lastHidden = []; hiddenVersion++; ids.forEach(id => sel.add(id)); return selChanged(); }
+  if (a === "refreshW") { if (p) { p.sig = ""; p.vis = null; } return draw(); }
+  if (a === "refreshV") { geometryDirty = true; geometryStamp++; hiddenVersion++; colourDirty = true; panes.forEach(q => { q.sig = ""; q.vis = null; q.auxSig = ""; }); return draw(); }
+}
+function etvSpin(id, v, step) { return `<span style="display:inline-flex;align-items:center"><input id="${id}" value="${esc(String(v))}" style="width:64px"><span style="display:inline-flex;flex-direction:column;margin-left:2px"><button type="button" data-sp="${id}" data-d="${step}" style="padding:0 4px;line-height:9px;font-size:8px">&#9650;</button><button type="button" data-sp="${id}" data-d="${-step}" style="padding:0 4px;line-height:9px;font-size:8px">&#9660;</button></span></span>`; }
+function etvSpinWire(d, after) { d.querySelectorAll("[data-sp]").forEach(b => b.onclick = () => { const i = q(d, "#" + b.dataset.sp); i.value = String(Math.round(((+i.value || 0) + +b.dataset.d) * 1000) / 1000); if (after) after(); }); }
+function etvView3d() {
+  // Set 3D View: ETABS's plan angle is where the eye stands, measured from X; elevation is above the XY plane; aperture 0 is no perspective.
+  const p = panes[active]; if (!p) return;
+  const deg = r => Math.round(r * 1800 / Math.PI) / 10, plan = ((deg(p.cam.yaw) + 180) % 360 + 360) % 360, elev = Math.round(deg(p.cam.pitch)), ap = p.cam.ap ?? 60;
+  const d = dialog("Set 3D View", `<div style="display:flex;gap:10px;margin-bottom:8px"><canvas id="e3Box" width="150" height="120" style="border:1px solid var(--line);background:#fff"></canvas><canvas id="e3Ax" width="96" height="120" style="border:1px solid var(--line);background:#fff"></canvas></div>
+    <div style="display:flex;gap:8px"><fieldset style="flex:1"><legend>View Direction Angle</legend><div class="g2"><span>${etvSpin("e3P", plan === 0 ? 0 : plan, 5)}</span><span>Plan</span><span>${etvSpin("e3E", elev, 5)}</span><span>Elevation</span><span>${etvSpin("e3A", ap, 5)}</span><span>Aperture</span></div></fieldset>
+    <fieldset><legend>Fast View</legend><div style="display:grid;grid-template-columns:auto auto;gap:6px"><button type="button" data-fv="3d">3d</button><button type="button" data-fv="xy">xy</button><button type="button" data-fv="xz">xz</button><button type="button" data-fv="yz">yz</button></div></fieldset></div>`,
+    [["OK", d => {
+      const pl = fnum(d, "#e3P"), el = fnum(d, "#e3E"), a = fnum(d, "#e3A");
+      if (![pl, el, a].every(isFinite)) { formError(d, "Enter numbers for Plan, Elevation and Aperture."); return false; }
+      if (a < 0 || a >= 180) { formError(d, "Aperture must be from 0 to less than 180 degrees."); return false; }
+      if (p.mode !== "3d") setMode(p, "3d");
+      const cam = {...p.cam, yaw: (pl - 180) * Math.PI / 180, pitch: Math.max(-89.9, Math.min(89.99, el)) * Math.PI / 180, persp: a > 0, ap: a, fov: a > 0 ? a * Math.PI / 180 : p.cam.fov};
+      go(p, fitCam(p, cam)); syncTools();
+    }], ["Cancel"]], {width: 400});
+  const paint = () => {
+    const c = q(d, "#e3Ax"), g = c.getContext("2d"), pl = (+q(d, "#e3P").value || 0) * Math.PI / 180, el = (+q(d, "#e3E").value || 0) * Math.PI / 180;
+    const {right, up} = camAxes({yaw: pl - Math.PI, pitch: Math.min(el, Math.PI / 2 - 1e-4)});
+    g.clearRect(0, 0, c.width, c.height); g.font = "10px Segoe UI"; g.lineWidth = 1.4;
+    for (const [n, v, col] of [["X", [1, 0, 0], "#e00"], ["Y", [0, 1, 0], "#0a0"], ["Z", [0, 0, 1], "#00d"]]) { const x = dot(v, right), y = dot(v, up); if (Math.hypot(x, y) < 0.05) continue; g.strokeStyle = g.fillStyle = col; g.beginPath(); g.moveTo(48, 64); g.lineTo(48 + x * 34, 64 - y * 34); g.stroke(); g.fillText(n, 50 + x * 38, 66 - y * 38); }
+    const b = q(d, "#e3Box").getContext("2d"); b.fillStyle = "#c8ccd2"; b.fillRect(0, 0, 150, 120); b.fillStyle = "#e6e2a8"; b.fillRect(14, 10, 122, 100); b.fillStyle = "#a8d8d8"; b.fillRect(22, 14, 106, 92); b.fillStyle = "#b9bdc3"; b.fillRect(28, 18, 94, 84);
+  };
+  etvSpinWire(d, paint); d.querySelectorAll("#e3P,#e3E").forEach(i => i.oninput = paint);
+  const fast = {"3d": [315, 35], xy: [270, 90], xz: [270, 0], yz: [0, 0]};
+  d.querySelectorAll("[data-fv]").forEach(b => b.onclick = () => { const [pl, el] = fast[b.dataset.fv]; q(d, "#e3P").value = pl; q(d, "#e3E").value = el; paint(); });
+  paint();
+}
+function etvPlanView() {
+  // Select Plan View: a story level (or reference plane) from the list, or a plan at any global Z.
+  const p = panes[active], z0 = p && p.mode === "plan" ? elevationOf(p.story) : null, cur = p && p.mode === "plan" ? p.story : topStory();
+  const names = stories.slice().reverse().map(s => s.name);
+  const d = dialog("Select Plan View", `<fieldset><legend>Plan View Options</legend><label style="display:block"><input type="radio" name="spO" value="story" checked> Default Plan from Story Level or Reference Plane</label><label style="display:block"><input type="radio" name="spO" value="z"> At Specified Global Z Coordinate</label></fieldset>
+    <fieldset id="spS"><legend>Select a Story Level or Reference Plane</legend><div class="row" style="margin:0 0 4px"><span style="width:44px">Filter</span><input id="spF" style="flex:1"><button type="button" id="spC">Clear</button></div><select id="spL" size="12" style="width:100%;height:auto"></select></fieldset>
+    <fieldset id="spZ" hidden><legend>Set a Global Z Coordinate</legend><div class="row" style="margin:0"><span style="width:130px">Global Z Coordinate</span><input id="spZv" value="${num(L(z0 ?? 0))}" style="width:110px"><span>${esc(lu())}</span></div><label style="display:block;margin-top:4px"><input type="checkbox" id="spJ" ${selJ.size === 1 ? "" : "disabled"}> Set Coordinate at Selected Joint Object</label></fieldset>`,
+    [["OK", d => apply(d)], ["Close"], ["Apply", d => { apply(d); return false; }, true]], {width: 330});
+  const fill = () => { const f = q(d, "#spF").value.trim().toLowerCase(); q(d, "#spL").innerHTML = names.filter(n => !f || n.toLowerCase().includes(f)).map(n => `<option ${n === cur ? "selected" : ""}>${esc(n)}</option>`).join(""); if (q(d, "#spL").selectedIndex < 0 && q(d, "#spL").options.length) q(d, "#spL").selectedIndex = 0; };
+  q(d, "#spF").oninput = fill; q(d, "#spC").onclick = () => { q(d, "#spF").value = ""; fill(); };
+  d.querySelectorAll("[name=spO]").forEach(r => r.onchange = () => { const z = q(d, "[name=spO]:checked").value === "z"; q(d, "#spS").hidden = z; q(d, "#spZ").hidden = !z; });
+  q(d, "#spJ").onchange = () => { const at = q(d, "#spJ").checked && pointXyz.get(String([...selJ][0])); if (at) q(d, "#spZv").value = num(L(at[2])); };
+  q(d, "#spL").ondblclick = () => { apply(d); d.close(); };
+  fill();
+  function apply(d) {
+    if (q(d, "[name=spO]:checked").value === "story") { const n = q(d, "#spL").value; if (!n) { formError(d, "Select a story."); return false; } return setStory(n); }
+    const z = fnum(d, "#spZv"); if (!isFinite(z)) { formError(d, "Enter the global Z coordinate."); return false; }
+    const zm = etvM(z), at = stories.find(s => Math.abs(s.elevation - zm) <= tol() * 10);
+    if (at) return setStory(at.name);
+    const name = "Z = " + num(z) + (lu() ? " (" + lu() + ")" : ""); etv.zPlanes[name] = zm; setStory(name);
+  }
+}
+function etvElevView() {
+  // Set Elevation View: grid line elevations and the user's own ones, the user's added at an ordinate.
+  const p = panes[active];
+  const d = dialog("Set Elevation View", `<fieldset><legend>Elevations</legend><div style="display:grid;grid-template-columns:1fr 150px;gap:6px 12px">
+    <div><div style="display:flex;align-items:center;gap:6px"><span style="width:44px">Filter</span><input id="seF" style="flex:1"></div><label style="display:block;margin-left:48px"><input type="checkbox" id="seG" checked> Include Grid Line Elevations</label><label style="display:block;margin-left:48px"><input type="checkbox" id="seU" checked> Include User Elevations</label></div>
+    <div><button type="button" id="seC" style="width:100%">Clear Filter</button></div>
+    <select id="seL" size="14" style="width:100%;height:auto"></select>
+    <div style="display:flex;flex-direction:column;gap:6px"><button type="button" id="seAdd">Add at Ordinate...</button><button type="button" id="seBeam">Add at Selected Beam</button><button type="button" id="seRen">Change Name...</button><button type="button" id="seDel">Delete Elevation</button>
+      <div style="margin-top:auto"><label style="display:block"><input type="checkbox" id="seCut"> 3D Section Cut</label><label style="display:block;margin-top:6px"><input type="radio" name="seS" value="Left" ${etv.cutSide !== "Right" ? "checked" : ""} disabled> Left</label><label style="display:block;margin-top:6px"><input type="radio" name="seS" value="Right" ${etv.cutSide === "Right" ? "checked" : ""} disabled> Right</label></div></div></div></fieldset>`,
+    [["OK", d => apply(d)], ["Close"], ["Apply", d => { apply(d); return false; }, true]], {width: 420});
+  const list = () => { const f = q(d, "#seF").value.trim().toLowerCase(), out = []; if (q(d, "#seG").checked) for (const g of grids.X.concat(grids.Y)) out.push({...g, grid: true}); if (q(d, "#seU").checked) for (const u of etvUserElev()) out.push({...u, user: true}); return out.filter(g => !f || g.label.toLowerCase().includes(f)); };
+  let shown = [];
+  const fill = keep => { const was = keep ?? q(d, "#seL").value, cur = p && p.mode === "elev" && p.line ? p.line.dir + p.line.label : ""; shown = list(); q(d, "#seL").innerHTML = shown.map((g, i) => `<option value="${i}" ${g.dir + g.label === (was !== "" && shown[+was] ? shown[+was].dir + shown[+was].label : cur) ? "selected" : ""}>${esc(g.label)}</option>`).join(""); if (q(d, "#seL").selectedIndex < 0 && shown.length) q(d, "#seL").selectedIndex = 0; sync(); };
+  const pick = () => shown[+q(d, "#seL").value];
+  const beam = () => { const f = [...sel].map(objOf).find(o => o && o.type === "f" && Math.abs(o.a[2] - o.b[2]) <= tol() * 10 && (Math.abs(o.a[0] - o.b[0]) <= tol() * 10 || Math.abs(o.a[1] - o.b[1]) <= tol() * 10)); return f; };
+  const sync = () => { const g = pick(); q(d, "#seRen").disabled = q(d, "#seDel").disabled = !(g && g.user); q(d, "#seBeam").disabled = !beam(); const cut = q(d, "#seCut").checked; d.querySelectorAll("[name=seS]").forEach(r => r.disabled = !cut); };
+  q(d, "#seF").oninput = () => fill(""); q(d, "#seC").onclick = () => { q(d, "#seF").value = ""; fill(""); };
+  q(d, "#seG").onchange = q(d, "#seU").onchange = () => fill(""); q(d, "#seL").onchange = sync; q(d, "#seCut").onchange = sync;
+  q(d, "#seL").ondblclick = () => { apply(d); d.close(); };
+  const addUser = g => { const l = etvUserElev(); let n = g.label, i = 1; while (l.some(x => x.label === n) || allLines().some(x => x.label === n)) n = g.label + "-" + i++; l.push({...g, label: n}); etvUserElevSave(l); q(d, "#seU").checked = true; fill(""); const k = shown.findIndex(x => x.user && x.label === n); if (k >= 0) { q(d, "#seL").value = String(k); sync(); } };
+  q(d, "#seAdd").onclick = () => etvAddAtOrdinate(addUser);
+  q(d, "#seBeam").onclick = () => { const f = beam(); if (!f) return; const alongX = Math.abs(f.a[1] - f.b[1]) <= tol() * 10; addUser(alongX ? {dir: "Y", at: f.a[1], label: "Y = " + num(L(f.a[1]))} : {dir: "X", at: f.a[0], label: "X = " + num(L(f.a[0]))}); };
+  q(d, "#seRen").onclick = () => { const g = pick(); if (!g || !g.user) return; const r = dialog("Change Name", `<div class="row" style="margin:0"><span style="width:60px">Name</span><input id="cnN" value="${esc(g.label)}" style="flex:1"></div>`, [["OK", r => { const n = q(r, "#cnN").value.trim(); const l = etvUserElev(); if (!n) { formError(r, "Enter a name."); return false; } if (n !== g.label && (l.some(x => x.label === n) || allLines().some(x => x.label === n))) { formError(r, "That name is already used."); return false; } const it = l.find(x => x.label === g.label); if (it) it.label = n; etvUserElevSave(l); fill(""); }], ["Cancel"]], {width: 280}); };
+  q(d, "#seDel").onclick = () => { const g = pick(); if (!g || !g.user) return; etvUserElevSave(etvUserElev().filter(x => x.label !== g.label)); fill(""); };
+  fill();
+  function apply(d) {
+    const g = pick(); if (!g) { formError(d, "Select an elevation."); return false; }
+    const line = {dir: g.dir, label: g.label, at: g.at};
+    if (q(d, "#seCut").checked) {
+      // 3D Section Cut: a 3-D view of the model on one side of the elevation, seen from the cut.
+      const side = q(d, "[name=seS]:checked").value, pp = panes[active]; if (!pp) return; etv.cutSide = side;
+      setMode(pp, "3d"); pp.cut = {dir: g.dir, at: g.at, side, label: g.label};
+      const yaw = g.dir === "X" ? (side === "Left" ? Math.PI : 0) : (side === "Left" ? Math.PI / 2 : -Math.PI / 2);
+      pp.sig = ""; pp.vis = null; go(pp, fitCam(pp, {...pp.cam, yaw: yaw + (side === "Left" ? -0.35 : 0.35), pitch: 0.3})); syncTools(); return;
+    }
+    const pp = panes[active]; if (pp) pp.cut = null;
+    setLine(allLines().find(x => x.dir === line.dir && x.label === line.label) || line);
+  }
+}
+function etvAddAtOrdinate(done) {
+  const at1 = selJ.size === 1 ? pointXyz.get(String([...selJ][0])) : null, one = at1 ? {at: at1} : null;
+  const d = dialog("Add Elevation View At Ordinate", `<fieldset><legend>Add Options</legend><div class="row"><span style="width:110px">Grid System</span><select id="aoG" style="flex:1"><option>G1</option></select></div>
+    <div class="row"><label style="width:120px"><input type="radio" name="aoD" value="X" checked> X Ordinate</label><input id="aoX" value="0" style="width:110px"><span>${esc(lu())}</span></div>
+    <div class="row"><label style="width:120px"><input type="radio" name="aoD" value="Y"> Y Ordinate</label><input id="aoY" value="" disabled style="width:110px"></div>
+    <label style="display:block"><input type="checkbox" id="aoJ" ${one ? "" : "disabled"}> Set Ordinate to Selected Joint Coordinate</label></fieldset>`,
+    [["OK", d => { const dir = q(d, "[name=aoD]:checked").value, v = fnum(d, dir === "X" ? "#aoX" : "#aoY"); if (!isFinite(v)) { formError(d, "Enter the ordinate."); return false; } done({dir, at: etvM(v), label: dir + " = " + num(v)}); }], ["Cancel"]], {width: 360});
+  const sw = () => { const x = q(d, "[name=aoD]:checked").value === "X"; q(d, "#aoX").disabled = !x; q(d, "#aoY").disabled = x; if (x && q(d, "#aoX").value === "") q(d, "#aoX").value = "0"; if (!x && q(d, "#aoY").value === "") q(d, "#aoY").value = "0"; if (q(d, "#aoJ").checked) jt(); };
+  const jt = () => { if (!one || !q(d, "#aoJ").checked) return; q(d, "#aoX").value = num(L(one.at[0])); q(d, "#aoY").value = num(L(one.at[1])); };
+  d.querySelectorAll("[name=aoD]").forEach(r => r.onchange = sw); q(d, "#aoJ").onchange = jt;
+}
+function etvLimits() {
+  // Set Building View Limits: a plan box and a story range that every window draws inside, unless Ignore Limits is on.
+  if (!P) return;
+  const l = etv.limits || {x0: lo[0], x1: hi[0], y0: lo[1], y1: hi[1], top: topStory(), bot: stories.length ? stories[0].name : "", ignore: false};
+  const names = stories.slice().reverse().map(s => s.name), U = esc(lu());
+  const d = dialog("Set Building View Limits", `<div style="display:flex;gap:12px"><fieldset style="flex:1"><legend>Plan Limits</legend><div style="display:flex;gap:10px"><div style="flex:1">
+    <fieldset><legend>Set X Axis Limits</legend><div class="g2"><span>Min</span><span><input id="blX0" value="${num(L(l.x0))}" style="width:80px"> ${U}</span><span>Max</span><span><input id="blX1" value="${num(L(l.x1))}" style="width:80px"> ${U}</span></div><button type="button" data-all="x" style="margin-left:60px">Show All</button></fieldset>
+    <fieldset><legend>Set Y Axis Limits</legend><div class="g2"><span>Min</span><span><input id="blY0" value="${num(L(l.y0))}" style="width:80px"> ${U}</span><span>Max</span><span><input id="blY1" value="${num(L(l.y1))}" style="width:80px"> ${U}</span></div><button type="button" data-all="y" style="margin-left:60px">Show All</button></fieldset></div>
+    <div><canvas id="blC" width="160" height="160" style="border:1px solid var(--line);background:#fff"></canvas><label style="display:block;margin-top:8px"><input type="checkbox" id="blI" ${l.ignore ? "checked" : ""}> Ignore Limits</label></div></div></fieldset></div>
+    <div style="display:flex;gap:12px;align-items:flex-start"><fieldset style="flex:1"><legend>Set Story Range</legend><div class="g2"><span>Top Story</span><select id="blT">${opts(names, l.top)}</select><span>Bottom Story</span><select id="blB">${opts(names, l.bot)}</select></div><button type="button" data-all="s" style="margin-left:150px">Show All</button></fieldset>
+    <div style="display:flex;flex-direction:column;gap:8px;padding-top:14px"></div></div>`,
+    [["OK", d => {
+      const v = ["#blX0", "#blX1", "#blY0", "#blY1"].map(s => fnum(d, s)); if (!v.every(isFinite)) { formError(d, "Enter numbers for the limits."); return false; }
+      if (v[0] > v[1] || v[2] > v[3]) { formError(d, "Min must not be more than Max."); return false; }
+      const top = q(d, "#blT").value, bot = q(d, "#blB").value; if (elevationOf(top) < elevationOf(bot)) { formError(d, "The top story must be above the bottom story."); return false; }
+      etv.limits = {x0: etvM(v[0]), x1: etvM(v[1]), y0: etvM(v[2]), y1: etvM(v[3]), top, bot, ignore: q(d, "#blI").checked};
+      hiddenVersion++; panes.forEach(p => { p.sig = ""; p.vis = null; }); draw();
+    }], ["Cancel"]], {width: 470});
+  d.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { const k = b.dataset.all; if (k === "x") { q(d, "#blX0").value = num(L(lo[0])); q(d, "#blX1").value = num(L(hi[0])); } else if (k === "y") { q(d, "#blY0").value = num(L(lo[1])); q(d, "#blY1").value = num(L(hi[1])); } else { q(d, "#blT").value = names[0] || ""; q(d, "#blB").value = names[names.length - 1] || ""; } paint(); });
+  d.querySelectorAll("#blX0,#blX1,#blY0,#blY1").forEach(i => i.oninput = paint);
+  function paint() {
+    // The plan with its columns as dots and the limits box, as the picture shows.
+    const c = q(d, "#blC"), g = c.getContext("2d"), w = hi[0] - lo[0] || 1, h = hi[1] - lo[1] || 1, s = 130 / Math.max(w, h), ox = 80 - w * s / 2, oy = 80 + h * s / 2, X = x => ox + (x - lo[0]) * s, Y = y => oy - (y - lo[1]) * s;
+    g.clearRect(0, 0, 160, 160); g.fillStyle = "#0000ff";
+    for (const f of frames) if (Math.abs(f.a[0] - f.b[0]) < 1e-6 && Math.abs(f.a[1] - f.b[1]) < 1e-6) g.fillRect(X(f.a[0]) - 2.5, Y(f.a[1]) - 2.5, 5, 5);
+    const v = ["#blX0", "#blX1", "#blY0", "#blY1"].map(s => etvM(+q(d, s).value || 0)); g.strokeStyle = "#555"; g.strokeRect(X(v[0]), Y(v[3]), (v[1] - v[0]) * s, (v[3] - v[2]) * s);
+  }
+  paint();
+}
+function etvAxes() {
+  const p = panes[active], a = (p && p.axesAt) || [0, 0, 0], U = esc(lu());
+  dialog("Axes Location", `<fieldset><legend>Change Location To</legend><div class="g2"><span>X-Ordinate</span><span><input id="axX" value="${num(L(a[0]))}" style="width:90px"> ${U}</span><span>Y-Ordinate</span><span><input id="axY" value="${num(L(a[1]))}" style="width:90px"> ${U}</span><span>Z-Ordinate</span><span><input id="axZ" value="${num(L(a[2]))}" style="width:90px"> ${U}</span></div></fieldset><label style="display:block;margin-top:6px"><input type="checkbox" id="axA"> Apply to All Windows</label>`,
+    [["OK", d => { const v = ["#axX", "#axY", "#axZ"].map(s => fnum(d, s)); if (!v.every(isFinite)) { formError(d, "Enter numbers for the ordinates."); return false; } const at = v.map(etvM), zero = at.every(x => Math.abs(x) < 1e-12); (q(d, "#axA").checked ? panes : [p]).forEach(w => { if (w) w.axesAt = zero ? null : at; }); opt.axes = true; syncTools(); draw(); }], ["Cancel"]], {width: 300});
+}
+function etvDxForm() {
+  // DirectX View Settings: the lights, the graphics device and normal averaging; OK keeps them and the 3-D view uses the lights.
+  const v = {...etvDxDefault, ...(etvDx() || {})}, step = v.step || Math.round(radius() * 2 / 3 * 1e4) / 1e4;
+  const chk = (id, on, t) => `<label style="display:block;margin:6px 0"><input type="checkbox" id="${id}" ${on ? "checked" : ""}> ${t}</label>`;
+  const row = (id, val, t, st) => `<div style="display:flex;align-items:center;gap:6px;margin:6px 0">${etvSpin(id, val, st)}<span>${t}</span></div>`;
+  const d = dialog("DirectX View Settings", `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <fieldset><legend>Directional Light</legend>${chk("dxD", v.dir, "Use Directional Light")}${row("dxDP", v.dPlan, "Plan", 5)}${row("dxDE", v.dElev, "Elevation", 5)}${row("dxAm", v.amb, "Ambient", 0.1)}</fieldset>
+    <fieldset><legend>Specular Light</legend>${chk("dxS", v.spec, "Use Specular Light")}${row("dxSP", v.sPlan, "Plan", 5)}${row("dxSE", v.sElev, "Elevation", 5)}${row("dxPw", v.power, "Power", 1)}</fieldset>
+    <fieldset style="grid-row:span 2"><legend>Viewing Volume</legend><div>Step Size</div><input id="dxSt" value="${num(L(step))}" style="width:100%;margin:4px 0 10px"><div style="text-align:center">Near Distance</div><input type="range" id="dxN" min="0" max="1" step="0.01" value="${v.near}" style="width:100%"><div style="display:flex;justify-content:space-between"><span>Min</span><span>Max</span></div><div style="text-align:center;margin-top:8px">Far Distance</div><input type="range" id="dxF" min="0" max="1" step="0.01" value="${v.far}" style="width:100%"><div style="display:flex;justify-content:space-between"><span>Min</span><span>Max</span></div></fieldset>
+    <fieldset><legend>Graphics Device</legend>${chk("dxAA", v.aa, "Use Antialiasing")}${chk("dxMS", v.ms, "Use Multisampling")}</fieldset>
+    <fieldset><legend>Normal Averaging</legend>${chk("dxNF", v.nFrames, "Frames (Extrude View)")}${chk("dxNS", v.nShells, "Shells")}</fieldset></div>`,
+    [["OK", d => {
+      const n = ["#dxDP", "#dxDE", "#dxAm", "#dxSP", "#dxSE", "#dxPw", "#dxSt"].map(s => fnum(d, s)); if (!n.every(isFinite)) { formError(d, "Enter numbers in every box."); return false; }
+      if (n[2] < 0 || n[2] > 1) { formError(d, "Ambient must be from 0 to 1."); return false; }
+      if (n[6] <= 0) { formError(d, "Step Size must be more than zero."); return false; }
+      const s = {dir: q(d, "#dxD").checked, dPlan: n[0], dElev: n[1], amb: n[2], spec: q(d, "#dxS").checked, sPlan: n[3], sElev: n[4], power: n[5], step: etvM(n[6]), near: +q(d, "#dxN").value, far: +q(d, "#dxF").value, aa: q(d, "#dxAA").checked, ms: q(d, "#dxMS").checked, nFrames: q(d, "#dxNF").checked, nShells: q(d, "#dxNS").checked};
+      try { localStorage.setItem("cpm-etabs-directx", JSON.stringify(s)); } catch {}
+      panes.forEach(p => p.sig = ""); draw(); hmSay("DirectX View Settings kept. Antialiasing and multisampling take effect when the window opens next.");
+    }], ["Cancel"]], {width: 620});
+  etvSpinWire(d);
+}
+function etvLight(M, def) {
+  // The 3-D light from DirectX View Settings once the user has set them: plan and elevation turn it away from the eye.
+  const v = program === "etabs" && etvDx(); if (!v) return def;
+  if (!v.dir) return mul(M.d, -1e-3);
+  const a = v.dPlan * Math.PI / 180, e = v.dElev * Math.PI / 180, b = mul(M.d, -1);
+  return unitv(add(add(mul(b, Math.cos(a) * Math.cos(e)), mul(M.right, Math.sin(a) * Math.cos(e))), mul(M.up, Math.sin(e))));
+}
+function etvAmbient(def) { const v = program === "etabs" && etvDx(); return v ? v.amb : def; }
+function etvPoint(p, x, y) {
+  // Measure: in a plan the click snaps as drawing does; elsewhere a joint under the pointer, else the view plane.
+  if (p.mode === "plan") { const s = snapAt(p, x, y), z = elevationOf(p.story) ?? 0; return s ? [s.q[0], s.q[1], z] : null; }
+  const j = jointAt(p, x, y, 8); if (j) { const jj = jointsIn(p).find(t => t.name === j); if (jj) return jj.at.slice(); }
+  return p.M ? p.M.back(x, y) : null;
+}
+function etvMeasureClick(p, x, y, dbl) {
+  const kind = tool.slice(8), m = etv.measure && etv.measure.kind === kind ? etv.measure : (etv.measure = {kind, pts: []}), q0 = etvPoint(p, x, y); if (!q0) return;
+  if (!dbl) m.pts.push(q0); const U = lu() ? " " + lu() : "", f = v => num(L(v));
+  if (kind === "line" && m.pts.length === 2) { const [a, b] = m.pts, dv = sub(b, a); hmSay(`Measure Line: length ${f(len(dv))}${U}  (dX ${f(dv[0])}, dY ${f(dv[1])}, dZ ${f(dv[2])})`); etv.measure = null; return; }
+  if (kind === "angle" && m.pts.length === 3) { const [a, o, b] = m.pts, u = sub(a, o), w = sub(b, o), c = dot(u, w) / ((len(u) * len(w)) || 1); hmSay(`Measure Angle: ${num(Math.acos(Math.max(-1, Math.min(1, c))) * 180 / Math.PI)} degrees`); etv.measure = null; return; }
+  if (kind === "area" && m.pts.length >= 3 && (dbl || len(sub(m.pts[m.pts.length - 1], m.pts[0])) <= tol() * 10)) {
+    const pts = dbl ? m.pts : m.pts.slice(0, -1); let n = [0, 0, 0], per = 0;
+    for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; n = add(n, cross(a, b)); per += len(sub(b, a)); }
+    hmSay(`Measure Area: area ${num(len(n) / 2 * L(1) * L(1))}${lu() ? " " + lu() + "²" : ""}, perimeter ${f(per)}${U}`); etv.measure = null; return;
+  }
+  hmSay({line: "Measure Line: click the second point.", angle: m.pts.length === 1 ? "Measure Angle: click the corner of the angle." : "Measure Angle: click the third point.", area: "Measure Area: click the next corner; click the first corner again or double-click to finish."}[kind]);
+}
+function etvWalk(p, dx, dy) {
+  // Walk: drag up or down to walk forward or back by the DirectX step size, left or right to turn.
+  if (p.mode !== "3d") { p.mode = "3d"; p.sig = ""; }
+  const v = etvDx(), step = (v && v.step) || radius() * 2 / 3, M = p.M; if (!M) return;
+  const fwd = unitv([M.d[0], M.d[1], 0]); p.anim = null;
+  p.cam = {...p.cam, persp: true, yaw: p.cam.yaw - dx * 0.004, target: add(p.cam.target, mul(fwd, -dy * step / 100))}; p.pickOk = false; draw();
+}
+// The View menu's keys as ETABS has them.
+document.addEventListener("keydown", e => {
+  if (program !== "etabs" || !P || e.altKey || (e.target.closest && e.target.closest("input, textarea, select, .dlg"))) return;
+  const c = e.ctrlKey || e.metaKey, s = e.shiftKey, k = e.key;
+  const a = c && s ? {F1: "m:etv:plan", F2: "m:etv:elev", F3: "m:etv:3d", J: "m:etv:only", A: "showAll", W: "m:etv:refreshW", V: "m:etv:refreshV"}[k.length === 1 ? k.toUpperCase() : k]
+    : c && !s ? (k.toLowerCase() === "d" ? "o:grid" : null)
+    : !c && s ? {F2: "zin", F3: "zout"}[k] : !c && !s && k === "F10" ? "t:pan" : null;
+  if (!a) return; e.preventDefault(); e.stopPropagation(); act(a);
+}, true);
 async function modelAct(a) {
   hideMenus();
   if (a.startsWith("etn:")) return etnAct(a.slice(4));
+  if (a.startsWith("ets:")) return etsForm(a.slice(4));
+  if (a.startsWith("etv:")) return etvAct(a.slice(4));
   if (a.startsWith("eto:")) { await hmDefs(); return etoForm(a.slice(4)); }
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
