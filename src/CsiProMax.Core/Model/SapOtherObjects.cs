@@ -28,7 +28,8 @@ public static class SapOtherObjects
     public static readonly IReadOnlyDictionary<string, (string Kind, bool Many, string[] Fields)> Tables = new Dictionary<string, (string, bool, string[])>(StringComparer.OrdinalIgnoreCase)
     {
         ["Cable Section Assignments"] = ("cable", false, ["CableSect", "MatProp"]),
-        ["Cable Property Modifiers"] = ("cable", false, ["AMod", "MassMod", "WeightMod"]),
+        // SAP2000's cable and tendon tables that share the frame tables' shape: Frame names the object, Cable and Tendon say which it is.
+        ["Cable Property Modifiers"] = ("cable", false, ["AMod", "AS2Mod", "AS3Mod", "JMod", "I22Mod", "I33Mod", "MassMod", "WeightMod", "EAModifier", "EIModifier"]),
         ["Cable Output Station Assignments"] = ("cable", false, ["StationType", "MinNumSta", "MaxStaSpcg", "AddAtElmInt", "AddAtPtLoad"]),
         ["Cable Added Mass Assignments"] = ("cable", false, ["MassPerLen"]),
         ["Cable Material Temperatures"] = ("cable", false, ["Temp", "JtPattern"]),
@@ -49,6 +50,21 @@ public static class SapOtherObjects
     };
 
     public static bool Has(string table) => Tables.ContainsKey(table);
+
+    /// <summary>The tables of SAP2000 26.3 that name a cable or tendon in Frame (the frame tables' shape), with flags.</summary>
+    private static readonly HashSet<string> ByFrame = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Cable Property Modifiers", "Cable Output Station Assignments", "Cable Added Mass Assignments", "Cable Material Temperatures",
+        "Tendon Local Axes Assignments 1 - Typical", "Tendon Tension And Compression Limits", "Tendon Material Temperatures",
+    };
+
+    /// <summary>The field that names the object in this table's rows.</summary>
+    public static string KeyOf(string table, string kind) => ByFrame.Contains(table) ? "Frame" : Key(kind);
+
+    /// <summary>The Yes/No fields a Frame-named row carries to say it is a cable or a tendon (SAP2000's own shape).</summary>
+    private static (string, string)[] Flags(string table, string kind) => !ByFrame.Contains(table) ? []
+        : table.EndsWith("Material Temperatures", StringComparison.OrdinalIgnoreCase) ? [("Cable", kind == "cable" ? "Yes" : "No"), ("Tendon", kind == "tendon" ? "Yes" : "No")]
+        : [(Key(kind), "Yes")];
 
     private static string KeptKey(string table) => "sap2000|" + table.ToUpperInvariant();
 
@@ -74,7 +90,7 @@ public static class SapOtherObjects
                 var joints = JointsOf(kind, r);
                 var pts = joints.Select(j => at.TryGetValue(j, out var p) ? p : null).ToList();
                 if (pts.Count == 0 || pts.Exists(p => p is null)) continue;
-                all.Add((kind, name, joints, pts!));
+                all.Add((kind, name, joints, pts.Select(p => p!).ToList()));
             }
         }
         return all;
@@ -131,8 +147,10 @@ public static class SapOtherObjects
     /// <summary>The object's rows of a table, without its name.</summary>
     public static List<Dictionary<string, string>> Rows(StructuralModel m, string kind, string name, string table)
     {
-        var key = Key(kind);
-        return Kept(m, table).Where(r => r.GetValueOrDefault(key) == name).Select(r => r.Where(kv => kv.Key != key && kv.Key != "Frame" && kv.Value.Length > 0).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal)).ToList();
+        var key = KeyOf(table, kind);
+        var flags = Flags(table, kind);
+        return Kept(m, table).Where(r => r.GetValueOrDefault(key) == name && flags.All(f => f.Item2 == "No" || (r.GetValueOrDefault(f.Item1) ?? "Yes").Equals("Yes", StringComparison.OrdinalIgnoreCase)))
+            .Select(r => r.Where(kv => kv.Key != key && !flags.Any(f => f.Item1 == kv.Key) && kv.Value.Length > 0).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal)).ToList();
     }
 
     /// <summary>Every table's rows of one object (for the forms).</summary>
@@ -159,10 +177,11 @@ public static class SapOtherObjects
         Check(kind, tables);
         var have = List(m).Where(o => o.Kind == kind).Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var n in names) if (!have.Contains(n)) throw new ArgumentException($"There is no {kind} '{n}'.");
-        var key = Key(kind);
         foreach (var (table0, rows) in tables)
         {
             var table = Tables.Keys.First(k => k.Equals(table0, StringComparison.OrdinalIgnoreCase));
+            var key = KeyOf(table, kind);
+            var flags = Flags(table, kind);
             var fields = Tables[table].Fields;
             var given = rows.Where(r => r.Values.Any(v => v.Length > 0)).ToList();
             m.Kept ??= new(StringComparer.OrdinalIgnoreCase);
@@ -171,12 +190,13 @@ public static class SapOtherObjects
             {
                 // The file's rows stay where they are and keep their other fields (GUID, Frame, ...): the form's
                 // fields are set on them in order; rows beyond the form's go, rows beyond the file's go after the last.
-                var mine = list.Where(r => r.GetValueOrDefault(key) == n).ToList();
+                var mine = list.Where(r => r.GetValueOrDefault(key) == n && flags.All(f => f.Item2 == "No" || (r.GetValueOrDefault(f.Item1) ?? "Yes").Equals("Yes", StringComparison.OrdinalIgnoreCase))).ToList();
                 var at = mine.Count > 0 ? list.IndexOf(mine[^1]) + 1 : list.Count;
                 for (var i = 0; i < Math.Max(mine.Count, given.Count); i++)
                 {
                     if (i >= given.Count) { list.Remove(mine[i]); continue; }
                     var row = i < mine.Count ? mine[i] : new Dictionary<string, string>(StringComparer.Ordinal) { [key] = n };
+                    foreach (var (flag, yes) in flags) row[flag] = yes;
                     foreach (var f in fields)
                     {
                         var v = given[i].FirstOrDefault(kv => kv.Key.Equals(f, StringComparison.OrdinalIgnoreCase)).Value;

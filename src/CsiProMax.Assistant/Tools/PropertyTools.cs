@@ -169,9 +169,21 @@ public static class PropertyTools
             """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"opening":{"type":"boolean"},"tables":{"type":"object"}}}""",
             Ask.Changes, AssignShells, a => "Assign shell data"),
         new("reverse_objects",
-            "SAP2000's Assign > Area > Reverse Local 3 (and Frame/Cable/Link Reverse Connectivity): reverses the corner order of areas (label@story), so the local 3 axis points the other way. keep: \"global\" (default) keeps the assignments in the same global orientation (an area load along local 3 changes sign), \"local\" keeps them in the same local orientation.",
-            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"keep":{"type":"string","enum":["global","local"]}}}""",
+            "SAP2000's Assign > Area > Reverse Local 3 and Assign > Cable/Link > Reverse Connectivity: reverses the corner order of areas (label@story; kind area, the default), so the local 3 axis points the other way, or the I and J ends of cables and links (kind cable or link, objects by SAP2000 name). keep: \"global\" (default) keeps the assignments in the same global orientation (an area load along local 3 changes sign), \"local\" keeps them in the same local orientation.",
+            """{"type":"object","required":["objects"],"properties":{"kind":{"type":"string","enum":["area","cable","link"]},"objects":{"type":"array","items":{"type":"string"}},"keep":{"type":"string","enum":["global","local"]}}}""",
             Ask.Changes, ReverseObjects, a => "Reverse local 3"),
+        new("assign_sap_object_data",
+            "SAP2000's Assign > Cable, Tendon, Solid and Link/Support items on those objects of a model opened from a .s2k (kind cable, tendon, solid or link; objects by SAP2000 name): tables, rows of SAP2000's own assignment tables by full table name, e.g. {\"Cable Section Assignments\": [{\"CableSect\": \"CAB1\"}]} (sap_object_data lists the tables and each object's rows; [] takes a table off).",
+            """{"type":"object","required":["kind","objects","tables"],"properties":{"kind":{"type":"string","enum":["cable","tendon","solid","link"]},"objects":{"type":"array","items":{"type":"string"}},"tables":{"type":"object"}}}""",
+            Ask.Changes, AssignSapObjects, a => $"Assign {a.Text("kind", "object")} data"),
+        new("sap_object_data",
+            "SAP2000's cables, tendons, solids and links of a model opened from a .s2k: each with its joints and where they are, SAP2000's assignment tables of each kind with their fields, and with objects (and kind) each object's rows.",
+            """{"type":"object","properties":{"kind":{"type":"string","enum":["cable","tendon","solid","link"]},"objects":{"type":"array","items":{"type":"string"}}}}""",
+            Ask.Never, (a, e) => SapObjectData(Offline(e).Model, a)),
+        new("switch_solid_faces",
+            "SAP2000's Assign > Solid > Switch Faces (Modify Solid Faces): the solids' corners renumbered so face and with (1 to 6) change places; move (default true) moves the face assignments (surface springs) with their face.",
+            """{"type":"object","required":["objects","face","with"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"face":{"type":"integer"},"with":{"type":"integer"},"move":{"type":"boolean"}}}""",
+            Ask.Changes, SwitchSolidFaces, a => "Switch solid faces"),
         new("assign_joint_data",
             "Assigns to joints (point@story) what Assign > Joint offers: restraint (any of UX UY UZ RX RY RZ; [] frees the joint) and spring (a point spring property; \"\" takes it off); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Joint Assignments - Additional Mass\": [{\"MassXY\": \"2\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
             """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"restraint":{"type":"array","items":{"type":"string"}},"spring":{"type":"string"},"tables":{"type":"object"}}}""",
@@ -397,6 +409,15 @@ public static class PropertyTools
     {
         var link = Offline(e);
         var m0 = link.Model;
+        if (a.Text("kind", "area") is "cable" or "link")
+        {
+            var kind = a.Text("kind");
+            var names = a.Texts("objects");
+            if (names.Count == 0) throw new ToolInputException("Give the objects.");
+            var have = SapOtherObjects.List(m0).Where(o => o.Kind == kind).Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+            if (names.FirstOrDefault(n => !have.Contains(n)) is { } missing) throw new ToolInputException($"There is no {kind} '{missing}'.");
+            return Core(() => link.Edit(m => { SapOtherObjects.Reverse(m, kind, names); return (JsonNode)new JsonObject { ["reversed"] = names.Count }; }));
+        }
         var objects = Objects(a, (l, s) => m0.AreaAssigns.Exists(x => x.Label == l && x.Story == s), "area");
         var global = a.Text("keep", "global") != "local";
         // An area object is shared by every story that has its label: reversing it on some stories only would reverse it on all.
@@ -426,6 +447,57 @@ public static class PropertyTools
             }
             return (JsonNode)new JsonObject { ["reversed"] = objects.Count };
         }));
+    }
+
+    private static JsonNode AssignSapObjects(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var kind = a.Need("kind");
+        if (!SapOtherObjects.Kinds.Contains(kind)) throw new ToolInputException("kind is cable, tendon, solid or link.");
+        var names = a.Texts("objects");
+        if (names.Count == 0) throw new ToolInputException("Give the objects.");
+        var tables = AssignRows(a) ?? throw new ToolInputException("Give the tables to set.");
+        var have = SapOtherObjects.List(link.Model).Where(o => o.Kind == kind).Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+        if (names.FirstOrDefault(n => !have.Contains(n)) is { } missing) throw new ToolInputException($"There is no {kind} '{missing}' (only a model opened from a SAP2000 file has them).");
+        Core(() => { SapOtherObjects.Check(kind, tables); return 0; });
+        return Core(() => link.Edit(m => { SapOtherObjects.Set(m, kind, names, tables); return (JsonNode)new JsonObject { ["assigned"] = names.Count }; }));
+    }
+
+    private static JsonNode SapObjectData(StructuralModel m, JsonElement a)
+    {
+        var all = SapOtherObjects.List(m);
+        var o = new JsonObject
+        {
+            ["objects_by_kind"] = new JsonObject(SapOtherObjects.Kinds.Select(k => KeyValuePair.Create(k, (JsonNode?)new JsonArray(all.Where(x => x.Kind == k).Select(x => (JsonNode)new JsonObject
+            {
+                ["name"] = x.Name, ["joints"] = new JsonArray(x.Joints.Select(j => (JsonNode)j).ToArray()),
+                ["points"] = new JsonArray(x.Points.Select(p => (JsonNode)new JsonArray(p[0], p[1], p[2])).ToArray()),
+            }).ToArray())))),
+            ["tables"] = new JsonObject(SapOtherObjects.Tables.Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
+            {
+                ["kind"] = t.Value.Kind, ["many"] = t.Value.Many, ["fields"] = new JsonArray(t.Value.Fields.Select(f => (JsonNode)f).ToArray()),
+            }))),
+        };
+        if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty("objects", out _) && a.Text("kind", "") is { Length: > 0 } kind)
+            o["objects"] = new JsonArray(a.Texts("objects").Select(n => (JsonNode)new JsonObject
+            {
+                ["object"] = n, ["kind"] = kind,
+                ["tables"] = new JsonObject(SapOtherObjects.RowsOf(m, kind, n).Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonArray(t.Value.Select(r => (JsonNode)new JsonObject(r.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)))).ToArray())))),
+            }).ToArray());
+        return o;
+    }
+
+    private static JsonNode SwitchSolidFaces(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var names = a.Texts("objects");
+        if (names.Count == 0) throw new ToolInputException("Give the solids.");
+        var have = SapOtherObjects.List(link.Model).Where(o => o.Kind == "solid").Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+        if (names.FirstOrDefault(n => !have.Contains(n)) is { } missing) throw new ToolInputException($"There is no solid '{missing}' (only a model opened from a SAP2000 file has them).");
+        var face = (int)a.Number("face"); var with = (int)a.Number("with");
+        if (face is < 1 or > 6 || with is < 1 or > 6) throw new ToolInputException("A solid has faces 1 to 6.");
+        var move = !a.TryGetProperty("move", out var mv) || mv.ValueKind != JsonValueKind.False;
+        return Core(() => link.Edit(m => { SapOtherObjects.SwitchFaces(m, names, face, with, move); return (JsonNode)new JsonObject { ["switched"] = names.Count }; }));
     }
 
     /// <summary>The tables argument: rows by table name; true and false become Yes and No, as the tables hold them.</summary>

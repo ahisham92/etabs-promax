@@ -96,6 +96,14 @@ public static class SapFormRoundTrip
         var objects = new JsonObject { ["objects"] = new JsonArray(all.Select(x => (JsonNode)x).ToArray()), ["keep"] = "local" }.ToJsonString();
         ctx.Tool("reverse_objects", objects, _ => FieldContext.Expect(m.Area(floor.Label)!.PointNames[1] == corners[^1], "the corners did not run the other way"), "SAP2000 form Assign Area Reverse Local 3 Axis: the corners run the other way");
         ctx.Tool("reverse_objects", objects, _ => FieldContext.Expect(m.Area(floor.Label)!.PointNames.SequenceEqual(corners), "reversing twice did not give the corners back"), "SAP2000 form Assign Area Reverse Local 3 Axis, again: the corners are back");
+        // Assign > Cable, Tendon, Solid and Link/Support: the Modeler's model was not opened from a SAP2000 file, so it has
+        // none of them; the tools list SAP2000's tables and say no, in words, to objects that are not there.
+        ctx.Tool("sap_object_data", "{}", a => FieldContext.Expect(a["tables"]?["Cable Section Assignments"] is not null && a["tables"]?["Link Property Assignments"] is not null,
+            "SAP2000's cable and link assignment tables are not listed"), "SAP2000 forms Assign Cable, Tendon, Solid and Link/Support: their tables are listed");
+        ctx.Refused("assign_sap_object_data", """{"kind":"cable","objects":["CPM_NO_CABLE"],"tables":{"Cable Section Assignments":[{"CableSect":"CAB1"}]}}""", "There is no cable",
+            "SAP2000 form Assign Cable Sections: a cable that is not in the model is refused in words");
+        ctx.Refused("switch_solid_faces", """{"objects":["CPM_NO_SOLID"],"face":1,"with":2}""", "There is no solid",
+            "SAP2000 form Assign Solid Switch Faces: a solid that is not in the model is refused in words");
     }
 
     private static Dictionary<string, string> R(params (string Key, string Value)[] fields) => fields.ToDictionary(f => f.Key, f => f.Value, StringComparer.Ordinal);
