@@ -48,7 +48,7 @@ internal static class SapFreshProcess
         var apiFile = EtabsApi.FindApiFile(program);
         if (!File.Exists(apiFile) || EtabsApi.RunsOnFramework(apiFile))
             throw new EtabsException($"A second {name} could not be started from here ({(File.Exists(apiFile) ? "its API runs on the .NET Framework" : "its API file was not found")}).");
-        var api = Assembly.LoadFrom(apiFile);
+        var api = EtabsApi.Load(apiFile);
         var ns = EtabsApi.NamespaceOf(apiFile);
         var plugIns = KeptPlugIns.Take(program);
         var before = Process.GetProcessesByName(program.ProcessName).Select(p => p.Id).ToHashSet();
