@@ -1823,6 +1823,43 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         var own = dead.Steps.Where(s => s.Section == PanelFieldSteps.Section).ToList();
         Check(own.Count > 20 && own.All(s => !s.Detail.Contains("stopped answering")), "CSI ProMax's own features ran on a link that answers: " + string.Join("; ", own.Where(s => s.Detail.Contains("stopped answering")).Take(3).Select(s => s.Name)));
 
+        // 0.4.60 full test (2026-11-27 05:07 Cairo): the company had closed ETABS, the scratch windows stopped, and CSI
+        // ProMax's own features ran on the engineer's link, which answered nothing: 8 failures "ETABS is not open". With
+        // no answering link they run on a hidden scratch window started for them alone, never on a dead link.
+        var starts = 0;
+        CsiProMax.Tests.StandInWindow? helper = null;
+        var closed = FieldTest.Run(System.Reflection.DispatchProxy.Create<ICsiLink, CsiProMax.Tests.DeadLink>(), options with
+        {
+            At = at.AddMinutes(5), Viewer = false,
+            StartScratch = (program, ctx, file) =>
+            {
+                if (++starts == 1) return new CsiProMax.Tests.StandInWindow(System.Reflection.DispatchProxy.Create<ICsiLink, CsiProMax.Tests.DeadLink>(), Path.Combine(ctx.Folder, "cpm-field-test.edb"));
+                var path = Path.Combine(ctx.Folder, "cpm-stand-in.edb");
+                return helper = new CsiProMax.Tests.StandInWindow(new OfflineEtabs(OfflineEtabs.Load(file), path), path);
+            },
+        });
+        Equal(2, starts, "scratch windows started: the program's part, then one for CSI ProMax's own features");
+        var ownClosed = closed.Steps.Where(s => s.Section == PanelFieldSteps.Section).ToList();
+        Check(ownClosed.Count > 20 && ownClosed.All(s => !s.Detail.Contains("is not open") && !s.Detail.Contains("stopped answering")), "CSI ProMax's own features ran on the hidden scratch window: " + string.Join("; ", ownClosed.Where(s => !s.Ok).Take(3).Select(s => s.Name + ": " + s.Detail)));
+        Check(helper is { Closed: true, Disposed: true }, "the hidden scratch window for them is closed and let go of");
+
+        // And the open model's checks themselves, with no program open on the PC: run on a hidden scratch window too.
+        {
+            var standCtx = new FieldContext(CsiProgram.Etabs, Path.Combine(root, "stand"), System.Reflection.DispatchProxy.Create<ICsiLink, CsiProMax.Tests.DeadLink>());
+            Directory.CreateDirectory(standCtx.Folder);
+            standCtx.Files[CsiProgram.Etabs.Key] = Directory.GetFiles(Path.Combine(root, "work"), "*.e2k", SearchOption.AllDirectories).First();
+            CsiProMax.Tests.StandInWindow? w2 = null;
+            var did = FieldTest.StandIn(standCtx, options with
+            {
+                StartScratch = (program, ctx, file) => { var path = Path.Combine(ctx.Folder, "cpm-stand-in.edb"); return w2 = new CsiProMax.Tests.StandInWindow(new OfflineEtabs(OfflineEtabs.Load(file), path), path); },
+            }, CsiProgram.Etabs, open: true, panel: false);
+            Check(did is (true, false), "the open model's checks ran, and only they: " + did);
+            Check(standCtx.Steps.Any(s => s.Section == FieldTest.OpenSection && s.Name == "Info" && s.Ok), "the open model's checks read the hidden window's model");
+            // The stand-in model here has no results (a real hidden program reads what it has); nothing says "not open".
+            Check(!standCtx.Steps.Any(s => s.Detail.Contains("is not open") || s.Detail.Contains("could not be read")), "nothing of the open model is left out for want of a program: " + string.Join("; ", standCtx.Steps.Where(s => s.Skipped || !s.Ok).Select(s => s.Name)));
+            Check(w2 is { Closed: true, Disposed: true }, "the hidden window is closed after them");
+        }
+
         // A program window that never comes back is given up on; the rest of the test still runs and the report is saved.
         using var hold = new ManualResetEventSlim(false);
         var stuck = FieldTest.Run(open, options with
