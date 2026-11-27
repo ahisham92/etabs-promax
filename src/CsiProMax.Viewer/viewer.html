@@ -225,6 +225,7 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg legend{padding:0 4px;color:var(--group);font-weight:400}
 .dlg .g2{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}
 .dlg .g1{display:grid;gap:4px}
+.dlg label.dis{color:var(--mute)}
 .dlg .gu{display:grid;grid-template-columns:auto 1fr auto;gap:5px 8px;align-items:center}.dlg .gu .un{min-width:52px;color:var(--mute)}.dlg input.grey,.dlg select:disabled,.dlg input:disabled{background:var(--form);color:var(--mute)}
 .dlg .g3{display:grid;grid-template-columns:1fr 1fr;gap:3px 14px}
 .dlg .g4{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px 14px}
@@ -321,7 +322,7 @@ body.chaton #right{width:380px;max-width:42%}
 <div class="bar" id="tools">
   <label>Story <select id="story"></select></label>
   <label>Elevation <select id="line"></select></label>
-  <label>Colour by <select id="colour"><option value="kind">Object type</option><option value="section">Section</option><option value="material">Material</option><option value="ratio">Design ratio</option><option value="punching">Punching ratio</option><option value="soil">Soil pressure</option></select></label>
+  <label>Colour by <select id="colour"><option value="kind">Object type</option><option value="section">Section</option><option value="material">Material</option><option value="ratio">Design ratio</option><option value="punching">Punching ratio</option><option value="soil">Soil pressure</option><option value="spring">Spring properties</option><option value="group">Groups</option><option value="designtype">Frame design type</option><option value="bw">Black and white printer</option><option value="printer">Colour printer</option><option value="story">Stories</option></select></label>
   <span class="sep"></span>
   <label>Load case <select id="case"></select></label>
   <label>Component <select id="comp"></select></label>
@@ -396,14 +397,32 @@ const unitDefaults = {
   mks: {name: "Metric MKS Defaults", force: "tonf", length: "m", temperature: "C", section: "cm", stress: "kgf/cm²", moment: "tonf-m"}};
 let dispU = null;
 let unitsText = "", lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
+// The items of ETABS 23.2's Object Assignments and Other Assignments tabs (and SAP2000's Object Options), each with what
+// it shows: a word for a value the pack carries, or the assignment keywords it is about (shown as KEY=value).
+const asgItems = {
+  j: [["jNames", "Labels", "label"], ["jUid", "Unique Names", "uid"], ["jSprings", "Point Springs", "spr"], ["jPZ", "Panel Zones", /PANELZONE|^PZ/], ["jMass", "Additional Mass", /MASS/], ["jFloorMesh", "Floor Mesh Option", /FLOORMESH|MESHFLOOR/]],
+  a: [["aNames", "Labels", "label"], ["aUid", "Unique Names", "uid"], ["aSections", "Sections", "section"], ["aMods", "Stiffness Modifiers", "mod"], ["aAxes", "Local Axes", "axes"], ["aSprings", "Area Springs", "spr"],
+    ["aMass", "Additional Mass", /MASS/], ["aMesh", "Mesh Options", /MESH/], ["aEdge", "Auto Edge Constraints", /EDGECONSTRAINT|AUTOEDGE/], ["aLoadSet", "Uniform Load Sets", /LOADSET/], ["aMat", "Material Overwrite", /^MAT/],
+    ["aHinge", "Wall Hinges", /HINGE/], ["aThick", "Thickness Overwrites", /THICK/], ["aIns", "Insertion Point", /CARDINAL|OFFSET|TRANSFORMSTIFF/], ["aRel", "Edge Releases", /RELEASE/], ["aRebar", "Rebar Ratio Overwrite", /REBAR/]],
+  f: [["names", "Labels", "label"], ["fUid", "Unique Names", "uid"], ["fSections", "Sections", "section"], ["fMods", "Property Modifiers", "mod"], ["fReleases", "End Releases", "rel"], ["fSlabRel", "Slab Line Releases", "slabrel"],
+    ["fPF", "Partial Fixity", "pf"], ["fOffsets", "End Length Offsets", "off"], ["fIns", "Insertion Point", /CARDINAL|OFFSET[XYZ]|SNAP|TRANSFORMSTIFF/], ["fAxes", "Local Axes", "axes"], ["fSta", "Output Stations", /STA/],
+    ["fTC", "T/C Limits", /LIMIT/], ["fHinges", "Nonlinear Hinges", "hin"], ["fHingeOw", "Hinge Overwrites", /HINGEOVER|HINGEOW/], ["fSprings", "Line Springs", "spr"], ["fMass", "Additional Mass", /MASS/],
+    ["fMesh", "Mesh Options", /AUTOMESH|MESHAT|MAXMESH/], ["fFloorMesh", "Floor Mesh Option", /FLOORMESH|MESHFLOOR/], ["fConn", "Moment Connections", /CONNECT/], ["fSplice", "Column Splices", /SPLICE/],
+    ["fNP", "Nonprismatic Parameters", /NONPRIS/], ["fMat", "Material Overwrite", /^MAT/], ["fRebar", "Rebar Ratio Overwrite", /REBAR/], ["fGroup", "Group Name", "grp"]],
+  o: [["pierNames", "Labels", "pier"], ["pierAxes", "Local Axes", "pieraxes"], ["spanNames", "Labels", "span"], ["spanAxes", "LocalAxes", "spanaxes"], ["linkUid", "Unique Names", "uid"], ["linkProps", "Properties", "section"], ["linkAxes", "Local Axes", "axes"],
+    ["jAxes", "Local Axes", "jaxes"], ["cNames", "Labels", "label"], ["cSections", "Sections", "section"], ["tSections", "Sections", "section"], ["tAxes", "Local Axes", "axes"], ["sNames", "Labels", "label"], ["sSections", "Sections", "section"], ["sAxes", "Local Axes", "axes"], ["lNames", "Labels", "label"], ["lSections", "Sections", "section"], ["lAxes", "Local Axes", "axes"], ["tNames", "Labels", "label"]],
+};
 const opt = {grid: true, extrude: false, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: true, sections: true, explorer: true, side: true,
-  // The rest of Set Display Options (Ahmed 2026-11-27: every item of ETABS 23.2's form, and SAP2000's and SAFE's):
-  // shells extruded on their own, objects shrunk, dimension lines and story levels, and what each object is assigned.
-  extrudeA: false, shrink: false, dims: true, levels: true, aNames: false, jNames: false, jSprings: false, jDia: false,
-  fSections: false, fReleases: false, fAxes: false, fMods: false, fOffsets: false, fHinges: false, fSprings: false, fPier: false, fSpan: false,
-  aSections: false, aAxes: false, aMods: false, aDia: false, aSprings: false, aPier: false, aSpan: false, tNames: false, sNames: false};
+  // The rest of Set Display Options, as read from ETABS 23.2's Set View Options and SAP2000 26.3's Display Options on
+  // Ahmed's PC (2026-11-27): every box of every tab. Each is a key here, false unless the program ticks it at first.
+  extrudeA: false, shrink: false, dims: true, levels: true, horizon: true, arch: true, dia: false, conn: false, amesh: false, ribs: false, footings: false,
+  soilJ: false, soilA: false, umesh: false, allWin: false, jOnly: false, guide: true, bbox: false, fThick: false, offsetView: false};
+for (const it of Object.values(typeof asgItems === "undefined" ? {} : asgItems).flat()) if (!(it[0] in opt)) opt[it[0]] = false;
 // Each object's assignments from the pack (releases, local axes, modifiers, offsets, hinges, springs, diaphragms, piers, spandrels).
 let assign = {f: {}, a: {}, j: {}};
+// SAP2000's View by Colors of > Selected Groups: the groups picked with Select Groups... (all when none is picked).
+const selGroups = new Set();
+const groupNames = () => [...new Set([assign.f, assign.a].flatMap(m => Object.values(m).flatMap(x => x.grp || [])))].sort();
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
 let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
@@ -1150,7 +1169,7 @@ function readMesh() {
 const meshIdx = new Map();
 function meshIndex() { meshIdx.clear(); meshList.forEach((n, i) => meshIdx.set(n, points.length + i)); }
 let meshDrawn = false;
-const meshWanted = () => res.mode === "shell" && meshOf.size > 0;
+const meshWanted = () => (res.mode === "shell" || opt.amesh) && meshOf.size > 0;
 function readShells() {
   // The force or stress at each joint of each shell, averaged over the shells that meet at the joint, as the programs
   // draw their shell contours.
@@ -1997,6 +2016,12 @@ function buildColours() {
     if (dview) { const v = dview.byObj.get(o.id); c = designColour(v) || (o.type === "a" ? (T.dark ? "#3a4248" : "#dde2e5") : T.dark ? "#59636a" : "#b4bcc1"); label = null; }
     else if (mode === "section") { c = palette[secs.indexOf(o.type + ":" + o.section) % palette.length]; label = o.section || "(none)"; }
     else if (mode === "material" && sectionMat.size) { const m = sectionMat.get(o.section) || ""; c = palette[(mats.indexOf(m) + 3) % palette.length]; label = m || "(not known)"; }
+    else if (mode === "spring") { const s = (o.type === "f" ? assign.f : assign.a)[o.name] || {}; label = s.spr || "None"; c = s.spr ? palette[[...new Set(Object.values(assign.f).concat(Object.values(assign.a)).map(x => x.spr).filter(Boolean))].sort().indexOf(s.spr) % palette.length] : (T.dark ? "#59636a" : "#b4bcc1"); }
+    else if (mode === "group") { const s = (o.type === "f" ? assign.f : assign.a)[o.name] || {}, gname = (s.grp || []).find(x => !selGroups.size || selGroups.has(x)); label = gname || "None"; c = gname ? palette[groupNames().indexOf(gname) % palette.length] : (T.dark ? "#59636a" : "#b4bcc1"); }
+    else if (mode === "designtype") { const m = (sectionMat.get(o.section) || "").toLowerCase(); label = o.type === "a" ? "No Design" : /steel|^s\d|a992|a36|fy/.test(m) ? "Steel Frame" : /conc|^c\d|fc|4000/.test(m) ? "Concrete Frame" : "No Design"; c = {"Steel Frame": "#d0342c", "Concrete Frame": "#2f8ff7", "No Design": T.dark ? "#59636a" : "#9aa4aa"}[label]; }
+    else if (mode === "bw") { c = T.dark ? "#ffffff" : "#000000"; label = null; }
+    else if (mode === "printer") { c = {column: "#c00000", beam: "#0000c0", brace: "#008000", floor: "#a0a0a0", wall: "#c08040", ramp: "#a0a0a0", opening: "#606060"}[o.kind] || "#404040"; label = kindName[o.kind] || o.kind; }
+    else if (mode === "story") { const st = o.story || ""; label = st || "(none)"; c = palette[Math.max(0, stories.findIndex(x => x.name === st)) % palette.length]; }
     else if (mode === "ratio") { const r = ratio.get(o.id); c = ratioColour(r) || (o.type === "a" ? (o.kind === "wall" ? T.wall : T.floor) : T.dark ? "#59636a" : "#b4bcc1"); label = o.type === "a" && r === undefined ? null : ratioLabel(r); }
     else { c = o.type === "a" ? (o.kind === "wall" ? T.wall : T.floor) : T[o.kind] || T.other; label = kindName[o.kind] || o.kind; }
     put(o.id, c); if (label) legend.set(label, c);
@@ -2280,7 +2305,7 @@ function drawScene(p, M, R, dpr, mode) {
     return;
   }
   // The ground grid first: everything stands on it.
-  if (p.aux && opt.grid && p.mode === "3d" && T.ground) { gl.depthMask(false); thick(p.aux.ground, 1, 1, T.ground, 1, 0); gl.depthMask(true); }
+  if (p.aux && opt.grid && opt.horizon && p.mode === "3d" && T.ground) { gl.depthMask(false); thick(p.aux.ground, 1, 1, T.ground, 1, 0); gl.depthMask(true); }
   const savedK = curDefK;
   // The shape before loading, faint behind the deformed one.
   if (curDefK && res.ghost) { curDefK = 0; thick(bufs.lines, 1, 1, T.ghost, 1, 0); curDefK = savedK; }
@@ -2415,6 +2440,8 @@ function overlay(p, g, M, T, w, h) {
   if (p.mode === "plan" && !opt.extrude) drawPlanColumns(p, g, to, T);
   if (opt.joints) drawJoints(p, g, to, T);
   drawAssigns(p, g, to, T);
+  if (opt.bbox) { g.strokeStyle = T.dark ? "#8f9aa1" : "#9aa4aa"; g.lineWidth = 1; g.setLineDash([4, 3]); const c = [0, 1, 2, 3, 4, 5, 6, 7].map(i => to([i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]]));
+    for (const [i, j] of [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]]) if (c[i][3] && c[j][3]) { g.beginPath(); g.moveTo(c[i][0], c[i][1]); g.lineTo(c[j][0], c[j][1]); g.stroke(); } g.setLineDash([]); }
   if (opt.supports && !gl) drawSupports(p, g, to, T);
   if (opt.pt !== false) drawPT(p, g, to, T);
   drawMarks(p, g, to, T);
@@ -2474,12 +2501,29 @@ function shellAxes(a, ang) {
   return [add(mul(e1, c), mul(e2, sn)), add(mul(e2, c), mul(e1, -sn)), n3];
 }
 const modText = m => m ? Object.entries(m).map(([k, v]) => k.replace(/MOD$/, "") + "=" + num(v)).join(" ") : "";
+function asgText(item, o, s) {
+  const [k, , what] = item, x = s.x || {};
+  if (what instanceof RegExp) return Object.entries(x).filter(([w]) => what.test(w)).map(([w, v]) => w + "=" + v).join(" ");
+  switch (what) {
+    case "label": return shortName(o.name);
+    case "uid": return s.uid ? String(s.uid) : "";
+    case "section": return o.section || "";
+    case "mod": return modText(s.mod);
+    case "rel": return s.rel_i || s.rel_j ? (s.rel_i || "-") + " / " + (s.rel_j || "-") : "";
+    case "pf": return s.pf ? Object.entries(s.pf).map(([w, v]) => w + "=" + num(v)).join(" ") : "";
+    case "off": return s.off ? "I=" + num(s.off[0]) + " J=" + num(s.off[1]) + (x.RIGIDZONE ? " RZ=" + x.RIGIDZONE : "") : "";
+    case "hin": return s.hin ? s.hin.length + (s.hin.length === 1 ? " hinge" : " hinges") : "";
+    case "spr": return s.spr || "";
+    case "grp": return s.grp ? s.grp.join(", ") : "";
+    default: return "";
+  }
+}
 function drawAssigns(p, g, to, T) {
   if (!p.vis) return;
-  const fItems = opt.names || opt.fSections || opt.fReleases || opt.fAxes || opt.fMods || opt.fOffsets || opt.fHinges || opt.fSprings || opt.fPier || opt.fSpan;
-  const aItems = opt.aNames || opt.aSections || opt.aAxes || opt.aMods || opt.aDia || opt.aSprings || opt.aPier || opt.aSpan;
-  const jItems = opt.jNames || opt.jSprings || opt.jDia;
-  if (!fItems && !aItems && !jItems) return;
+  const on = list => list.filter(it => opt[it[0]] && typeof it[2] !== "string" || opt[it[0]] && !["axes", "slabrel"].includes(it[2]));
+  const fOn = on(asgItems.f), aOn = on(asgItems.a), jOn = on(asgItems.j);
+  const any = fOn.length || aOn.length || jOn.length || opt.fAxes || opt.aAxes || opt.fReleases || opt.fHinges || opt.fOffsets || opt.pierNames || opt.spanNames || opt.pierAxes || opt.spanAxes || opt.jAxes || opt.dia || opt.supports;
+  if (!any) return;
   let n = 0; for (const o of frames) if (p.vis[o.id]) n++; for (const o of areas) if (p.vis[o.id]) n++;
   const many = n > 4000, L = size * 0.025, taken = [];
   g.font = "10px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.setLineDash([]);
@@ -2493,9 +2537,11 @@ function drawAssigns(p, g, to, T) {
     const o = to(at); if (!o[3]) return;
     [["#e8291c", "1"], [T.dark ? "#ffffff" : "#1f8a4c", "2"], ["#1c5fd0", "3"]].forEach(([c, t], i) => { const b = to(add(at, mul(ax[i], L))); if (!b[3]) return; g.strokeStyle = g.fillStyle = c; g.lineWidth = 1.5; arrow(g, o, b); g.fillText(t, b[0] + (b[0] - o[0]) * 0.25, b[1] + (b[1] - o[1]) * 0.25); });
   };
+  const piers = new Map(), spans = new Map(), group = (map, name, pts, axis) => { if (!name) return; const e = map.get(name) || {pts: [], axis}; e.pts.push(...pts); map.set(name, e); };
   for (const f of frames) {
-    if (!fItems || !p.vis[f.id]) continue;
+    if (!p.vis[f.id]) continue;
     const s = assign.f[f.name] || {}, mid = mul(add(f.a, f.b), 0.5), at = t => add(f.a, mul(sub(f.b, f.a), t));
+    group(piers, s.pier, [f.a, f.b]); group(spans, s.span, [f.a, f.b]);
     if (opt.fAxes) arrows(mid, axesOf(f, s.ang));
     if (opt.fReleases && (s.rel_i || s.rel_j)) {
       g.strokeStyle = "#16a34a"; g.lineWidth = 1.5;
@@ -2506,23 +2552,29 @@ function drawAssigns(p, g, to, T) {
     if (opt.fOffsets && s.off) { g.strokeStyle = T.dark ? "#ffd83c" : "#b86a12"; g.lineWidth = 4; const [oi, oj] = s.off;
       if (oi > 0) { const a = to(f.a), b = to(at(Math.min(0.5, oi / len))); if (a[3] && b[3]) { g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); } }
       if (oj > 0) { const a = to(f.b), b = to(at(1 - Math.min(0.5, oj / len))); if (a[3] && b[3]) { g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); } } }
-    texts(mid, [opt.names && shortName(f.name), opt.fSections && f.section, opt.fReleases && (s.rel_i || s.rel_j) && (s.rel_i || "-") + " / " + (s.rel_j || "-"), opt.fMods && modText(s.mod), opt.fOffsets && s.off && "I=" + num(s.off[0]) + " J=" + num(s.off[1]),
-      opt.fHinges && s.hin && s.hin.length + (s.hin.length === 1 ? " hinge" : " hinges"), opt.fSprings && s.spr, opt.fPier && s.pier && "P " + s.pier, opt.fSpan && s.span && "S " + s.span].filter(Boolean));
+    texts(mid, fOn.map(it => asgText(it, f, s)).filter(Boolean));
   }
   for (const a of areas) {
-    if (!aItems || !p.vis[a.id]) continue;
+    if (!p.vis[a.id]) continue;
     const s = assign.a[a.name] || {}, cen = mul(a.pts.reduce(add, [0, 0, 0]), 1 / a.pts.length);
+    group(piers, s.pier, a.pts, a); group(spans, s.span, a.pts, a);
     if (opt.aAxes) arrows(cen, shellAxes(a, s.ang));
-    texts(cen, [opt.aNames && shortName(a.name), opt.aSections && a.section, opt.aMods && modText(s.mod), opt.aDia && s.dia, opt.aSprings && s.spr, opt.aPier && s.pier && "P " + s.pier, opt.aSpan && s.span && "S " + s.span].filter(Boolean), css(T.ghost));
+    texts(cen, aOn.map(it => asgText(it, a, s)).filter(Boolean).concat(opt.dia && s.dia ? [s.dia] : []), css(T.ghost));
   }
-  if (jItems) {
+  // Pier and spandrel labels (and their local axes) at the middle of their objects, as ETABS's Other Assignments.
+  for (const [map, names, axes, colour] of [[piers, opt.pierNames, opt.pierAxes, "#b45309"], [spans, opt.spanNames, opt.spanAxes, "#7c3aed"]]) {
+    if (!names && !axes) continue;
+    map.forEach((e, name) => { const c = mul(e.pts.reduce(add, [0, 0, 0]), 1 / e.pts.length); if (axes) arrows(c, e.axis ? shellAxes(e.axis, 0) : [[1, 0, 0], [0, 1, 0], [0, 0, 1]]); if (names) texts(c, [name], colour); });
+  }
+  if (jOn.length || opt.jAxes || opt.dia || opt.supports) {
     const z = p.mode === "plan" ? elevationOf(p.story) : null;
     for (const pt of points) {
-      const nm = String(pt[0]), at = [pt[1], pt[2], pt[3]], s = assign.j[nm] || {};
+      const nm = String(pt[0]), at = [pt[1], pt[2], pt[3]], s = assign.j[nm] || {}, o = {name: nm};
       if (p.mode === "plan" && (z === null || Math.abs(at[2] - z) > tol() * 10)) continue;
       if (p.mode === "elev" && p.line && !onLine(at, p.line)) continue;
-      if (opt.jSprings && s.spr) { const q = to(at); if (q[3]) { g.strokeStyle = T.support; g.lineWidth = 1.2; g.beginPath(); g.moveTo(q[0], q[1]); for (let i = 1; i <= 6; i++) g.lineTo(q[0] + (i % 2 ? 4 : -4), q[1] + i * 2.5); g.lineTo(q[0], q[1] + 17); g.stroke(); } }
-      const list = [opt.jNames && shortName(nm), opt.jSprings && s.spr, opt.jDia && s.dia].filter(Boolean);
+      if ((opt.supports || opt.jSprings) && s.spr) { const q = to(at); if (q[3]) { g.strokeStyle = T.support; g.lineWidth = 1.2; g.beginPath(); g.moveTo(q[0], q[1]); for (let i = 1; i <= 6; i++) g.lineTo(q[0] + (i % 2 ? 4 : -4), q[1] + i * 2.5); g.lineTo(q[0], q[1] + 17); g.stroke(); } }
+      if (opt.jAxes) arrows(at, [[1, 0, 0], [0, 1, 0], [0, 0, 1]]);
+      const list = jOn.map(it => asgText(it, o, s)).filter(Boolean).concat(opt.dia && s.dia ? [s.dia] : []);
       if (list.length) { const q = to(at); if (q[3] && !many) { g.textAlign = "left"; g.fillStyle = T.text; list.forEach((t, i) => g.fillText(t, q[0] + 5, q[1] - 6 - i * 11)); g.textAlign = "center"; } }
     }
   }
@@ -2565,7 +2617,7 @@ function drawPT(p, g, to, T) {
     const off = (q, i, w) => { const a = s.pts[Math.max(0, i - 1)], b = s.pts[Math.min(s.pts.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [q[0] - dy / l * w, q[1] + dx / l * w, q[2]]; };
     g.strokeStyle = c; g.setLineDash([6, 4]); line(s.pts); g.setLineDash([]);
     g.globalAlpha = 0.85; line(s.pts.map((q, i) => off(q, i, s.wl)).concat(s.pts.map((q, i) => off(q, i, -s.wr)).reverse()), true); g.globalAlpha = 1;
-    if (opt.sNames) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = c; g.fillText(s.name, x + 3, y - 3); } }
+    if (opt.names) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = c; g.fillText(s.name, x + 3, y - 3); } }
   }
   // Openings: their outline crossed corner to corner, as ETABS draws an opening in a floor.
   g.strokeStyle = "#6b7280"; g.lineWidth = 1;
@@ -2587,7 +2639,7 @@ function drawPT(p, g, to, T) {
       const o = (q, w) => [q[0] + nx * w, q[1] + ny * w, q[2]];
       g.lineWidth = 1; g.globalAlpha = 0.7; line([o(a, s.wl), o(b, s.wl), o(b, -s.wr), o(a, -s.wr)], true); g.globalAlpha = 1;
     }
-    if (opt.sNames || !rebar) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = g.strokeStyle; g.fillText(rebar ? s.name : s.name + " " + s.what, x + 3, y - 3); } }
+    if (rebar ? opt.names : opt.fSlabRel) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = g.strokeStyle; g.fillText(rebar ? s.name : s.name + " " + s.what, x + 3, y - 3); } }
   }
   // Tendons: their true profile in 3D and elevation; in plan, the tendons of the story's slab.
   g.strokeStyle = "#0fa3b1"; g.lineWidth = 2;
@@ -3521,46 +3573,80 @@ const dialogs = {
       [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Close"]], {width: 400}), resCases("reactions"));
   },
   display() {
-    // ETABS 23.2's Set View Options (View > Set Display Options, Ctrl+W) item for item; SAFE's has the same tabs with its
-    // own objects; SAP2000's Display Options for Active Window keeps its one page of Joints / Frames / Areas / Links and
-    // General groups with its "Not in View" boxes (Ahmed 2026-11-27: every item there and working, Openings too).
-    const cb = (k, l) => `<label><input type="checkbox" data-o="${k}" ${opt[k] ? "checked" : ""}>${l}</label>`;
-    const kb = (k, l) => `<label><input type="checkbox" data-k="${k}" ${hidden.kind.has(k) ? "" : "checked"}>${l}</label>`;
-    const nv = (ks, l) => `<label><input type="checkbox" data-nv="${ks}" ${ks.split(",").every(k => hidden.kind.has(k)) ? "checked" : ""}>${l}</label>`;
-    const fs = (legend, items, cls) => `<fieldset><legend>${legend}</legend><div class="${cls || "g2"}">${items.join("")}</div></fieldset>`;
-    const colours = `<select id="dCol">${$("colour").innerHTML}</select>`, back = `<select id="dBg">${opts([["white", "White"], ["black", "Black"]], bg)}</select>`;
-    let body, title, width;
+    // Read from the programs on Ahmed's PC (2026-11-27), tab by tab and box by box: ETABS 23.2's Set View Options
+    // (General / Object Assignments / Other Assignments; SAFE has the same form) and SAP2000 26.3's Display Options
+    // (Object Options / General Options). Pictures: project files field/display-forms.
+    const cb = (k, l, dis) => `<label${dis ? ' class="dis"' : ""}><input type="checkbox" data-o="${k}" ${opt[k] ? "checked" : ""}${dis ? " disabled" : ""}>${l}</label>`;
+    const inv = (k, l, dis) => `<label${dis ? ' class="dis"' : ""}><input type="checkbox" data-o="${k}" data-inv="1" ${opt[k] ? "" : "checked"}${dis ? " disabled" : ""}>${l}</label>`;
+    const kb = (ks, l, ind) => `<label${ind ? ' style="padding-left:18px"' : ""}><input type="checkbox" data-k="${ks}" ${ks.split(",").every(k => hidden.kind.has(k)) ? "" : "checked"}>${l}</label>`;
+    const nv = (ks, l, dis) => `<label${dis ? ' class="dis"' : ""}><input type="checkbox" data-nv="${ks}" ${ks.split(",").every(k => hidden.kind.has(k)) ? "checked" : ""}${dis ? " disabled" : ""}>${l}</label>`;
+    const box = (legend, items, style) => `<fieldset${style ? ` style="${style}"` : ""}><legend>${legend}</legend><div class="g1">${items.join("")}</div></fieldset>`;
+    const items = list => list.map(([k, l]) => cb(k, l));
+    const has = {cable: false, solid: false, link: false, tendon: tendons.length > 0, jspr: Object.values(assign.j).some(x => x.spr)};
+    let body, title, width, buttons;
     if (program === "sap2000") {
-      title = "Display Options for Active Window"; width = 620;
-      body = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
-        ${fs("Joints", [cb("jNames", "Labels"), cb("supports", "Restraints"), cb("jSprings", "Springs"), cb("jDia", "Constraints"), cb("joints", "Invisible", true).replace(/data-o="joints" (checked)?/, `data-o="joints" data-inv="1" ${opt.joints ? "" : "checked"}`), nv("joint", "Not in View")])}
-        ${fs("Frames/Cables/Tendons", [cb("names", "Labels"), cb("fSections", "Sections"), cb("fReleases", "Releases"), cb("fAxes", "Local Axes"), cb("fMods", "Property Modifiers"), cb("fOffsets", "End Offsets"), cb("fHinges", "Hinges"), cb("fSprings", "Line Springs"), cb("tNames", "Tendon Labels"), nv("column,beam,brace", "Frames Not in View"), nv("tendon", "Tendons Not in View")])}
-        ${fs("Areas", [cb("aNames", "Labels"), cb("aSections", "Sections"), cb("aAxes", "Local Axes"), cb("aMods", "Property Modifiers"), cb("aSprings", "Area Springs"), cb("aDia", "Constraints"), nv("floor,wall,ramp", "Areas Not in View"), nv("opening", "Openings Not in View")])}
-        ${fs("General", [cb("shrink", "Shrink Objects"), cb("extrude", "Extrude View"), cb("fill", "Fill Objects"), cb("edges", "Show Edges"), cb("grid", "Show Grid"), cb("axes", "Show Axes"), cb("levels", "Show Bounding Planes"), cb("see", "See Through Areas")])}
-        </div>${fs("View by Colors of", [`<span>Colors</span>${colours}`, `<span>Background</span>${back}`])}`;
+      title = "Display Options"; width = 520;
+      const vbc = $("colour").value, radio = (v, l) => `<label><input type="radio" name="vbc" value="${v}" ${(vbc === v || v === "kind" && !["section", "material", "printer", "bw", "group"].includes(vbc)) ? "checked" : ""}>${l}</label>`;
+      const vt = opt.extrude ? "extrude" : opt.offsetView ? "offset" : "standard", vtr = (v, l) => `<label><input type="radio" name="vt" value="${v}" ${vt === v ? "checked" : ""}>${l}</label>`;
+      body = `<div class="itabs"><button data-page="o" class="on">Object Options</button><button data-page="g">General Options</button></div>
+        <div class="ipage on" data-page="o"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px;align-items:start">
+          <div>${box("Joints", [cb("jNames", "Labels"), cb("supports", "Restraints"), cb("jSprings", "Springs", !has.jspr), cb("jAxes", "Local Axes"), inv("joints", "Invisible"), nv("joint", "Not in View")])}
+            ${box("Frames", [cb("names", "Labels"), cb("fSections", "Sections"), cb("fReleases", "Releases"), cb("fAxes", "Local Axes"), nv("column,beam,brace", "Not in View")])}</div>
+          <div>${box("Cables", [cb("cNames", "Labels", 1), cb("cSections", "Sections", 1), nv("cable", "Not in View", 1)])}
+            ${box("Tendons", [cb("tNames", "Labels", !has.tendon), cb("tSections", "Sections", !has.tendon), cb("tAxes", "Local Axes", !has.tendon), nv("tendon", "Not in View", !has.tendon)])}
+            ${box("Areas", [cb("aNames", "Labels"), cb("aSections", "Sections"), cb("aAxes", "Local Axes"), nv("floor,wall,ramp,opening", "Not in View"), cb("umesh", "User Mesh")])}</div>
+          <div>${box("Solids", [cb("sNames", "Labels", 1), cb("sSections", "Sections", 1), cb("sAxes", "Local Axes", 1), nv("solid", "Not in View", 1), cb("sMesh", "User Mesh", 1)])}
+            ${box("Links", [cb("lNames", "Labels", 1), cb("lSections", "Sections", 1), cb("lAxes", "Local Axes", 1), nv("link", "Not in View", 1)])}</div>
+        </div></div>
+        <div class="ipage" data-page="g"><div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px;align-items:start">
+          <div><fieldset><legend>View by Colors of</legend><div class="g1">${radio("kind", "Objects")}${radio("section", "Sections")}${radio("material", "Materials")}${radio("printer", "Color Printer")}${radio("bw", "White Background, Black Objects")}${radio("group", "Selected Groups")}
+            <button id="dSelGroups" style="margin:2px 0 0 22px" ${vbc === "group" ? "" : "disabled"}>Select Groups...</button></div></fieldset>
+            ${box("Miscellaneous", [cb("amesh", "Show Analysis Model (If Available)"), cb("jOnly", "Show Joints Only for Objects in View"), cb("guide", "Show Guide Structure")])}</div>
+          <div><fieldset><legend>View Type</legend><div class="g1">${vtr("standard", "Standard")}${vtr("offset", "Offset")}${vtr("extrude", "Extrude")}</div></fieldset>
+            ${box("General", [cb("shrink", "Shrink Objects"), cb("fill", "Fill Objects"), cb("edges", "Show Edges"), cb("grid", "Show Reference Lines"), cb("bbox", "Show Bounding Boxes")])}
+            ${cb("fThick", "Show Frame Section Thickness in Extruded View")}</div>
+        </div></div>
+        <div style="margin:8px 0 0">${cb("allWin", "Apply to All Windows")}</div>
+        <div class="g1" style="justify-items:center;margin-top:6px"><button id="dDefaults" style="width:210px">Reset Form to Default Values</button><button id="dCurrent" style="width:210px">Reset Form to Current Window Settings</button></div>`;
     } else {
-      const safe = program === "safe";
-      title = safe ? "Set Display Options" : "Set View Options"; width = 640;
-      body = `<div class="itabs"><button data-page="g" class="on">General</button><button data-page="a">Object Assignments</button><button data-page="o">Object Present in View</button></div>
+      title = "Set View Options"; width = 470;
+      const colours = [["kind", "Objects"], ["section", "Section Properties"], ["material", "Material Properties"], ["spring", "Spring Properties"], ["group", "Groups"], ["designtype", "Frame Design Type"], ["bw", "Black and White Printer Colors"], ["printer", "Color Printer Colors"], ["story", "Stories"]];
+      const vbc = colours.some(c => c[0] === $("colour").value) ? $("colour").value : "kind";
+      body = `<div class="itabs"><button data-page="g" class="on">General</button><button data-page="a">Object Assignments</button><button data-page="x">Other Assignments</button></div>
         <div class="ipage on" data-page="g">
-        ${fs("View by Colors of", [`<span>Colors</span>${colours}`, `<span>Background Color</span>${back}`])}
-        ${fs("Special Effects", [cb("fill", "Object Fill"), cb("edges", "Object Edges"), cb("extrude", "Extrude Frames"), cb("extrudeA", "Extrude Shells"), cb("shrink", "Object Shrink"), cb("see", "See Through Shells")])}
-        ${fs("Other Special Items", [cb("grid", "Grid Lines"), cb("dims", "Dimension Lines"), cb("levels", safe ? "Reference Planes" : "Story Levels"), cb("axes", "Global Axes"), cb("joints", "Joints Invisible").replace(/data-o="joints" (checked)?/, `data-o="joints" data-inv="1" ${opt.joints ? "" : "checked"}`)])}
-        </div>
-        <div class="ipage" data-page="a"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
-        ${fs("Joint Assignments", [cb("jNames", "Labels"), cb("supports", "Restraints"), cb("jSprings", "Springs"), cb("jDia", "Diaphragms")], "g1")}
-        ${fs("Frame Assignments", [cb("names", "Labels"), cb("fSections", "Sections"), cb("fReleases", "Releases"), cb("fAxes", "Local Axes"), cb("fMods", "Property Modifiers"), cb("fOffsets", "End Length Offsets"), cb("fHinges", "Hinges"), cb("fSprings", "Line Springs"), cb("fPier", "Pier Labels"), cb("fSpan", "Spandrel Labels")], "g1")}
-        ${fs("Shell Assignments", [cb("aNames", "Labels"), cb("aSections", "Sections"), cb("aAxes", "Local Axes"), cb("aMods", "Property Modifiers"), cb("aDia", "Diaphragms"), cb("aSprings", "Area Springs"), cb("aPier", "Pier Labels"), cb("aSpan", "Spandrel Labels")], "g1")}
-        </div>${fs(safe ? "Tendons and Strips" : "Tendons and Slab Items", [cb("tNames", "Tendon Labels"), cb("sNames", safe ? "Strip and Slab Rebar Labels" : "Design Strip and Slab Rebar Labels")])}</div>
-        <div class="ipage" data-page="o"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
-        ${fs("Joints", [cb("joints", "Joints"), cb("supports", "Supports")], "g1")}
-        ${fs("Frames", safe ? [kb("beam", "Beams"), kb("column", "Columns"), kb("brace", "Braces"), kb("tendon", "Tendons")] : [kb("column", "Columns"), kb("beam", "Beams"), kb("brace", "Braces"), kb("tendon", "Tendons")], "g1")}
-        ${fs(safe ? "Areas" : "Shells", safe ? [kb("floor", "Slabs"), kb("wall", "Walls"), kb("ramp", "Ramps"), kb("opening", "Openings")] : [kb("floor", "Floors"), kb("wall", "Walls"), kb("ramp", "Ramps"), kb("opening", "Openings")], "g1")}
-        </div>${fs("Slab Design Items", [kb("strip", "Design Strips"), kb("rebar", "Slab Rebar"), kb("release", "Slab Line Releases")])}
-        <p class="kv">Sections can be turned on and off one by one in the Model Explorer.</p></div>`;
+          <fieldset><div class="g2" style="padding:4px 10px"><span>View by Colors of</span><select id="dCol">${opts(colours, vbc)}</select></div></fieldset>
+          <div style="display:grid;grid-template-columns:1fr 1.25fr;gap:0 8px;align-items:start">
+          ${box("Objects Present in View", [kb("joint", "Joint Objects"), inv("joints", "Invisible").replace("<label>", '<label style="padding-left:18px">'), kb("column", "Columns"), kb("beam", "Beams"), kb("brace", "Braces"), kb("nullframe", "All Null Frames"), kb("floor,ramp", "Floors"), kb("wall", "Walls"), kb("opening", "Openings"), kb("nullarea", "All Null Shells"), kb("wallstack", "Wall Stacks"), kb("link", "Links")])}
+          <div>${box("Special Effects", [cb("shrink", "Object Shrink"), cb("fill", "Object Fill"), cb("edges", "Object Edge"), cb("extrude", "Extrude Frames"), cb("extrudeA", "Extrude Shells")])}
+          ${box("Other Special Items", [cb("supports", "Joint Restraints and Springs"), cb("dia", "Diaphragm Extent"), cb("conn", "Connections"), cb("levels", "Story Labels"), cb("dims", "Dimension Lines"), cb("arch", "Architectural Plan Layers"), cb("horizon", "Horizon"), cb("amesh", "Shell Analysis Mesh"), cb("ribs", "Slab Internal Ribs"), cb("footings", "Isolated Column Footings"), cb("soilJ", "Soil Profile for Joints"), cb("soilA", "Soil Profile for Areas"), cb("umesh", "Shell User Mesh")])}</div>
+          </div></div>
+        <div class="ipage" data-page="a"><div style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px;align-items:start">
+          <div>${box("Joint Assignments", items(asgItems.j))}${box("Shell Assignments", items(asgItems.a))}</div>
+          ${box("Frame Assignments", items(asgItems.f.slice(0, -1)).concat([`<div style="height:12px"></div>`, cb("fGroup", "Group Name")]))}
+        </div></div>
+        <div class="ipage" data-page="x"><div style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px;align-items:start">
+          <div>${box("Pier Assignments", [cb("pierNames", "Labels"), cb("pierAxes", "Local Axes")])}${box("Link Assignments", [cb("linkUid", "Unique Names"), cb("linkProps", "Properties"), cb("linkAxes", "Local Axes")])}</div>
+          ${box("Spandrel Assignments", [cb("spanNames", "Labels"), cb("spanAxes", "LocalAxes")])}
+        </div></div>
+        <div style="margin:8px 0 0">${cb("allWin", "Apply to All Windows")}</div>
+        <div class="g1" style="justify-items:center;margin-top:6px"><button id="dDefaults" style="width:190px">Set to Default View Options</button></div>`;
     }
-    dialog(title, body, [["OK", d => applyDisplay(d)], ["Apply", d => { applyDisplay(d); return false; }, true], ["Cancel"]], {width});
-    setTimeout(() => { const d = document.querySelector(".dlg:last-of-type #dCol"); if (d) d.value = $("colour").value; });
+    dialog(title, body, [["OK", d => applyDisplay(d)], ["Close"], ["Apply", d => { applyDisplay(d); return false; }, true]], {width});
+    const d = document.querySelector(".dlg:last-of-type");
+    // Set to Default View Options / Reset Form to Default Values: the boxes as the program has them on a new model.
+    const defaults = {joints: false, supports: true, fill: true, edges: true, extrude: false, extrudeA: false, shrink: false, levels: true, dims: true, arch: true, horizon: true, grid: true, guide: true};
+    q(d, "#dDefaults").onclick = () => {
+      d.querySelectorAll("[data-o]").forEach(x => { const v = defaults[x.dataset.o] || false; x.checked = x.dataset.inv ? !v : v; });
+      d.querySelectorAll("[data-k]").forEach(x => x.checked = true); d.querySelectorAll("[data-nv]").forEach(x => x.checked = false);
+      if (q(d, "#dCol")) q(d, "#dCol").value = "kind"; const r = q(d, '[name=vbc][value="kind"]'); if (r) r.checked = true; const t = q(d, '[name=vt][value="standard"]'); if (t) t.checked = true;
+    };
+    if (q(d, "#dCurrent")) q(d, "#dCurrent").onclick = () => { d.close(); dialogs.display(); };
+    d.querySelectorAll("[name=vbc]").forEach(r => r.onchange = () => { q(d, "#dSelGroups").disabled = q(d, "[name=vbc]:checked").value !== "group"; });
+    if (q(d, "#dSelGroups")) q(d, "#dSelGroups").onclick = () => {
+      const names = groupNames();
+      dialog("Select Groups", names.length ? names.map(n => `<label style="display:block;margin:3px 0"><input type="checkbox" data-gr="${esc(n)}" ${selGroups.has(n) ? "checked" : ""}>${esc(n)}</label>`).join("") : `<p class="kv">This model has no groups.</p>`,
+        [["OK", g => { selGroups.clear(); g.querySelectorAll("[data-gr]:checked").forEach(x => selGroups.add(x.dataset.gr)); }], ["Cancel"]], {width: 280});
+    };
   },
   view3d() {
     const p = panes[active]; if (!p) return;
@@ -3647,17 +3733,19 @@ function applyContour(d) {
   $("case").value = res.case; $("comp").value = res.comp; pointsDirty = true; syncResults(); syncTools(); draw();
 }
 function applyDisplay(d) {
-  // A box shown twice (Restraints on two tabs) takes the one the user changed.
+  // A box shown in two places takes the one the user changed.
   const seen = {};
-  d.querySelectorAll("[data-o]").forEach(x => { const k = x.dataset.o, v = x.dataset.inv ? !x.checked : x.checked; if (k in seen && v === opt[k]) return; seen[k] = v; });
-  const geo = ["extrude", "extrudeA", "shrink"];
+  d.querySelectorAll("[data-o]").forEach(x => { if (x.disabled) return; const k = x.dataset.o, v = x.dataset.inv ? !x.checked : x.checked; if (k in seen && v === opt[k]) return; seen[k] = v; });
+  const vt = q(d, "[name=vt]:checked"); if (vt) { seen.extrude = vt.value === "extrude"; seen.extrudeA = seen.extrude; seen.offsetView = vt.value === "offset"; }
+  const geo = ["extrude", "extrudeA", "shrink", "amesh"];
   for (const [k, v] of Object.entries(seen)) if (opt[k] !== v) { opt[k] = v; if (geo.includes(k)) { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; }
-  d.querySelectorAll("[data-k]").forEach(x => { x.checked ? hidden.kind.delete(x.dataset.k) : hidden.kind.add(x.dataset.k); });
-  d.querySelectorAll("[data-nv]").forEach(x => x.dataset.nv.split(",").forEach(k => x.checked ? hidden.kind.add(k) : hidden.kind.delete(k)));
+  d.querySelectorAll("[data-k]").forEach(x => x.dataset.k.split(",").forEach(k => x.checked ? hidden.kind.delete(k) : hidden.kind.add(k)));
+  d.querySelectorAll("[data-nv]:not([disabled])").forEach(x => x.dataset.nv.split(",").forEach(k => x.checked ? hidden.kind.add(k) : hidden.kind.delete(k)));
   if (hidden.kind.has("joint")) opt.joints = false;
   hiddenVersion++;
-  const c = q(d, "#dCol").value; if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design" || res.mode === "values" || res.mode === "loads") res.mode = "model"; syncResults(); }
-  const b = q(d, "#dBg").value; if (b !== bg) act("bg");
+  const vbc = q(d, "[name=vbc]:checked"), c = vbc ? vbc.value : q(d, "#dCol").value;
+  if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design" || res.mode === "values" || res.mode === "loads") res.mode = "model"; syncResults(); }
+  if (c === "bw" && bg !== "white") act("bg");
   colourDirty = true; buildTree(); syncTools(); draw();
 }
 

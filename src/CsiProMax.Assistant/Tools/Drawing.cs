@@ -77,7 +77,7 @@ public static class Drawing
     }
 
     /// <summary>The assignments the display form can show, by the Viewer's object names (label@story), only where set:
-    /// f: {rel_i, rel_j, ang, mod, off, hin (relative places), spr, pier, span}; a: {kind, ang, mod, dia, spr, pier, span}; j: {spr, dia}.</summary>
+    /// f: {rel_i, rel_j, ang, mod, off, hin (relative places), spr, pier, span, pf, x, grp, uid}; a: {kind, ang, mod, dia, spr, pier, span, x, grp, uid}; j: {spr, dia, x, grp}.</summary>
     public static JsonObject Assignments(CsiProMax.Model.StructuralModel m)
     {
         static string N(string label, string story) => label + "@" + story;
@@ -89,6 +89,18 @@ public static class Drawing
             return set.Count == 0 ? null : new JsonObject(set.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)JsonValue.Create(R(kv.Value)))));
         }
         void Put(JsonObject o, string k, JsonNode? v) { if (v is not null) o[k] = v; }
+        // Every keyword of the assignment line (mesh options, insertion point, output stations, mass, overwrites ...):
+        // each item of the display form shows the keywords it is about. And the groups the object is in.
+        static JsonObject? Words(List<List<string>> extra)
+        {
+            var o = new JsonObject();
+            foreach (var l in extra) for (var i = 0; i + 1 < l.Count; i += 2) if (l[i] is not ("RELEASE" or "ANG" or "PIER" or "SPANDREL" or "SPRINGPROP" or "OPENING")) o[l[i]] = l[i + 1].Trim('"');
+            return o.Count == 0 ? null : o;
+        }
+        var groups = new Dictionary<(string, string, string), List<string>>();
+        foreach (var g in CsiProMax.Model.GroupDefs.Groups(m)) foreach (var k in g.Members) { if (!groups.TryGetValue(k, out var gl)) groups[k] = gl = []; gl.Add(g.Name); }
+        JsonArray? Groups(string type, string label, string story) => groups.TryGetValue((type, label, story), out var gl) ? new JsonArray(gl.Select(x => (JsonNode)x).ToArray()) : null;
+        var uid = 0;
         var hinges = CsiProMax.Model.PropertyDefs.Hinges(m).GroupBy(h => N(h.Label, h.Story)).ToDictionary(g => g.Key, g => new JsonArray(g.Select(h => (JsonNode)JsonValue.Create(R(h.Hinge.At))).ToArray()));
         var f = new JsonObject();
         foreach (var l in m.LineAssigns)
@@ -105,7 +117,11 @@ public static class Drawing
             if (Q(CsiProMax.Model.PropertyDefs.Value(l.Extra, "SPRINGPROP")) is { } sp) o["spr"] = sp;
             if (Q(CsiProMax.Model.PropertyDefs.Value(l.Extra, "PIER")) is { } pier) o["pier"] = pier;
             if (Q(CsiProMax.Model.PropertyDefs.Value(l.Extra, "SPANDREL")) is { } span) o["span"] = span;
-            if (o.Count > 0) f[N(l.Label, l.Story)] = o;
+            var pf = CsiProMax.Model.PropertyDefs.PartialFixity(l);
+            if (pf.Count > 0) o["pf"] = new JsonObject(pf.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)JsonValue.Create(R(kv.Value)))));
+            Put(o, "x", Words(l.Extra)); Put(o, "grp", Groups("LINE", l.Label, l.Story));
+            o["uid"] = ++uid;
+            f[N(l.Label, l.Story)] = o;
         }
         var kinds = m.Areas.GroupBy(x => x.Label).ToDictionary(g => g.Key, g => g.First().Kind);
         var a = new JsonObject();
@@ -120,7 +136,9 @@ public static class Drawing
             if (Q(CsiProMax.Model.PropertyDefs.Value(x.Extra, "SPRINGPROP")) is { } sp) o["spr"] = sp;
             if (Q(CsiProMax.Model.PropertyDefs.Value(x.Extra, "PIER")) is { } pier) o["pier"] = pier;
             if (Q(CsiProMax.Model.PropertyDefs.Value(x.Extra, "SPANDREL")) is { } span) o["span"] = span;
-            if (o.Count > 0) a[N(x.Label, x.Story)] = o;
+            Put(o, "x", Words(x.Extra)); Put(o, "grp", Groups("AREA", x.Label, x.Story));
+            o["uid"] = ++uid;
+            a[N(x.Label, x.Story)] = o;
         }
         var jt = new JsonObject();
         foreach (var p in m.PointAssigns)
@@ -128,6 +146,7 @@ public static class Drawing
             var o = new JsonObject();
             if (Q(CsiProMax.Model.PropertyDefs.Value(p.Extra, "SPRINGPROP")) is { } sp) o["spr"] = sp;
             if (Q(p.Diaphragm) is { } dia && !dia.Equals("None", StringComparison.OrdinalIgnoreCase)) o["dia"] = dia;
+            Put(o, "x", Words(p.Extra)); Put(o, "grp", Groups("POINT", p.Point, p.Story));
             if (o.Count > 0) jt[N(p.Point, p.Story)] = o;
         }
         var all = new JsonObject();

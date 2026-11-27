@@ -507,7 +507,7 @@ static class ExtrasTests
             Check(CsiProMax.Assistant.ReferenceForms.PathFor("safe", "Units > Show Units Form...")[0] == CsiProMax.Assistant.Etabs.MenuCommand.StatusBar, "SAFE's Units form is not opened from its status bar");
             Check(CsiProMax.Assistant.ModelerCheck.Script.Contains("the units at the bottom right, as ${target} has them", StringComparison.Ordinal), "the window check does not try the units control");
         });
-        yield return ("Ahmed 2026-11-27: Set Display Options is ETABS 23.2's form item for item (General, Object Assignments, Object Present in View with Openings), SAFE's and SAP2000's own, and every item has what it draws", () =>
+        yield return ("Ahmed 2026-11-27: Set Display Options is the form read from ETABS 23.2 (Set View Options: General, Object Assignments, Other Assignments) and SAP2000 26.3 (Display Options: Object Options, General Options) on his PC, and every item has what it draws", () =>
         {
             var m = Seed.Etabs23();
             var line = m.LineAssigns.First(l => l.Section is not null);
@@ -528,12 +528,12 @@ static class ExtrasTests
             Check((string?)a["a"]![floor.Label + "@" + floor.Story]!["kind"] == "opening", "an area assigned as an opening is not sent as one");
             Check((string?)a["j"]![j.Point + "@" + j.Story]!["dia"] == "D1", "a joint's diaphragm is not sent");
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-            foreach (var marker in new[] { "title = safe ? \"Set Display Options\" : \"Set View Options\"", "title = \"Display Options for Active Window\"", "data-page=\"a\">Object Assignments</button>", "data-page=\"o\">Object Present in View</button>",
-                "kb(\"opening\", \"Openings\")", "nv(\"opening\", \"Openings Not in View\")", "cb(\"shrink\", \"Object Shrink\")", "cb(\"extrudeA\", \"Extrude Shells\")", "cb(\"fReleases\", \"Releases\")", "cb(\"fAxes\", \"Local Axes\")", "cb(\"aDia\", \"Diaphragms\")",
-                "if (a.kind === \"opening\") {", "function drawAssigns(p, g, to, T)", "[\"opening\", \"Openings\", areas]" })
+            foreach (var marker in new[] { "title = \"Set View Options\"", "title = \"Display Options\"", "data-page=\"a\">Object Assignments</button>", "data-page=\"x\">Other Assignments</button>", "data-page=\"o\" class=\"on\">Object Options</button>", "data-page=\"g\">General Options</button>",
+                "kb(\"opening\", \"Openings\")", "nv(\"floor,wall,ramp,opening\", \"Not in View\")", "cb(\"shrink\", \"Object Shrink\")", "cb(\"extrudeA\", \"Extrude Shells\")", "[\"fReleases\", \"End Releases\", \"rel\"]", "[\"fAxes\", \"Local Axes\", \"axes\"]", "cb(\"pierNames\", \"Labels\")",
+                "cb(\"horizon\", \"Horizon\")", "Set to Default View Options", "Reset Form to Current Window Settings", "[\"story\", \"Stories\"]", "if (a.kind === \"opening\") {", "function drawAssigns(p, g, to, T)", "[\"opening\", \"Openings\", areas]" })
                 Check(html.Contains(marker, StringComparison.Ordinal), "the display form lacks: " + marker);
-            foreach (var key in new[] { "names", "fSections", "fReleases", "fAxes", "fMods", "fOffsets", "fHinges", "fSprings", "fPier", "fSpan", "aNames", "aSections", "aAxes", "aMods", "aDia", "aSprings", "aPier", "aSpan", "jNames", "jSprings", "jDia" })
-                Check(html.Contains("opt." + key + " &&", StringComparison.Ordinal) || html.Contains("if (opt." + key + ")", StringComparison.Ordinal), "the item " + key + " draws nothing");
+            // Every assignment item shows something: a value the pack carries or the keywords it is about.
+            Check(html.Contains("function asgText(item, o, s)", StringComparison.Ordinal) && html.Contains("texts(mid, fOn.map(it => asgText(it, f, s))", StringComparison.Ordinal), "the assignment items are not drawn");
         });
         yield return ("Ahmed 2026-11-27: a units change shows the whole model in the new units (stories, sections, materials, loads, tables) and it is saved in its own units, exactly as it was", () =>
         {
