@@ -9,12 +9,18 @@ namespace CsiProMax.Assistant.Packs;
 
 /// <summary>
 /// The review packs kept up to date by themselves, with no window: dotnet CsiProMax.dll --packs. One for each Windows
-/// user (a named mutex), started at sign-in by the Tools menu keeper (keep-plugins.ps1) and by the CSI ProMax window.
+/// user (a named mutex), started at sign-in by the Tools menu keeper (keep-plugins.ps1) and by the CSI ProMax window,
+/// but only when the engineer turned it on (packs-on.txt; install.ps1 -Packs). It is off by default (2026-11-27): after
+/// a run it reads every result table through the program's API, and the program answers those calls on its own window's
+/// thread, so a large model stayed locked for 30 to 60 minutes after each run, and a design started meanwhile crashed,
+/// on PCs where nobody had opened CSI ProMax at all. Off, it does nothing until asked; a pack is still made on demand
+/// (export_pack in the chat, or --packs --once).
 /// Every few seconds it looks for open ETABS, SAP2000 and SAFE windows and, for each, follows <see cref="AutoPack"/>'s
 /// rule: after an analysis or a design the pack beside the model is written again. The newer programs (on .NET 8) are
 /// reached through their API from here; the older ones (ETABS 21, SAP2000 25, SAFE 21 and before) through the
 /// plug-in's pipe, once Tools > CSI ProMax was opened in them, or through Windows PowerShell.
-///   --packs          keep doing it until Windows signs out (or packs-off.txt is put in %LOCALAPPDATA%\CsiProMax)
+///   --packs          keep doing it until Windows signs out, when packs-on.txt is in %LOCALAPPDATA%\CsiProMax (and
+///                    packs-off.txt is not); otherwise it ends at once
 ///   --packs --once   one look at every open program now, and say what was done (from a command line)
 /// What it does goes in %LOCALAPPDATA%\CsiProMax\packs.log, and what it watches now in packs.json.
 /// </summary>
@@ -29,10 +35,17 @@ public static class PackWatcher
     /// <summary>The file that turns it off: while it is there, nothing is watched and no watcher starts.</summary>
     internal static string OffFile => Path.Combine(StateRoot, "packs-off.txt");
 
+    /// <summary>
+    /// The file that says the engineer turned it on (install.ps1 -Packs, or made by hand). Without it nothing is watched
+    /// and no watcher starts: a PC where CSI ProMax was only installed leaves every program alone.
+    /// </summary>
+    internal static string ChosenFile => Path.Combine(StateRoot, "packs-on.txt");
+
     /// <summary>What the Tools menu keeper reads to start the watcher at sign-in: "on|dotnet|folder of CsiProMax.dll".</summary>
     internal static string OnFile => Path.Combine(StateRoot, "packs.txt");
 
-    public static bool Off => File.Exists(OffFile);
+    /// <summary>Off unless the engineer turned it on, and off whenever packs-off.txt is there.</summary>
+    public static bool Off => File.Exists(OffFile) || !File.Exists(ChosenFile);
 
     /// <summary>How often each program is looked at.</summary>
     public static TimeSpan Every { get; set; } = TimeSpan.FromSeconds(10);
@@ -110,6 +123,9 @@ public static class PackWatcher
         if (DateTime.UtcNow < f.NotBefore) return;
         // An analysis that is still writing its log: the program is busy, so it is not asked anything now.
         if (f.Before is { } b && AutoPack.RunStamp(b.File) is { } run && DateTime.UtcNow - run < AutoPack.Settle) return;
+        // A program whose window does not answer (a run, a design or a long command of the engineer's) is not asked
+        // anything either: each API call would wait behind that work and keep the program busy longer.
+        if (!Responding(f.Pid)) return;
         try
         {
             var done = AutoPack.Once(f.Link(), ref f.Before, window: f.Key);
@@ -125,6 +141,13 @@ public static class PackWatcher
             f.Drop();
             f.NotBefore = DateTime.UtcNow.AddMinutes(1);
         }
+    }
+
+    /// <summary>Whether the program's window answers now (Windows asks it with a short wait). A process that is gone answers false.</summary>
+    private static bool Responding(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); return !p.HasExited && p.Responding; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { return false; }
     }
 
     public static int Run(string[] args)
@@ -182,7 +205,7 @@ public static class PackWatcher
                 }
                 Thread.Sleep(Every);
             }
-            Log("packs-off.txt is there: watching stops.");
+            Log(File.Exists(OffFile) ? "packs-off.txt is there: watching stops." : "packs-on.txt is not there (the watcher is off unless turned on): watching stops.");
             return 0;
         }
         finally
@@ -258,7 +281,8 @@ public static class PackWatcher
 
     /// <summary>
     /// Starts the watcher from this version's folder when none runs, and tells the Tools menu keeper to start it at
-    /// every sign-in. On by default; packs-off.txt turns it off. Called by the CSI ProMax window when it opens.
+    /// every sign-in, only when the engineer turned it on (packs-on.txt). Off by default; packs-off.txt turns it off.
+    /// Called by the CSI ProMax window when it opens.
     /// </summary>
     public static void EnsureRunning()
     {

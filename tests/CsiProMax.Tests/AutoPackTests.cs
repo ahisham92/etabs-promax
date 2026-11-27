@@ -178,11 +178,34 @@ static class AutoPackTests
             Check(program.Contains("FollowPack("), "the Viewer follows the pack it shows");
             var keeper = File.ReadAllText(Path.Combine(SourceText.Root(), "keep-plugins.ps1"));
             Check(keeper.Contains("packs.txt") && keeper.Contains("CsiProMax.Packs"), "the keeper starts the watcher at sign-in when it is on");
+            Check(keeper.Contains("packs-on.txt"), "the keeper starts the watcher only when the engineer turned it on (packs-on.txt)");
             var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
             Check(install.Contains("-NoPacks") && install.Contains("packs.txt"), "install.ps1 turns the watcher on (and -NoPacks off)");
+            Check(install.Contains("packs-on.txt") && System.Text.RegularExpressions.Regex.IsMatch(install, @"elseif \(\$Packs\) \{\s*\[IO\.File\]::WriteAllText\(\$chosenFile"), "install.ps1 turns the watcher on only with -Packs");
             var watcher = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Packs/PackWatcher.cs"));
             Check(watcher.Contains("CsiProgram.All"), "every CSI program is looked for");
+            Check(watcher.Contains("Responding(f.Pid)"), "a program whose window does not answer is not asked anything");
             Check(!watcher.Contains(".Save(") && !File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Packs/AutoPack.cs")).Contains(".Save("), "the watcher never saves the model");
+        });
+
+        yield return ("auto pack: the watcher is off until the engineer turns it on, and packs-off.txt still wins", () =>
+        {
+            var keep = PackWatcher.StateRoot;
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-packs-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            try
+            {
+                PackWatcher.StateRoot = folder;
+                // Only installed (an older version may have left packs.txt saying where it is): off.
+                File.WriteAllText(Path.Combine(folder, "packs.txt"), "on|dotnet|folder");
+                Check(PackWatcher.Off, "an installed CSI ProMax that nobody turned on leaves the programs alone");
+                Equal(0, PackWatcher.Run([]), "the watcher started without packs-on.txt ends at once");
+                File.WriteAllText(PackWatcher.ChosenFile, "on");
+                Check(!PackWatcher.Off, "packs-on.txt turns it on");
+                File.WriteAllText(PackWatcher.OffFile, "off");
+                Check(PackWatcher.Off, "packs-off.txt turns it off even when it was turned on");
+            }
+            finally { PackWatcher.StateRoot = keep; Directory.Delete(folder, true); }
         });
     }
 }

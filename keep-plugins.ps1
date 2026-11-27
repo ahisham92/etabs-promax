@@ -295,12 +295,14 @@ function Invoke-Register {
 }
 
 # The review packs kept up to date after every analysis and design (CSI ProMax's watcher, dotnet CsiProMax.dll --packs):
-# started from here at sign-in when CSI ProMax turned it on (packs.txt in %LOCALAPPDATA%\CsiProMax: on|dotnet|folder),
-# none runs yet (its mutex Local\CsiProMax.Packs), and packs-off.txt is not there. It only reads the programs.
+# started from here at sign-in only when the engineer turned it on (packs-on.txt in %LOCALAPPDATA%\CsiProMax, made by
+# install.ps1 -Packs; off by default since 2026-11-27, as its reads after every run kept ETABS busy for a long time),
+# CSI ProMax said where it is (packs.txt: on|dotnet|folder), none runs yet (its mutex Local\CsiProMax.Packs), and
+# packs-off.txt is not there. It only reads the programs.
 function Invoke-Packs {
     if (-not $onWindows -or -not $StateRoot) { return }
     $on = Join-Path $StateRoot 'packs.txt'
-    if (-not (Test-Path -LiteralPath $on) -or (Test-Path -LiteralPath (Join-Path $StateRoot 'packs-off.txt'))) { return }
+    if (-not (Test-Path -LiteralPath $on) -or -not (Test-Path -LiteralPath (Join-Path $StateRoot 'packs-on.txt')) -or (Test-Path -LiteralPath (Join-Path $StateRoot 'packs-off.txt'))) { return }
     $parts = @(([IO.File]::ReadAllText($on)).Trim() -split '\|')
     if ($parts.Count -lt 3 -or $parts[0] -ne 'on') { return }
     $dotnet = $parts[1]; $folder = $parts[2]; $dll = Join-Path $folder 'CsiProMax.dll'

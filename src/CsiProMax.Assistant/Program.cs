@@ -12,7 +12,8 @@ namespace CsiProMax.Assistant;
 ///   --demo          a small model in memory instead of ETABS, to see the window on a PC without ETABS
 ///   --modeler [file] the Modeler: CSI ProMax's own model with no ETABS, saved as .e2k for licensed ETABS to import
 ///   --viewer [file] the Viewer in a CSI ProMax window of its own: a review pack (.cpmx) or a Viewer page, or empty
-///   --packs         no window: the review pack beside each model written again after every analysis and design (--once: one look now)
+///   --packs         no window: the review pack beside each model written again after every analysis and design, when
+///                   turned on (packs-on.txt; off by default) (--once: one look now, whether on or not)
 ///   --selftest      check the link to ETABS call by call and print the result (--changes also adds and deletes objects)
 /// </summary>
 public static class Program
@@ -148,7 +149,7 @@ public static class Program
             CarryOver();
             // The review packs kept up to date after every run and design, with no window (AutoPack, PackWatcher).
             if (args.Contains("--packs")) return CsiProMax.Assistant.Packs.PackWatcher.Run(args);
-            // Every window starts it when it is not running yet (on by default; packs-off.txt turns it off).
+            // Every window starts it when it is not running yet, only when the engineer turned it on (packs-on.txt; off by default).
             if (!args.Contains("--no-update") && !args.Contains("--demo")) CsiProMax.Assistant.Packs.PackWatcher.EnsureRunning();
             // The Viewer on its own (its shortcut, or a pack opened with CSI ProMax): one window, no CSI program, no chat.
             if (args.Contains("--viewer")) return RunViewer(args);
