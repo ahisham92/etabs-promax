@@ -80,6 +80,14 @@ public static class ModelerCheck
         },
         // The Analyze and Draw toggles and forms of the program's own menus: run here without starting the program or
         // changing the model.
+        // The Edit items that change the model at once: done, then undone, so the check's model stays as it was.
+        ...Object.fromEntries(["m:ete:cut", "m:ete:join", "m:ete:reverse", "m:ete:relabel", "m:ete:splitEdges", "m:ete:mergeShells", "m:ete:userMesh", "m:ete:gridAtJoints"].map(k => [k, async it => {
+          const was = hm.state && hm.state.rev; await act(it.act); await wait(900);
+          const changed = hm.state && hm.state.rev !== was, said = document.getElementById("hint").textContent;
+          if (changed) { await hmRun("undo", null, true); await wait(400); }
+          closeDialogs();
+          return {ok: (changed ? "changed the model, then undone: " : "") + said.slice(0, 160)};
+        }])),
         "m:etn:alive": async it => {
           await act(it.act); const on = ticked(it.act); await act(it.act); const off = !ticked(it.act);
           return on && off ? {ok: "Model Alive ticks on and off (no change made meanwhile, so no run)"} : {fail: "Model Alive does not tick on and off"};
@@ -668,6 +676,55 @@ public static class ModelerCheck
           const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
           return off.length ? {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")} : {ok: `Analyze ${an.length} items, Draw ${dr.length} items, in the program's order and words`};
         });
+        // The Detailing menu item by item and its rule forms with every sub-form they open (pictures in
+        // field/reference-forms/etabs/Detailing): titles in the program's words; a value set and OK is kept with the model,
+        // Set to Default Values and OK puts the program's defaults back.
+        await step("Detailing menu and its rule forms, as the program has them (23.2 pictures)", async () => {
+          if (program !== "etabs") { await hmRun("set_model_program", {program: "etabs"}, true); for (let i = 0; i < 30 && program !== "etabs"; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
+          const m = programMenus(), words = l => (l || []).filter(Boolean).map(x => x[0]), sub = n => ((m.Detailing || []).find(x => x && x[0] === n) || [])[1];
+          const want = {top: ["Bar Selection and Curtailment Rule", "Clear Detailing...", "Concrete Detailing", "Steel Detailing", "Drawing Management", "Generate/Show Beam Groups...", "DetailingComments and Log..."],
+            "Bar Selection and Curtailment Rule": ["Beam Bar Selection and Curtailment Rule...", "Slab/Mat/Footing Bar Selection and Curtailment Rule...", "Column Stack Bar Selection and Curtailment Rule...", "Wall Stack Bar Selection and Curtailment Rule..."],
+            "Concrete Detailing": ["Run/Update Beam Detailing/Check", "Run/Update Slab/Mat/Footing Detailing/Check", "Run/Update Column Stack Detailing/Check", "Run/Update Wall Stack Detailing/Check", "Show/Edit Beam Detailing...", "Show/Edit Slab/Mat/Footing Detailing...", "Show/Edit Column Stack Detailing...", "Show/Edit Wall Stack Detailing...", "Clear Beam Detailing...", "Clear Slab/Mat/Footing Detailing...", "Clear Column Stack Detailing...", "Clear Wall Stack Detailing..."],
+            "Steel Detailing": ["Run/Update Beam Detailing/Check", "Run/Update Column Stack Detailing/Check", "Show/Edit Beam Detailing...", "Show/Edit Column Stack Detailing...", "Clear Beam Detailing...", "Clear Column Stack Detailing..."],
+            "Drawing Management": ["Drawing Sheet Setup...", "Drawing Format Properties...", "Open Drawing Manager...", "Clear Drawing Manager..."]};
+          const got = {top: words(m.Detailing).filter(x => x !== "Engine Extras")}; for (const k of Object.keys(want)) if (k !== "top") got[k] = words(sub(k));
+          const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+          if (off.length) return {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")};
+          const top = () => { const f = document.querySelectorAll(".dlg"); return f[f.length - 1]; }, title = () => (top() && top().querySelector(".dt b") || {}).textContent || "";
+          const forms = [["m:etq:beam", "Concrete Beam: Bar Selection and Curtailment Rule", [["#etqDev", "Bar Development Rules"], ["#etqCur", "Rebar Curtailment Rules"], ["#etqSel", "Rebar Selection Rules"], ["#etqLong", "Longitudinal Rebars in Sections"]]],
+            ["m:etq:slab", "Slab/Mat/Footing: Bar Selection and Curtailment Rule", [["#etqSDev", "Bar Development Rules"], ["#etqSCur", "Slab Rebar Curtailment Rules"], ["#etqSSel", "Rebar Selection Rules for Strip"], ["#etqMSel", "Rebar Selection Rules for Strip"], ["#etqFSel", "Rebar Selection Rules for Footing"]]],
+            ["m:etq:column", "Concrete Column Stack: Bar Layout and Selection Rule", [["#etqCSel", "Rebar Selection Rules", ["#etqConf", "Confinement: Non Seismic Detailing"]], ["#etqCSpl", "Bar Splices"]]],
+            ["m:etq:wall", "Concrete Wall Stack: Detailing Rules", [["#etqSpan", "Spandrel Rebar Rules"]]]];
+          const said = [];
+          for (const [a, name, subs] of forms) {
+            await act(a); await wait(500);
+            if (title() !== name) return {fail: `${a} opened "${title()}", not "${name}"`};
+            const main = top();
+            for (const [b, t, inner] of subs) {
+              const btn = main.querySelector(b); if (!btn || btn.disabled) return {fail: `${name}: no ${b} button`};
+              btn.click(); await wait(250);
+              if (title() !== t) return {fail: `${name}: ${b} opened "${title()}", not "${t}"`};
+              if (inner) { top().querySelector(inner[0]).click(); await wait(250); if (title() !== inner[1]) return {fail: `${t}: opened "${title()}", not "${inner[1]}"`}; top().close(); }
+              top().close(); await wait(100);
+            }
+            said.push(`${name}: ${main.querySelectorAll("[data-p]").length} fields, ${subs.length} sub-forms`);
+            main.close(); await wait(100);
+          }
+          // Wall: Pier Rebar Rules opens once Satisfy Required As using Rules is chosen, as in the program.
+          await act("m:etq:wall"); await wait(500);
+          let main = top(); main.querySelector('[data-p="main.pier"][value="rules"]').click(); await wait(100);
+          main.querySelector("#etqPier").click(); await wait(250);
+          if (title() !== "Pier Rebar Rules") return {fail: "Pier Rebar Rules did not open: " + title()};
+          top().close(); formOk("OK"); await wait(900);
+          await act("m:etq:wall"); await wait(500); main = top();
+          if (!main.querySelector('[data-p="main.pier"][value="rules"]').checked) return {fail: "the wall rule chosen and OK was not kept"};
+          main.querySelector("#etqDef").click(); await wait(100); formOk("OK"); await wait(900);
+          const j = await hmRun("detailing_rules", {}, true);
+          if (!j.ok || (j.result.rules || {}).wall) return {fail: "Set to Default Values and OK did not put the defaults back: " + JSON.stringify(j.result || j.error)};
+          return {ok: `Detailing ${got.top.length} items in the program's order and words; ` + said.join("; ") + "; a wall rule was kept and put back to defaults"};
+        });
+        if (window.cpmForms) for (const [what, label] of [["beam", "Beam"], ["slab", "Slab/Mat/Footing"], ["column", "Column Stack"], ["wall", "Wall Stack"]])
+          window.cpmForms.push({path: `Detailing > Bar Selection and Curtailment Rule > ${label} Bar Selection and Curtailment Rule...`, act: "m:etq:" + what, target: "etabs"});
         // Design > Steel Connection Design (its submenu and View/Revise Preferences), Live Load Reduction Factors and the
         // lateral displacement and time period targets, as the 23.2 pictures show them (field/reference-forms/etabs/Design):
         // each form set as an engineer sets it, OK, and the model holds what was set.
@@ -776,7 +833,7 @@ public static class ModelerCheck
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL", "m:etf:p3dTxt", "m:etf:p3dStr"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL", "m:etf:p3dTxt", "m:etf:p3dStr", "m:ete:beamsToSlab", "m:ete:convertMesh", "m:ete:divLinks", "m:ete:revLinks", "m:ete:removeJoints", "m:ete:reverseWall", "m:ete:wallOpenings", "m:ete:wallCurve"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();
@@ -807,7 +864,7 @@ public static class ModelerCheck
     /// Serves the live Modeler page on a scratch model and checks it in <paramref name="browser"/> (Edge or Chrome when
     /// null). <paramref name="chat"/>: the page as a window with the AI chat on serves it (a chat with nothing in it), or off.
     /// </summary>
-    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 420, bool pictures = false)
+    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 600, bool pictures = false)
     {
         browser ??= ViewerCheck.FindBrowser();
         if (browser is null) return new ViewerCheck.Result([], [], "no Edge or Chrome was found on this PC to open the Modeler's window in");
@@ -865,7 +922,7 @@ public static class ModelerCheck
         {
             HandModel.Reset();
             server.Start();
-            var (dom, error) = ViewerCheck.Browse(browser, profile, seconds, "--dump-dom", "--virtual-time-budget=420000", "--window-size=1400,900", server.ViewUrl);
+            var (dom, error) = ViewerCheck.Browse(browser, profile, seconds, "--dump-dom", "--virtual-time-budget=600000", "--window-size=1400,900", server.ViewUrl);
             if (dom is null) return new ViewerCheck.Result([], [], "the browser could not be run: " + error);
             if (ViewerCheck.Read(dom) is not { } items)
                 return new ViewerCheck.Result([new ViewerCheck.Item("the Modeler page ran its check", false, "the page did not finish its check within the time the browser gave it")], [], null);

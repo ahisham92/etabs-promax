@@ -127,7 +127,7 @@ public static class StabilityTools
             };
             var points = e.Points();
             var stories = e.Stories();
-            string? StoryAt(double z) => stories.Count == 0 ? null : stories.MinBy(s => Math.Abs(s.Elevation - z)) is { } s && Math.Abs(s.Elevation - z) < 1e-3 * Math.Max(1, Math.Abs(z)) ? s.Name : null;
+            string? StoryAt(double z) => stories.Count == 0 ? null : stories.MinBy(s => Math.Abs(s.Elevation - z)) is { } s && Math.Abs(s.Elevation - z) < 1e-3 * Math.Max(1, Math.Abs(z)) ? s.Name.Trim() : null;
             var api = HasApi(e);
             if (!api) a.Notes.Add($"This link has no {e.Program.Name} API behind it, so releases, springs and diaphragms were not read; members are joined by position.");
 
@@ -150,7 +150,7 @@ public static class StabilityTools
                     springs.Add(p.Name);
                 if (program == CsiProgram.Etabs.Key && CsiTools.Try(e, "read a joint's diaphragm", "PointObj.GetDiaphragm", CsiTools.D(("Name", p.Name))) is { } dp
                     && ApiCall.Value(dp, "DiaphragmName")?.ToString() is { Length: > 0 } dn && !(ApiCall.Value(dp, "DiaphragmOption")?.ToString() ?? "").Contains("Disconnect", StringComparison.OrdinalIgnoreCase))
-                    diaphragms[p.Name] = dn;
+                    diaphragms[p.Name] = dn.Trim();
             }
             if (restraints.Count == 0 && points.Count > 0) a.Notes.Add("The supports could not be read.");
 
@@ -183,8 +183,9 @@ public static class StabilityTools
                     if (program == CsiProgram.Sap2000.Key && CsiTools.Try(e, "read a frame's mesh", "FrameObj.GetAutoMesh", CsiTools.D(("Name", f.Name))) is { } mesh)
                         meshed = ApiCall.Value(mesh, "AutoMesh")?.ToString() == "true" && ApiCall.Value(mesh, "AutoMeshAtPoints")?.ToString() != "false";
                 }
-                var story = f.Story.Length > 0 ? f.Story : null;
-                a.Frames.Add(new Frame(f.Name, f.Name, story, f.Kind, i, j, f.Section.Length > 0 ? f.Section : null, releases, meshed || program != CsiProgram.Sap2000.Key, lineSpring));
+                var story = f.Story.Trim() is { Length: > 0 } fst ? fst : null;
+                var (frameLabel, frameStory) = LabelOf(e, "FrameObj", f.Name, api && !manyFrames && program == CsiProgram.Etabs.Key);
+                a.Frames.Add(new Frame(f.Name, frameLabel, frameStory ?? story, f.Kind, i, j, f.Section.Length > 0 ? f.Section : null, releases, meshed || program != CsiProgram.Sap2000.Key, lineSpring));
             }
 
             // Areas, by their corners.
@@ -199,11 +200,12 @@ public static class StabilityTools
                 if (api && areas.Count <= MostOneByOne)
                 {
                     if (program == CsiProgram.Etabs.Key && CsiTools.Try(e, "read an area's diaphragm", "AreaObj.GetDiaphragm", CsiTools.D(("Name", ar.Name))) is { } d && ApiCall.Value(d, "DiaphragmName")?.ToString() is { Length: > 0 } dn && dn != "None")
-                        diaphragm = dn;
+                        diaphragm = dn.Trim();
                     if (CsiTools.Try(e, "read an area's springs", "AreaObj.GetSpringAssignment", CsiTools.D(("Name", ar.Name))) is { } s && ApiCall.Value(s, "SpringProp")?.ToString() is { Length: > 0 } sp2 && sp2 != "None")
                         spring = true;
                 }
-                a.Shells.Add(new Shell(ar.Name, ar.Name, null, ar.Kind, corners, ar.Section.Length > 0 ? ar.Section : null, spring, diaphragm));
+                var (areaLabel, areaStory) = LabelOf(e, "AreaObj", ar.Name, api && areas.Count <= MostOneByOne && program == CsiProgram.Etabs.Key);
+                a.Shells.Add(new Shell(ar.Name, areaLabel, areaStory, ar.Kind, corners, ar.Section.Length > 0 ? ar.Section : null, spring, diaphragm));
                 if (diaphragm is not null) foreach (var c in corners) diaphragms.TryAdd(c, diaphragm);
             }
 
@@ -228,7 +230,8 @@ public static class StabilityTools
             {
                 var r = restraints.GetValueOrDefault(p.Name) ?? new bool[6];
                 if (held.Contains(p.Name)) r = [true, true, true, true, true, true];
-                a.Joints.Add(new Joint(p.Name, p.Name, StoryAt(p.Z), p.X, p.Y, p.Z, r, springs.Contains(p.Name), diaphragms.GetValueOrDefault(p.Name)));
+                var (pointLabel, pointStory) = LabelOf(e, "PointObj", p.Name, api && !many && program == CsiProgram.Etabs.Key);
+                a.Joints.Add(new Joint(p.Name, pointLabel, pointStory ?? StoryAt(p.Z), p.X, p.Y, p.Z, r, springs.Contains(p.Name), diaphragms.GetValueOrDefault(p.Name)));
             }
 
             // Active degrees of freedom (a plane frame solves UX UZ RY only).
@@ -247,6 +250,19 @@ public static class StabilityTools
             }
             foreach (var p in e.LoadPatterns()) a.Patterns.Add(new Pattern(p.Name, p.Type, p.SelfWeight, HasLoads: true));
             return a;
+        }
+
+        /// <summary>
+        /// ETABS's label and story of an object ("W1" on "1ST"), as its forms and the .e2k name it, so the findings read
+        /// the same as the check of the model's file. The API's fixed-width strings come back padded: trimmed here.
+        /// Elsewhere (or when not asked) the object's own name, with no story.
+        /// </summary>
+        private static (string Label, string? Story) LabelOf(ICsiLink e, string obj, string name, bool ask)
+        {
+            if (ask && CsiTools.Try(e, "read an object's label", obj + ".GetLabelFromName", CsiTools.D(("Name", name))) is { } got
+                && ApiCall.Value(got, "Label")?.ToString()?.Trim() is { Length: > 0 } label)
+                return (label, ApiCall.Value(got, "Story")?.ToString()?.Trim() is { Length: > 0 } st ? st : null);
+            return (name.Trim(), null);
         }
 
         private static void LinksAndConstraints(ICsiLink e, AnalysisModel a, string program, Dictionary<string, string> diaphragms)
