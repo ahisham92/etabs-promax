@@ -103,7 +103,8 @@ main{flex:1;display:flex;min-height:0}
 #legend i{width:11px;height:11px;display:inline-block;border:1px solid rgba(0,0,0,.25)}
 /* the model windows */
 #center{flex:1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}
-#views{flex:1;position:relative;display:grid;gap:3px;padding:3px;min-width:0;min-height:0;background:var(--bg)}
+/* The view windows sit edge to edge, as the program tiles them: their own borders part them, with no grey frame. */
+#views{flex:1;position:relative;display:grid;gap:0;padding:0;min-width:0;min-height:0;background:var(--chrome)}
 #gl{position:absolute;left:0;top:0;width:100%;height:100%;z-index:0;pointer-events:none;display:block}
 .pane{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--vcap-off);z-index:1;position:relative}
 .pane.act{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
@@ -132,6 +133,13 @@ main{flex:1;display:flex;min-height:0}
 .float{position:fixed!important;z-index:50;box-shadow:var(--shadow);border:1px solid var(--line)!important;resize:both;overflow:hidden;min-width:180px;min-height:140px;max-width:none!important}
 #dock.float{border-top:1px solid var(--line)}#dock.float .grip{display:none}
 #dockHint{position:fixed;z-index:49;background:var(--accent);opacity:.25;pointer-events:none;display:none}
+/* A panel in a window of its own (popOut) fills that window. */
+body.popbody{display:flex;flex-direction:column;height:100vh;margin:0;overflow:hidden}
+.popped{position:static!important;flex:1;width:auto!important;height:auto!important;max-width:none!important;min-width:0;min-height:0;border:0!important;box-shadow:none!important;resize:none!important}
+#dock.popped .grip{display:none}
+/* Its window is narrow, but it is no narrow screen: the page's small-screen rules (which hide the Model Explorer and the
+   table list) don't apply to it. */
+.popped{display:flex!important;flex-direction:column}.popped[hidden]{display:none!important}body.popbody #tlist{display:flex!important}
 .dragging,.dragging *{cursor:move!important;user-select:none}
 .ddm{position:fixed;z-index:60;background:var(--menu);border:1px solid var(--line);box-shadow:var(--shadow);padding:3px 0;min-width:150px}
 .ddm div{padding:3px 24px;white-space:nowrap}.ddm div:hover{background:var(--hot)}.ddm div.off{opacity:.45;pointer-events:none}
@@ -143,7 +151,7 @@ html.live #menubar .brand{display:none}
 .ib.ddb::after{content:"";position:absolute;right:4px;top:11px;border:3.5px solid transparent;border-top:4px solid var(--capink);border-bottom:0}
 .ib:disabled svg{opacity:.45}
 #strip{background:var(--cap);width:28px}
-.pane.max{position:absolute;inset:3px;z-index:3}
+.pane.max{position:absolute;inset:0;z-index:3}
 /* A maximised view window hides the others (render does not draw them either), splitters included. */
 #views:has(>.pane.max)>.pane:not(.max),#views:has(>.pane.max)>.vsplit{visibility:hidden}
 /* A floating view window (its caption dragged, or Window Position > Float): over the docked ones inside the views,
@@ -491,7 +499,11 @@ body.chaton #right{width:380px;max-width:42%}
 <script id="pack" type="application/json"></script>
 <script>
 "use strict";
-const $ = id => document.getElementById(id);
+// A panel moved into a window of its own (popOut) takes its elements to that window's document: lookups by id ($) and
+// by selector (qsa) look there too.
+const popDocs = new Set();
+const $ = id => document.getElementById(id) || [...popDocs].map(d => d.getElementById(id)).find(Boolean) || null;
+const qsa = sel => [document, ...popDocs].flatMap(d => [...d.querySelectorAll(sel)]);
 const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const num = v => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
@@ -2900,13 +2912,14 @@ function drawPlanColumns(p, g, to, T) {
   }
 }
 function ddMenu(btn, items) {
-  // The small menu under a docked window's drop-down button.
-  document.querySelectorAll(".ddm").forEach(m => m.remove());
-  const m = document.createElement("div"), r = btn.getBoundingClientRect(); m.className = "ddm";
+  // The small menu under a docked window's drop-down button, in the window the button is in (a panel may have its own).
+  const doc = btn.ownerDocument, win = doc.defaultView;
+  qsa(".ddm").forEach(m => m.remove());
+  const m = doc.createElement("div"), r = btn.getBoundingClientRect(); m.className = "ddm";
   m.style.top = r.bottom + "px"; m.style.left = Math.max(0, r.right - 150) + "px";
-  for (const [t, f, off] of items) { const d = document.createElement("div"); d.textContent = t; if (off) d.className = "off"; d.onclick = () => { m.remove(); f(); }; m.appendChild(d); }
-  document.body.appendChild(m);
-  setTimeout(() => addEventListener("pointerdown", function off(e) { if (!m.contains(e.target)) { m.remove(); removeEventListener("pointerdown", off, true); } }, true));
+  for (const [t, f, off] of items) { const d = doc.createElement("div"); d.textContent = t; if (off) d.className = "off"; d.onclick = () => { m.remove(); f(); }; m.appendChild(d); }
+  doc.body.appendChild(m);
+  setTimeout(() => win.addEventListener("pointerdown", function off(e) { if (!m.contains(e.target)) { m.remove(); win.removeEventListener("pointerdown", off, true); } }, true));
 }
 function paneTitle(p) {
   const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? (periodOf(res.case) ? `Mode Shape (${res.case} · ${periodOf(res.case)})` : `Deformed Shape (${res.case})`) : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "shell" ? `Shell ${res.comp} (${res.case})` : res.mode === "values" && dview ? dview.title : res.mode === "loads" ? loadTitle() : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
@@ -3071,10 +3084,11 @@ function addViewSplits() {
     d.onpointerdown = e => {
       e.preventDefault(); d.setPointerCapture(e.pointerId); d.classList.add("on");
       const list = kind === "c" ? s.c : s.r, box = host.getBoundingClientRect(), total = list.reduce((a, b) => a + b, 0);
-      const size = (kind === "c" ? box.width : box.height) - 6 - 3 * (list.length - 1), start = kind === "c" ? box.left + 3 : box.top + 3;
+      const cs = getComputedStyle(host), pad = parseFloat(cs.paddingLeft) || 0, gap = parseFloat(kind === "c" ? cs.columnGap : cs.rowGap) || 0;
+      const size = (kind === "c" ? box.width : box.height) - 2 * pad - gap * (list.length - 1), start = (kind === "c" ? box.left : box.top) + pad;
       const before = list.slice(0, i).reduce((a, b) => a + b, 0), pair = list[i] + list[i + 1];
       d.onpointermove = m => {
-        const at = ((kind === "c" ? m.clientX : m.clientY) - start - 3 * i) / size * total - before;
+        const at = ((kind === "c" ? m.clientX : m.clientY) - start - gap * i) / size * total - before;
         list[i] = Math.max(pair * 0.1, Math.min(pair * 0.9, at)); list[i + 1] = pair - list[i];
         viewTemplate(); placeViewSplits(); draw();
       };
@@ -3090,14 +3104,16 @@ function addViewSplits() {
 // Each splitter sits in the gap after its column (row), read from the windows as they are laid out.
 function placeViewSplits() {
   const host = $("views"), box = host.getBoundingClientRect(), maxed = !!host.querySelector(".pane.max");
-  const docked = dockedPanes(), cols = docked.length === 4 ? 2 : docked.length;
+  const docked = dockedPanes(), cols = docked.length === 4 ? 2 : docked.length, cs = getComputedStyle(host);
+  const colGap = parseFloat(cs.columnGap) || 0, rowGap = parseFloat(cs.rowGap) || 0;
   host.querySelectorAll(".vsplit").forEach(d => {
     const i = +d.dataset.i, pane = docked[d.classList.contains("c") ? i : i * cols];
     d.hidden = maxed || !pane || !pane.el;
     if (d.hidden) return;
+    // Centred on the line between the window and the next (in the gap, when there is one).
     const r = pane.el.getBoundingClientRect();
-    if (d.classList.contains("c")) Object.assign(d.style, {left: (r.right - box.left - 1.5) + "px", top: "0", height: "100%"});
-    else Object.assign(d.style, {top: (r.bottom - box.top - 1.5) + "px", left: "0", width: "100%"});
+    if (d.classList.contains("c")) Object.assign(d.style, {left: (r.right - box.left + colGap / 2 - 3) + "px", top: "0", height: "100%"});
+    else Object.assign(d.style, {top: (r.bottom - box.top + rowGap / 2 - 3) + "px", left: "0", width: "100%"});
   });
 }
 new ResizeObserver(() => placeViewSplits()).observe(document.getElementById("views"));
@@ -5327,7 +5343,7 @@ function wireDesignCard(el) {
 // Output Items, Named Plots.
 let xTab = "model";
 function buildTree() {
-  const open = new Set([...document.querySelectorAll("#tree details[open]")].map(d => d.dataset.k)), first = !document.querySelector("#tree details");
+  const open = new Set(qsa("#tree details[open]").map(d => d.dataset.k)), first = !qsa("#tree details").length;
   // As the programs' Model Explorer: no counts beside the names, and only the root open at first.
   const node = (k, title, n, body, wide) => `<details data-k="${k}" ${first ? (wide && (k === "model" || k === "tabs") ? "open" : "") : open.has(k) ? "open" : ""}><summary>${esc(title)}</summary>${body}</details>`;
   const plain = list => list.length ? list.map(x => `<div class="leaf">${esc(x)}</div>`).join("") : `<div class="leaf kv">none</div>`;
@@ -5386,14 +5402,14 @@ const jointsCount = () => { const k = new Set(); for (const o of frames.concat(a
 const theWords = () => { const man = P.manifest || {}, any = Object.values(P.tables).some(t => t.from !== "input" && t.rows && t.rows.length && /forces|displacement|reaction|drift|modal/.test(norm(t.name))); return {analysed: any ? "Analysed: results are shown" : window.cpmLive ? "Not analysed yet (Analyze > Run Analysis)" : "No results in this pack"}; };
 function markTree() {
   const p = panes[active];
-  document.querySelectorAll("#tree [data-story]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "plan" && el.dataset.story === p.story));
-  document.querySelectorAll("#tree [data-line]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "elev" && !!p.line && el.dataset.line === p.line.dir + p.line.label));
-  document.querySelectorAll("#tree [data-sec]").forEach(el => el.classList.toggle("cur", !!lit && lit.type === el.dataset.sec && lit.name === el.dataset.v));
+  qsa("#tree [data-story]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "plan" && el.dataset.story === p.story));
+  qsa("#tree [data-line]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "elev" && !!p.line && el.dataset.line === p.line.dir + p.line.label));
+  qsa("#tree [data-sec]").forEach(el => el.classList.toggle("cur", !!lit && lit.type === el.dataset.sec && lit.name === el.dataset.v));
 }
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(b.dataset.close));
 
 // ---- side panel ----
-function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
+function showTab(name) { qsa("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); qsa(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $("fbFilter").onclick = () => selFilter();
 // The units at the bottom right, as each program has them (Ahmed 2026-11-27): ETABS and SAFE a "Units..." button with
@@ -5695,7 +5711,7 @@ $("grip").addEventListener("pointerdown", e => { const d = $("dock"), c = $("cen
 // Window Position (the small arrow) does the same from a menu, and a double-click on the caption floats or docks it.
 // Where each one is and its size are kept between visits.
 const panelInfo = {
-  explorer: {el: () => $("explorer"), cap: () => document.querySelector("#explorer>.dock"), split: () => $("splitExplorer"), home: "left", close: () => act("explorer")},
+  explorer: {el: () => $("explorer"), cap: () => $("explorer").querySelector(".dock"), split: () => $("splitExplorer"), home: "left", close: () => act("explorer")},
   right: {el: () => $("right"), cap: () => $("tabs"), split: () => $("splitRight"), home: "right", close: () => act("side")},
   dock: {el: () => $("dock"), cap: () => $("dockCap"), split: () => null, home: "bottom", close: () => showTables(false)},
 };
@@ -5720,6 +5736,7 @@ function placePanels() {
   let left = $("strip"), right = $("center");
   for (const k of ["explorer", "right"]) {
     const s = panelState(k), el = panelInfo[k].el(), sp = panelInfo[k].split(), float = s.side === "float";
+    if (s.side === "window") continue; // in a window of its own
     el.classList.toggle("float", float);
     if (float) { floatAt(el, s); continue; }
     unfloat(el, k, s);
@@ -5727,16 +5744,92 @@ function placePanels() {
     else right = put(put(right, sp), el);
   }
   const s = panelState("dock"), d = $("dock"), float = s.side === "float";
-  if (float) d.classList.remove("max");
-  d.classList.toggle("float", float);
-  if (float) floatAt(d, s); else unfloat(d, "dock", s);
+  if (s.side !== "window") {
+    if (float) d.classList.remove("max");
+    d.classList.toggle("float", float);
+    if (float) floatAt(d, s); else unfloat(d, "dock", s);
+  }
   syncSplits(); placeViewSplits();
 }
 function syncSplits() {
-  for (const k of ["explorer", "right"]) { const el = panelInfo[k].el(); panelInfo[k].split().hidden = el.hidden || el.classList.contains("float"); }
+  for (const k of ["explorer", "right"]) { const el = panelInfo[k].el(); panelInfo[k].split().hidden = el.hidden || el.classList.contains("float") || el.classList.contains("popped"); }
 }
+// ---- a panel in a window of its own ----
+// Dropped outside CSI ProMax's window (or Window Position > Separate Window), a panel moves into a window of its own
+// that can go on any screen; the host opens it as a CSI ProMax window. Closing that window, or Dock or Float from the
+// panel's Window Position, brings the panel back. The page keeps running the panel: its elements move into that
+// window's document with their handlers, and $ and qsa find them there.
+// A page that goes away takes the handlers of every element still in it, so the panel is never left in a page that is
+// closing or being replaced: it waits in popStage (here, hidden) while its window's page changes, and comes back before
+// its window closes (the host asks first: cpmBeforeClose).
+const popWins = {}; // panel -> {win, doc, el}
+const panelTitles = {explorer: "Model Explorer", right: "Properties", dock: "Tables"};
+const popStage = document.createElement("div"); popStage.hidden = true; document.body.appendChild(popStage);
+// The host says when a panel's window has its own page (it may replace the first one): the panel goes in then.
+const popReady = new Set();
+window.cpmPopReady = name => { const k = String(name).replace(/^cpm-pop-/, ""); popReady.add(k); if (popWins[k]) popWins[k].fill(true); };
+function popOut(k, sx, sy) {
+  if (popWins[k]) { popWins[k].win.focus(); return; }
+  const s = panelState(k), el = panelInfo[k].el(), r = el.getBoundingClientRect();
+  const w = Math.round(Math.max(260, r.width || s.fw || 320)), h = Math.round(Math.max(260, r.height || s.fh || 480));
+  const x = Math.round(sx ?? window.screenX + r.left), y = Math.round(sy ?? window.screenY + r.top);
+  popReady.delete(k);
+  const win = window.open("about:blank", "cpm-pop-" + k, `left=${x},top=${y},width=${w},height=${h}`);
+  if (!win) return;
+  let first = null; try { first = win.document; } catch (e) {}
+  // CSI ProMax's window host (WebView2) may replace the window's first page with its own blank one once it has opened
+  // the window, so there the panel waits until the host says the page is ready (or 3 s); a browser keeps the first one.
+  const hosted = !!(window.chrome && chrome.webview), opened = Date.now();
+  const p = popWins[k] = {win, doc: null, el};
+  const rescue = () => { if (el.ownerDocument !== document) popStage.appendChild(el); if (p.doc) { popDocs.delete(p.doc); p.doc = null; } };
+  // No closing tags in the text: the parser adds them, and the server puts the live page's script before every closing
+  // body tag it finds in this file, so none may stand in a script.
+  const fill = ready => {
+    let doc = null;
+    try { doc = win.document; } catch (e) { return; }
+    if (!doc || doc === p.doc || hosted && doc === first && !ready && !popReady.has(k) && Date.now() - opened < 3000) return;
+    if (p.doc) popDocs.delete(p.doc);
+    doc.open(); doc.write("<!doctype html><meta charset=\"utf-8\"><title></title><body class=\"popbody\">"); doc.close();
+    doc.title = panelTitles[k] + " · " + document.title;
+    for (const st of document.querySelectorAll("style")) doc.head.appendChild(st.cloneNode(true));
+    for (const a of ["data-theme", "data-program", "class"]) { const v = document.documentElement.getAttribute(a); if (v != null) doc.documentElement.setAttribute(a, v); }
+    doc.body.dataset.prog = document.body.dataset.prog || "";
+    if (s.side !== "window") s.last = s.side === "float" ? s.last || panelInfo[k].home : s.side;
+    s.side = "window";
+    el.classList.remove("float", "max"); el.classList.add("popped");
+    Object.assign(el.style, {left: "", top: "", width: "", height: ""});
+    doc.body.appendChild(el);
+    p.doc = doc; popDocs.add(doc);
+    win.addEventListener("pagehide", rescue); // a page leaving without the host asking first (a browser's own window)
+    win.cpmBeforeClose = () => { rescue(); back(); }; // the host asks before it closes the window
+    placePanels(); dockSave(); draw();
+  };
+  // Its window closed: the panel docks where it was.
+  const back = () => {
+    if (popWins[k] !== p) return;
+    bringBack(k);
+    const st = panelState(k); if (st.side === "window") st.side = st.last || panelInfo[k].home;
+    placePanels(); dockSave(); draw();
+  };
+  p.fill = fill;
+  if (!hosted || popReady.has(k)) fill(true);
+  const watch = setInterval(() => {
+    if (popWins[k] !== p) return clearInterval(watch);
+    if (win.closed) { clearInterval(watch); return back(); }
+    if (Date.now() - opened < 5000) fill();
+  }, 100);
+}
+// The panel's elements back in this window, where placePanels then puts them; its own window closes.
+function bringBack(k) {
+  const p = popWins[k], el = p ? p.el : panelInfo[k].el();
+  if (el.ownerDocument !== document || el.parentElement === popStage) (k === "dock" ? $("views") : $("center")).after(el);
+  el.classList.remove("popped");
+  if (p) { delete popWins[k]; popDocs.delete(p.doc); try { p.win.close(); } catch (e) {} }
+}
+addEventListener("pagehide", () => { for (const k of Object.keys(popWins)) try { popWins[k].win.close(); } catch (e) {} });
 function dockPanel(k, side) {
   const s = panelState(k), el = panelInfo[k].el();
+  if (s.side === "window" && side !== "window") { bringBack(k); s.side = s.last || panelInfo[k].home; }
   if (side === "float" && s.side !== "float") {
     const r = el.getBoundingClientRect();
     if (k === "dock") s.dh = el.offsetHeight;
@@ -5765,14 +5858,15 @@ function panelMenu(k, btn) {
   const s = panelState(k), items = k === "dock"
     ? [["Dock at the Bottom", () => dockPanel(k, "bottom"), s.side === "bottom"]]
     : [["Dock Left", () => dockPanel(k, "left"), s.side === "left"], ["Dock Right", () => dockPanel(k, "right"), s.side === "right"]];
-  ddMenu(btn, [...items, ["Float", () => dockPanel(k, "float"), s.side === "float"], ["Close", panelInfo[k].close]]);
+  ddMenu(btn, [...items, ["Float", () => dockPanel(k, "float"), s.side === "float"], ["Separate Window", () => popOut(k), s.side === "window"], ["Close", panelInfo[k].close]]);
 }
 // A caption dragged more than a few pixels floats its panel under the pointer; a plain click stays a click (the side
 // panel's caption is its row of tabs).
 function wireCaption(k) {
   const cap = panelInfo[k].cap(), el = panelInfo[k].el(), skip = ".x, .dd, input, select, textarea";
   cap.addEventListener("pointerdown", e => {
-    if (e.button !== 0 || e.target.closest(skip)) return;
+    // In a window of its own, the panel moves with that window's title bar.
+    if (e.button !== 0 || e.target.closest(skip) || el.ownerDocument !== document) return;
     const x0 = e.clientX, y0 = e.clientY;
     let moving = false, offX = 0, offY = 0;
     const move = m => {
@@ -5794,6 +5888,8 @@ function wireCaption(k) {
       // The click that ends the drag doesn't also press the tab under it.
       const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
       addEventListener("click", eat, true); setTimeout(() => removeEventListener("click", eat, true), 0);
+      // Dropped outside CSI ProMax's window (on another screen, say): the panel goes into a window of its own there.
+      if (m.clientX < 0 || m.clientY < 0 || m.clientX >= innerWidth || m.clientY >= innerHeight) return popOut(k, m.screenX - offX, m.screenY - offY);
       const edge = edgeAt(k, m.clientX, m.clientY);
       if (edge) dockPanel(k, edge); else dockSave();
     };
@@ -5802,7 +5898,7 @@ function wireCaption(k) {
   cap.addEventListener("dblclick", e => {
     if (e.target.closest(skip) || k === "right") return; // the side panel's caption is its tabs: a double-click there is for them
     const s = panelState(k);
-    dockPanel(k, s.side === "float" ? s.last || panelInfo[k].home : "float");
+    dockPanel(k, s.side === "float" || s.side === "window" ? s.last || panelInfo[k].home : "float");
   });
 }
 // The splitter beside a docked side panel: dragged, the panel takes that width (the views the rest).
@@ -5819,6 +5915,14 @@ for (const k of ["explorer", "right"]) {
   };
   new MutationObserver(syncSplits).observe(el, {attributes: true, attributeFilter: ["hidden"]});
 }
+// A panel closed while it is in a window of its own (its close button, or the menu that hides it) docks back where it
+// was, so that window doesn't stay open empty.
+for (const k of ["explorer", "right", "dock"]) {
+  const el = panelInfo[k].el();
+  new MutationObserver(() => { const s = panelState(k); if (el.hidden && s.side === "window") dockPanel(k, s.last || panelInfo[k].home); }).observe(el, {attributes: true, attributeFilter: ["hidden"]});
+}
+// A separate window opens only on a click: one left over from the last visit docks where the panel was.
+for (const k of Object.keys(panelInfo)) { const s = panelState(k); if (s.side === "window") s.side = s.last || panelInfo[k].home; }
 // The Tables' list of table names, sized against the table beside it.
 $("splitTables").onpointerdown = e => {
   const sp = $("splitTables"), list = $("tlist");

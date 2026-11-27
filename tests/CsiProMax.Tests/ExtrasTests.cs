@@ -325,6 +325,8 @@ static class ExtrasTests
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             foreach (var part in new[] { "function appMenuLoad()", "fetch(\"app-menu\"", "function drawDims(g, to, T, bub)", "#tools{display:none!important}", "bg = bgForTheme();", "return b === \"white\" || b === \"black\" ? b : darkTheme() ? \"black\" : \"white\";", "const model = node(\"model\", \"Model\", null,", ": \"Ready\";", "<option>Global</option>", "[\"run\", \"Run Analysis (F5)\", \"eng:run\"]" })
                 Check(html.Contains(part), "viewer.html lost " + part);
+            // The live page's script goes in before every closing body tag (Pack.LiveViewerHtml): one in a script breaks the page.
+            Check(html.Split("</body>").Length == 2, "viewer.html has more than one closing body tag; the live page's script would go into the other one");
             var main = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "MainWindow.cs"));
             Check(main.Contains("if (!CsiProMax.App.Modeler) layout.Children.Add(top);") && main.Contains("internal static bool RunAppMenu(string id)"), "the Engine window has no menu bar of its own; its items run from the page");
             var view = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
