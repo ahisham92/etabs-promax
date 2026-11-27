@@ -199,7 +199,7 @@ static class ExtrasTests
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             foreach (var part in new[] { "function designOutputName(fam, s)", "\"P-M Ratio Colors & Values\"", "\"P-M Colors/No Values\"", "\"Column P-M-M Interaction Ratios\"", "\"Rebar Percentage\"", "<legend>Choose Display Type</legend>",
                 "Design Output</label>", "Design Input</label>", "function buildDesignInput(fam, field)", "\"Design Sections\"", "\"Live Load Red. Factors\"",
-                "data-menu=\"Detailing\"", "function detailingItems()", "\"Beam Schedule...\"", "\"Column Schedule...\"", "function openSchedule(what)", "dialogs.deformed(ms, \"Mode Shape\")", "<button id=\"units\"", "$(\"units\").onclick", "<legend>Consistent Units</legend>" })
+                "data-menu=\"Detailing\"", "function detailingItems()", "\"Beam Schedule...\"", "\"Column Schedule...\"", "function openSchedule(what)", "dialogs.deformed(ms, \"Mode Shape\")", "<button id=\"units\"", "$(\"units\").onclick", "dialog(\"Consistent Units\"" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("det.hidden = program === \"sap2000\""), "SAP2000 has no Detailing menu");
         });
