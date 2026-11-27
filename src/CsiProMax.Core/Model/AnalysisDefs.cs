@@ -209,6 +209,7 @@ public static class AnalysisDefs
         {
             existing.Name = c.Name; existing.Lines = lines;
             SapLoadTables.Rename(m, "case", old, c.Name);
+            EtabsLoadTables.Rename(m, "case", old, c.Name);
             if (c.Name != old)
                 foreach (var combo in m.Combos)
                     foreach (var line in combo.Lines)

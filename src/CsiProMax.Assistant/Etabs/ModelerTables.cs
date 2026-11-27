@@ -39,6 +39,17 @@ public static class ModelerTables
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
+        // A pattern given an Auto Lateral Load code in the Engine's form takes the code first (ETABS 23 makes no code row
+        // from the AutoLoad alone, and takes no code row for a pattern without the code: LateralTools, 0.4.34 field test).
+        if (EtabsLoadTables.AutoLoads(model) is { Count: > 0 } auto)
+        {
+            try
+            {
+                EditableTables.Put(e, "Load Pattern Definitions", "Name", auto.Select(kv => (IReadOnlyDictionary<string, string>)new Dictionary<string, string> { ["Name"] = kv.Key, ["AutoLoad"] = kv.Value }).ToList(), "give the Modeler's patterns their Auto Lateral Load codes");
+                done.Add($"Load Pattern Definitions: {auto.Count} Auto Lateral Load code{(auto.Count == 1 ? "" : "s")}");
+            }
+            catch (EtabsException ex) { refused.Add($"Load Pattern Definitions (Auto Lateral Load codes): {ex.Message}"); }
+        }
         // The definitions the .e2k has no keyword for (generalized displacements, hinges, layers, ...), by name.
         // Soil profiles and column footings go in ahead of the point springs that name them.
         foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key))
@@ -233,6 +244,7 @@ public static class ModelerTables
     {
         "story definitions" => "Story",
         "mass source definition" => "Name|LoadPattern",
+        "load pattern definitions - auto notional loads" => "LoadPattern",
         "spring property definitions - soil profiles" => "Name|Soil Layer Name",
         // A form's table (design preferences, analysis options) has one row and no name: its row is that one.
         _ when ProgramForms.IsWallOverwrite(table) => table.Contains("Pier Design", StringComparison.OrdinalIgnoreCase) ? "Pier|Story" : "Spandrel|Story",

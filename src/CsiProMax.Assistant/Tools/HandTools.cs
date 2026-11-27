@@ -353,6 +353,8 @@ public static class HandTools
                 pattern.Name = name;
                 SapLoadTables.Rename(m, "pattern", was!, name);
                 SapLoadTables.Rename(m, "case", was!, name);
+                EtabsLoadTables.Rename(m, "pattern", was!, name);
+                EtabsLoadTables.Rename(m, "case", was!, name);
                 foreach (var l in m.LineLoads) Retag(l.Tokens, was!, name);
                 foreach (var l in m.AreaLoads) Retag(l.Tokens, was!, name);
                 foreach (var l in m.PointLoads) Retag(l.Tokens, was!, name);
@@ -429,6 +431,7 @@ public static class HandTools
                     InUse(AnalysisDefs.PDelta(m).Loads.Count(l => l.Pattern == name), "the P-Delta option (take it out first)");
                     m.LoadPatterns.RemoveAll(p => p.Name == name);
                     m.LoadCases.RemoveAll(c => c.Name == name);
+                    EtabsLoadTables.Drop(m, "pattern", name); EtabsLoadTables.Drop(m, "case", name);
                     m.LineLoads.RemoveAll(l => l.Pattern == name); m.AreaLoads.RemoveAll(l => l.Pattern == name); m.PointLoads.RemoveAll(l => l.Pattern == name);
                     break;
                 case "combination":
@@ -439,6 +442,7 @@ public static class HandTools
                     InUse(m.Combos.Count(c => c.Lines.Any(l => l.Count >= 2 && l[0] == "LOADCASE" && E2kText.Unquote(l[1]) == name)), "combinations (take it out of them first)");
                     InUse(m.LoadCases.Count(c => c.Lines.Any(l => (E2kText.Value(l, "MODALCASE") == name || E2kText.Value(l, "INITCOND") == name) && c.Name != name)), "other load cases (as their modal case or initial conditions)");
                     if (m.LoadCases.RemoveAll(c => c.Name == name) == 0) throw new ToolInputException($"There is no load case named '{name}'.");
+                    EtabsLoadTables.Drop(m, "case", name);
                     break;
                 case "function":
                     InUse(AnalysisDefs.UsersOfFunction(m, name).Count(), "load cases");
