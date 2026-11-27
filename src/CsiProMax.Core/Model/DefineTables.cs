@@ -149,6 +149,8 @@ public static class DefineTables
     private static Dictionary<string, (string, string)[]> WithSap(Dictionary<string, (string, string)[]> etabs)
     {
         foreach (var (t, fields) in SapHinges) etabs[t] = fields.Select(f => (f, f)).ToArray();
+        // ETABS 23.2's Link/Support Property Data, every type's table and the acceptance criteria (EtabsLinkTables).
+        foreach (var (t, fields) in EtabsLinkTables.Tables) etabs[t] = fields;
         // ETABS's shear wall pier and spandrel overwrites, by label (Ahmed 2026-11-27, every form).
         foreach (var (t, fields) in ProgramForms.WallOverwriteCatalog()) etabs[t] = fields.Select(f => (f.Key, f.Label)).ToArray();
         return etabs;

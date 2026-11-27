@@ -48,7 +48,8 @@ public static class StructureExtras
     };
 
     /// <summary>A nonlinear link's table has a row per direction: its rows are put in by name and direction.</summary>
-    public static bool PerDirection(string table) => table.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase) && !table.EndsWith("- Linear", StringComparison.OrdinalIgnoreCase);
+    public static bool PerDirection(string table) => table.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase) && !table.EndsWith("- Linear", StringComparison.OrdinalIgnoreCase)
+        && !table.Contains("Acceptance Criteria", StringComparison.OrdinalIgnoreCase) && !table.EndsWith("- Summary", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsLinkTable(string table) => table.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase);
 
@@ -56,6 +57,8 @@ public static class StructureExtras
     public static void RemoveLink(StructuralModel m, string name)
     {
         foreach (var t in Fields.Keys.Where(k => k.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase)).ToList()) Remove(m, t, name);
+        // ETABS's other link types and the acceptance criteria (the Link/Support Property Data form's own rows).
+        EtabsLinkTables.Remove(m, name);
     }
 
     /// <summary>Fields only SAP2000's table has; left out of the row put into ETABS.</summary>

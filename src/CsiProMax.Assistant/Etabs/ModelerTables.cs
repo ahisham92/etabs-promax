@@ -47,7 +47,8 @@ public static class ModelerTables
                 var put = rows.Select(r => StructureExtras.ForEtabs(table, r)).ToList();
                 // A nonlinear link's table has a row per direction: the same fields on each of the link's directions.
                 if (StructureExtras.PerDirection(table))
-                    put = put.SelectMany(r => (PropertyDefs.Links(model).Find(l => l.Name == r.GetValueOrDefault("Name"))?.Dofs.Keys.ToList() ?? []).Select(dof => new Dictionary<string, string>(r) { ["Direction"] = dof })).ToList();
+                    // A row the Link/Support Property Data form wrote already names its direction (and a multilinear point).
+                    put = put.SelectMany(r => r.ContainsKey("Direction") ? [r] : (PropertyDefs.Links(model).Find(l => l.Name == r.GetValueOrDefault("Name"))?.Dofs.Keys.ToList() ?? []).Select(dof => new Dictionary<string, string>(r) { ["Direction"] = dof })).ToList();
                 EditableTables.Put(e, table, KeyOf(table), put.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }

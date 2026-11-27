@@ -125,6 +125,8 @@ public static class CsiFieldSteps
                 FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
                 return "all there";
             });
+            // Each ETABS form the Engine keeps as ETABS's own tables (Link Property Data), read back field by field.
+            EtabsFormRoundTrip.Check(ctx);
             // Frame sections of the shapes the .e2k has no line for (Frame Section Property Data, every ETABS 23.2 shape): ETABS
             // takes them from their own tables after the .e2k opens, and reads them back with the Modeler's values.
             if (program.Key == CsiProgram.Etabs.Key)
