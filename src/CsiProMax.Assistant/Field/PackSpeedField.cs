@@ -37,10 +37,17 @@ public static class PackSpeedField
         if (lost is null) return;
         ctx.Step($"the {program} {what} holds every result and design table the program has, every row and field", () =>
         {
-            FieldContext.Expect(lost.Count == 0, $"{lost.Count} lost: " + string.Join("; ", lost.Take(30)) + (lost.Count > 30 ? "; ..." : ""));
+            // The whole list in a file of its own for the zip: the report cuts a long failure (0.4.73: 249 lost, 30 named).
+            if (lost.Count > 0 && ctx.Folder is { Length: > 0 } folder)
+                try { File.WriteAllLines(Path.Combine(folder, LostFile(program, what)), lost); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the report still names 30 */ }
+            FieldContext.Expect(lost.Count == 0, $"{lost.Count} lost (all in \"{LostFile(program, what)}\"): " + string.Join("; ", lost.Take(30)) + (lost.Count > 30 ? "; ..." : ""));
             return "nothing lost";
         });
     }
+
+    internal static string LostFile(string program, string what) =>
+        new string($"{program} {what} lost tables.txt".Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '-' : c).ToArray());
 
     /// <summary>Fails when the pack took longer than <see cref="Pack.MostTime"/>; names the slowest tables either way.</summary>
     public static void Timed(FieldContext ctx, Pack.Built? pack, TimeSpan took, string program)

@@ -479,7 +479,9 @@ public static class FieldTest
                 ctx.Link = window.Link;
                 ctx.Watched = window.Link;
                 // What the scratch window showed when a step failed, for the zip (its own windows only).
-                ctx.Failed = window is ScratchProgram { ProcessId: > 0 } scratch ? step => FailurePictures.Take(ctx.Folder, program, scratch.ProcessId, step.Name) : null;
+                ctx.Failed = window is ScratchProgram { ProcessId: > 0 } scratch ? step => FailurePictures.Take(ctx.Folder, program, FailurePictures.PictureOf(scratch.ProcessId), step.Name) : null;
+                FailurePictures.WorkFolder = ctx.Folder;
+                FailurePictures.NewPart((window as ScratchProgram)?.ProcessId ?? 0);
                 // The Viewer's own screen on this program's model: one check, the same for every program. It runs while
                 // the model has its results (the program's steps say when), or after them if they never did.
                 ctx.WhileAnalysed = () =>

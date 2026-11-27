@@ -3607,7 +3607,7 @@ function forProgram(m) {
     for (const it of list) {
       if (it && it.only) { if (!it.only.includes(program)) continue; }
       const item = it && it.only ? it.item : it;
-      if (Array.isArray(item) && Array.isArray(item[1])) { const sub = tidy(item[1]); if (!sub.some(Boolean)) continue; out.push([item[0], sub, ...item.slice(2)]); continue; }
+      if (Array.isArray(item) && Array.isArray(item[1])) { const sub = tidy(item[1]); if (!sub.some(Boolean) && !item[3]) continue; out.push([item[0], sub, ...item.slice(2)]); continue; }
       if (item === 0 && (!out.length || out[out.length - 1] === 0)) continue;
       out.push(item);
     }
@@ -3669,7 +3669,7 @@ function ticked(a) {
   return {bg: bg === "black", tables: !$("dock").hidden, plot: !!p && p.mode === "plot", persp: !!p && !!p.cam.persp && p.mode === "3d", explorer: opt.explorer, side: opt.side, anim: res.anim}[a] || false;
 }
 function menuHtml(list) {
-  return list.map(i => !i ? "<hr>" : Array.isArray(i[1]) ? `<div class="mi sub">${i[0]}<div class="drop">${menuHtml(i[1])}</div></div>` : `<div class="mi ${ticked(i[1]) ? "tick" : ""} ${i[3] ? "off" : ""}" data-do="${esc(i[1])}"><span>${esc(i[0])}</span>${i[2] ? `<kbd>${i[2]}</kbd>` : ""}</div>`).join("");
+  return list.map(i => !i ? "<hr>" : Array.isArray(i[1]) ? `<div class="mi sub${i[3] ? " off" : ""}">${i[0]}<div class="drop">${menuHtml(i[1])}</div></div>` : `<div class="mi ${ticked(i[1]) ? "tick" : ""} ${i[3] ? "off" : ""}" data-do="${esc(i[1])}"><span>${esc(i[0])}</span>${i[2] ? `<kbd>${i[2]}</kbd>` : ""}</div>`).join("");
 }
 document.querySelectorAll(".menu").forEach(el => {
   el.addEventListener("click", e => {
@@ -6240,11 +6240,14 @@ function modelerMenus(m) {
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Replicate...", "m:replicate", "", !any], ["Move...", "m:move", "", !any], ["Divide Frames...", "m:divide", "", !hmSelected("f").length], 0, only(["etabs", "safe"], ["Edit Stories and Grid Systems...", "m:storyGrid"]), 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
   m.Define = hmDefineMenu();
+  if (etnOn()) m.File = etfFileMenu();
   m.Draw = [["Select Object", "t:select", "Esc"], ["Reshape Object", "d:reshape"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], only(ES, ["Quick Draw Secondary Beams (click in a bay)", "d:qsec"]), 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], ["Draw Circular Floors (centre, then edge)", "d:circ"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
     only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0, ["Snap and Story Options...", "m:drawHelp"]];
   if (etnOn()) m.Draw = etnDrawMenu();
+  // ETABS 23.2's Detailing menu, item for item (etqDetailingMenu); the Engine's schedules under Engine Extras.
+  if (etnOn()) m.Detailing = etqDetailingMenu();
   if (etnOn()) m.Select = etsSelectMenu();
   if (etnOn()) m.View = etvViewMenu();
   // ETABS 23.2's own Assign menu, item for item (hmEtabsAssignMenu); SAP2000's and SAFE's below.
@@ -6492,6 +6495,381 @@ function hmStoryGrid() {
     [["OK"], ["Cancel"]], {width: 460});
   q(d, "#sgS").onclick = () => hmStories(); q(d, "#sgG").onclick = () => hmGrids();
 }
+// ---- ETABS 23.2's Design > Steel Connection Design (its submenu, View/Revise Preferences with Plate Depth Schedule and
+// Default Connection Type), Live Load Reduction Factors, Set Lateral Displacement Targets and Set Time Period Targets,
+// from the pictures field/reference-forms/etabs/Design/07, 70-99b (thread 'Make ETABS steel connection design forms
+// identical', 2026-11-27). Acts m:etc:*; the Design menu (thread 'Make ETABS Design, Detailing, Options and Tools forms
+// identical', etd*) calls etcConnectionMenu() and the acts m:etc:llrf, m:etc:dispTargets, m:etc:periodTargets.
+// Kept by the model tools set_connection_preferences, set_live_load_reduction and define_table_rows (EtabsDesignTools).
+// UNVERIFIED (no picture yet, asked of the capture thread): rows 11 on of Beam-Beam Partial Depth with Top, Full Depth and
+// Horizontal and of Beam-Column Shear Minor, Moment Major and Moment Minor (taken as the pictured types' rows); the value
+// lists of Bolt Types, Bolt Size, Hole Types, Weld Material, Anchor Rod Size/Material/Heads and Nuts (offered as
+// suggestions, any value typed is kept); the Description of the items the pictures do not show picked. ----
+const etc = {};
+const etcUS = () => /^(in|ft)$/i.test(hmU().l);
+// Lengths are kept in inches (as the AISC forms show them) and shown in mm in a metric model.
+const etcLen = () => etcUS() ? "in" : "mm", etcToShow = v => etcUS() ? v : +(Number(v) * 25.4).toPrecision(8), etcFromShow = v => etcUS() ? Number(v) : +(Number(v) / 25.4).toPrecision(10);
+const etcYes = ["Yes", "No"], etcCols = ["1 column", "2 columns"];
+const etcBoltTypes = ["A325-N", "A325-X", "A490-N", "A490-X"], etcBoltSizes = ["1/2", "5/8", "3/4", "7/8", "1", "1 1/8", "1 1/4", "1 3/8", "1 1/2"];
+const etcHoles = ["STD", "OVS", "SSL", "LSL"], etcWelds = ["E60XX", "E70XX", "E80XX", "E90XX", "E100XX", "E110XX"];
+const etcDesc = {
+  "Consider Eccentricity": "Consider eccentricity in the design when computing the strength of the bolt group.",
+  "Number of Bolt Column, N": "Number of vertical bolt lines", "Bolt Column Gap, g": "Gap between vertical bolt lines", "Plate Thickness, T": "Thickness of the plate.",
+};
+// One row: [label as the form shows it (" (in)" for a length), default, choices, greyed]. "mat:S" / "mat:C": the model's steel / concrete materials.
+const etcR = (label, def, list, grey) => ({label, def: String(def), list: list || null, grey: !!grey});
+const etcBBRows = () => [etcR("Consider Eccentricity", "Yes", etcYes), etcR("Length, Leh (in)", 1.5), etcR("Length, Lev (in)", 1.25), etcR("Bolt Spacing, S (in)", 3), etcR("Pref. Number of Bolts, n", 4), etcR("Length, a (in)", 2.5), etcR("Plate Offset, b (in)", 0),
+  etcR("Bolt Types", "A325-N", etcBoltTypes), etcR("Bolt Size", "7/8", etcBoltSizes), etcR("Hole Types", "STD", etcHoles), etcR("Weld Material", "E70XX", etcWelds), etcR("Weld Thickness, [1/16]D (in)", 4), etcR("Plate Material", "A992Fy50", "mat:S"), etcR("Plate Thickness, T (in)", 0.375),
+  etcR("Offset, Gt (in)", 1, null, true), etcR("Coping Depth, dct (in)", 2, null, true), etcR("Coping Depth, dcb (in)", 2, null, true), etcR("Offset, G (in)", 0.5, null, true)];
+const etcBCTail = () => [etcR("Bolt Column Gap, g (in)", 3), etcR("Length, Leh (in)", 1.5), etcR("Length, Lev (in)", 1.25), etcR("Bolt Spacing, S (in)", 3), etcR("Pref. Number of Bolts, n", 4), etcR("Length, a (in)", 2),
+  etcR("Bolt Types", "A325-N", etcBoltTypes), etcR("Bolt Size", "7/8", etcBoltSizes), etcR("Hole Types", "STD", etcHoles), etcR("Weld Material", "E70XX", etcWelds), etcR("Weld Thickness, [1/16]D (in)", 4), etcR("Plate Material", "A992Fy50", "mat:S"), etcR("Plate Thickness, T (in)", 0.5), etcR("Offset, G (in)", 0.5, null, true)];
+const etcN = () => etcR("Number of Bolt Column, N", "1 column", etcCols), etcEcc = () => etcR("Consider Eccentricity", "Yes", etcYes);
+const etcTabs = {
+  "Beam-Beam": {types: {"Partial Depth": ["Vertical Plate (Partial Depth)", etcBBRows()], "Partial Depth with Top": ["Vertical Plate (Partial Depth with Top)", etcBBRows()], "Full Depth": ["Vertical Plate (Full)", etcBBRows()], "Horizontal": ["Horizontal Plate", etcBBRows()]}, sched: true},
+  "Beam-Column": {types: {"Beam Column Shear Major Axis": ["Beam Column Shear Major Axis", [etcEcc(), etcN(), ...etcBCTail()]], "Beam Column Shear Minor Axis": ["Beam Column Shear Minor Axis", [etcN(), ...etcBCTail()]],
+    "Beam Column Moment Major Axis": ["Beam Column Moment Major Axis", etcBCTail()], "Beam Column Moment Minor Axis": ["Beam Column Moment Minor Axis", [etcN(), ...etcBCTail()]]}},
+  "Column-Footing": {types: {"": ["Column Footing Preferences", [etcR("Plate Thickness, T (in)", 1), etcR("Min Width, Nmin (in)", 10), etcR("Min Height, Bmin (in)", 10), etcR("Anchor Rod Size", "1", etcBoltSizes), etcR("Embedment Length, hef (in)", 20), etcR("Anchor Rod Material [ASTM]", "F1554 Gr36", ["F1554 Gr36", "F1554 Gr55", "F1554 Gr105"]), etcR("Anchor Rod Heads and Nuts", "Square", ["Square", "Heavy Hex"]), etcR("Pedestal Material", "4000Psi", "mat:C"),
+    etcR("Width Increment, dN (in)", 1), etcR("Height Increment, dB (in)", 1), etcR("Max Width, Nmax (in)", 100), etcR("Max Height, Bmax (in)", 100), etcR("Offset, Leh (in)", 2.5), etcR("Offset, Lev (in)", 2.5), etcR("Offset, a (in)", 2), etcR("Offset, b (in)", 2), etcR("Bolts Clearance, c (in)", 1.5), etcR("Bolt Size", "7/8", etcBoltSizes), etcR("Weld Material", "E70XX", etcWelds), etcR("Weld Thickness, [1/16]D (in)", 6), etcR("Plate Material", "A992Fy50", "mat:S")]]}},
+};
+const etcItem = label => label.replace(/ \(in\)$/, "");
+const etcIsLen = label => / \(in\)$/.test(label) && !/\[1\/16\]/.test(label);
+const etcShowLabel = label => etcIsLen(label) && !etcUS() ? label.replace(/ \(in\)$/, " (mm)") : label;
+const etcGroup = (tab, type) => type ? tab + "|" + type : tab;
+const etcSchedDef = {"Default Mode": "Auto", Horizontal: "10", Partial: "30"};
+// The preview: a sketch of each type, labelled as ETABS's preview labels it.
+function etcPreview(tab, type) {
+  const ink = "#222", plate = "#d9d9e6", t = (x, y, s, a) => `<text x="${x}" y="${y}" font-family="Times New Roman,serif" font-size="14" ${a ? `text-anchor="${a}"` : ""}>${s}</text>`;
+  const bolts = (x, y0, n, dy, cols) => Array.from({length: n * (cols || 1)}, (_, i) => `<circle cx="${x + Math.floor(i / n) * 22}" cy="${y0 + (i % n) * dy}" r="6" fill="#fff" stroke="${ink}"/>`).join("");
+  const beam = y => `<path d="M150 ${y}h220M150 ${y + 8}h220M150 ${y + 112}h220M150 ${y + 120}h220M370 ${y}v120" stroke="${ink}" fill="none"/>`;
+  let body = "";
+  if (tab === "Column-Footing") body = `<rect x="40" y="40" width="300" height="250" fill="#ccc" stroke="${ink}"/><rect x="80" y="80" width="220" height="170" fill="#fff" stroke="${ink}"/>${bolts(100, 100, 2, 130, 1)}${bolts(280, 100, 2, 130, 1)}
+    <path d="M150 150h80M150 180h80M186 150v30M150 140v50M230 140v50" stroke="${ink}" fill="#ddd"/>${t(190, 30, "N", "middle")}${t(55, 30, "b")}${t(320, 30, "b")}${t(20, 170, "B")}${t(20, 62, "a")}${t(20, 275, "a")}${t(100, 300, "L<tspan font-size='10'>eh</tspan>")}${t(190, 300, "S<tspan font-size='10'>1</tspan>", "middle")}${t(350, 170, "S<tspan font-size='10'>2</tspan>")}${t(350, 95, "L<tspan font-size='10'>ev</tspan>")}`;
+  else if (tab === "Beam-Beam") {
+    const hz = type === "Horizontal";
+    body = `<path d="M40 60h110M40 68h110M40 300h110M40 308h110M90 68v232" stroke="${ink}" fill="none"/>${beam(hz ? 60 : 60)}
+      ${hz ? `<rect x="100" y="76" width="110" height="34" fill="${plate}" stroke="${ink}"/>${bolts(150, 93, 1, 0, 2)}${t(130, 50, "a")}${t(160, 138, "s")}${t(190, 138, "L<tspan font-size='10'>eh</tspan>")}${t(220, 92, "L<tspan font-size='10'>ev</tspan>")}`
+        : `<rect x="96" y="${type === "Partial Depth" ? 92 : 76}" width="46" height="${type === "Partial Depth" ? 120 : 160}" fill="${plate}" stroke="${ink}"/>${bolts(124, type === "Partial Depth" ? 108 : 100, 4, 26)}${t(110, 50, "a")}${t(155, 120, "L<tspan font-size='10'>ev</tspan>")}${t(160, 160, "s")}${t(130, 240, "L<tspan font-size='10'>eh</tspan>")}${type === "Partial Depth" ? t(60, 250, "d/2") + t(70, 170, "b") : t(380, 192, "d<tspan font-size='10'>cb</tspan>")}`}
+      ${t(150, 50, "G<tspan font-size='10'>t</tspan>")}${t(380, 82, "d<tspan font-size='10'>ct</tspan>")}${t(390, 130, "d")}${t(96, 330, "G")}`;
+  } else {
+    const minor = /Minor/.test(type), moment = /Moment/.test(type), two = /Shear Minor/.test(type);
+    body = `<path d="M40 20v300M58 20v300M${minor ? "120 20v300" : "130 20v300M148 20v300"}" stroke="${ink}" fill="none" ${minor ? 'stroke-dasharray="6 4"' : ""}/>${beam(80)}
+      <rect x="${minor ? 58 : 150}" y="${moment ? 96 : 104}" width="${minor ? (two ? 150 : 110) : 46}" height="${moment ? 104 : 96}" fill="${plate}" stroke="${ink}"/>${bolts(minor ? (two ? 172 : 170) : 172, 116, 4, 24, two ? 2 : 1)}
+      ${t(minor ? 130 : 160, 50, "a")}${two ? t(170, 50, "g") : ""}${t(200, 50, "L<tspan font-size='10'>eh</tspan>")}${t(225, 112, "L<tspan font-size='10'>ev</tspan>")}${t(230, 160, "s")}${t(225, 206, "L<tspan font-size='10'>ev</tspan>")}${moment ? "" : t(160, 230, "G")}`;
+  }
+  return `<svg viewBox="0 0 420 340" style="width:100%;height:100%;background:#fff">${body}<path d="M${tab === "Column-Footing" ? "0 0" : "190 260l30 20h40"}" stroke="${ink}" fill="none"/></svg>`;
+}
+// Design > Steel Connection Design: ETABS 23.2's submenu (picture 07). The design items stay greyed until there are
+// analysis results, as ETABS greys them; Interactive Design, Display Design Info and Verify need connection results.
+function etcConnectionMenu() {
+  const res = !!engine.res, des = design.some(f => f.key === "connection");
+  return [["View/Revise Preferences...", "m:etc:prefs"], ["Select Design Combinations...", "m:etc:combos"], 0,
+    ["Start Design/Check", "m:etc:start", "Shift+F9", !res], ["Interactive Design", "m:etc:interactive", "", !des], 0,
+    ["Display Design Info...", "m:etc:info", "", !des], 0, ["Verify All Connections Passed...", "m:etc:verify", "", !des], 0,
+    ["Reset All Overwrites...", "m:etc:resetOw", "", !res], ["Delete Design Results...", "m:etc:delete", "", !des]];
+}
+async function etcAct(a) {
+  if (a === "prefs") return etcPrefs();
+  if (a === "llrf") return etcLiveLoadReduction();
+  if (a === "dispTargets") return etcDisplacementTargets();
+  if (a === "periodTargets") return etcPeriodTargets();
+  if (a === "combos") return typeof etdDesignCombos === "function" ? etdDesignCombos("connection") : etcCombos();
+  if (a === "start") return act("eng:design");
+  if (a === "interactive" || a === "info") return openDesign("connection");
+  if (a === "verify") {
+    const f = design.find(x => x.key === "connection"), items = f ? [...f.items.values()] : [], bad = items.filter(x => (x.ratio || 0) > 1 || /fail|error|o\/s|ng/i.test(String(x.status || ""))).length;
+    return dialog("ETABS", `<p style="max-width:380px">${items.length} connections were designed.<br>${bad ? `${bad} connection${bad === 1 ? "" : "s"} did not pass.` : "All connections passed."}</p>`, [["OK"]], {width: 420});
+  }
+  if (a === "resetOw") return dialog("ETABS", `<p style="max-width:380px">Reset all steel connection design overwrites to the program's defaults?</p>`, [["OK", async () => { const j = await hmRun("set_connection_preferences", {items: etcAllItems().map(([g, i]) => ({group: g, item: i, value: ""}))}); if (j.ok) hmSay("The steel connection design overwrites are back to the program's defaults."); }], ["Cancel"]], {width: 420});
+  if (a === "delete") return dialog("ETABS", `<p style="max-width:380px">Delete all steel connection design results?</p>`, [["OK", () => { design = design.filter(f => f.key !== "connection"); hmSay("The steel connection design results are deleted."); }], ["Cancel"]], {width: 420});
+}
+const etcAllItems = () => Object.entries(etcTabs).flatMap(([tab, x]) => Object.entries(x.types).flatMap(([type, [, rows]]) => rows.map(r => [etcGroup(tab, type), etcItem(r.label)])));
+async function etcRead() { const j = await hmPost({tool: "design_settings", args: {}}).catch(() => null); return j && j.ok ? j.result : {connection: [], live_load_reduction: [], displacement_targets: [], period_targets: []}; }
+// Design > Steel Connection Design > View/Revise Preferences: "Steel Connection Design Preferences for <code>" (pictures 70-84).
+async function etcPrefs() {
+  hm.defs = null;
+  const defs = await hmDefs(), st = await etcRead(), was = {};
+  for (const r of st.connection || []) was[(r.Group || "") + "|" + r.Item] = r.Value;
+  const mats = kind => (defs.materials || []).filter(m => kind === "C" ? /concrete/i.test(m.type || "") : /steel/i.test(m.type || "") && !/rebar|tendon/i.test(m.type || "")).map(m => m.name);
+  const cur = {...was}, start = {...was}, picked = new Set();
+  let tab = "Beam-Beam", type = "Partial Depth", code = was["|Design Code"] || "AISC 360-22", at = 0;
+  const val = (g, r) => { const k = g + "|" + etcItem(r.label); return k in cur ? cur[k] : r.def; };
+  const d = dialog("Steel Connection Design Preferences for " + code, `<style>.etcG td{height:26px;border:1px solid #c8c8c8;padding:0 4px}.etcG td:first-child{width:60px;background:#f3f3f3}.etcG td:last-child{width:62px;text-align:center}.etcG .b{color:#1d2fd6}.etcG .k{color:#000}.etcG .r{color:#e00000}.etcG .gy{color:#9a9a9a}.etcG tr.on td:nth-child(2){background:#0078d7;color:#fff}.etcG input,.etcG select{width:100%;border:0;background:transparent;text-align:center;color:inherit;font:inherit}</style>
+    <div style="display:grid;grid-template-columns:390px 400px;gap:10px">
+      <div><fieldset style="margin:0"><div class="itabs" id="etcT">${Object.keys(etcTabs).map(t => `<button data-t="${esc(t)}" class="${t === tab ? "on" : ""}">${esc(t)}</button>`).join("")}</div>
+        <div style="display:flex;gap:8px;margin:6px 0" id="etcTyRow"><select id="etcTy" style="flex:1"></select><button id="etcSch">Plate Depth Sched...</button></div>
+        <div style="height:300px;overflow-y:scroll;border:1px solid #444"><table class="etcG" style="width:100%;border-collapse:collapse"><thead><tr><th></th><th>Item</th><th>Value</th></tr></thead><tbody id="etcB"></tbody></table></div></fieldset>
+        <fieldset><legend>Explanation of Color Coding for Values</legend><div style="display:grid;grid-template-columns:80px 1fr;gap:4px"><span style="color:#1d2fd6">Blue:</span><span>All selected objects are program determined</span><span>Black:</span><span>Some selected objects are user defined</span><span style="color:#e00000">Red:</span><span>Value that has changed during the current session</span></div></fieldset></div>
+      <div><fieldset style="margin:0"><legend>Description</legend><textarea id="etcD" readonly rows="5" style="width:100%;box-sizing:border-box;resize:none"></textarea></fieldset>
+        <fieldset><legend id="etcPL"></legend><div id="etcP" style="height:330px;border:1px solid #888"></div></fieldset></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;margin-top:6px">
+      <fieldset style="margin:0"><legend>Set to Default Values</legend><div style="display:flex;gap:8px"><button id="etcDA">All Items</button><button id="etcDS">Selected Items</button></div></fieldset>
+      <fieldset style="margin:0"><legend>Reset to Previous Values</legend><div style="display:flex;gap:8px"><button id="etcRA">All Items</button><button id="etcRS">Selected Items</button></div></fieldset>
+      <fieldset style="margin:0"><legend>Connection Type</legend><button id="etcCT">Set Default...</button></fieldset>
+      <fieldset style="margin:0"><legend>Design Code</legend><select id="etcC">${opts(etcConnCodes, code)}</select></fieldset></div>`,
+    [["OK", async () => {
+      const items = Object.keys(cur).concat(Object.keys(start)).filter((k, i, a) => a.indexOf(k) === i && !k.startsWith("|") && !k.startsWith("Schedule|") && (cur[k] ?? "") !== (start[k] ?? ""))
+        .map(k => { const i = k.lastIndexOf("|"); return {group: k.slice(0, i), item: k.slice(i + 1), value: cur[k] ?? ""}; });
+      const sch = {}; let schSet = false;
+      for (const [k, f] of [["Default Mode", "mode"], ["Horizontal", "horizontal"], ["Partial", "partial"]]) if ((cur["Schedule|" + k] ?? "") !== (start["Schedule|" + k] ?? "")) { sch[f] = f === "mode" ? cur["Schedule|" + k] : Number(cur["Schedule|" + k]); schSet = true; }
+      const args = {}; if (code !== (start["|Design Code"] || "AISC 360-22")) args.code = code; if (items.length) args.items = items; if (schSet) args.schedule = sch;
+      if (!Object.keys(args).length) return;
+      const j = await hmRun("set_connection_preferences", args); if (j.ok) hmSay("Steel connection design preferences set.");
+    }], ["Cancel"]], {width: 830});
+  const rowsNow = () => etcTabs[tab].types[type][1], g = () => etcGroup(tab, type);
+  const desc = r => etcDesc[etcItem(r.label)] || etcItem(r.label).replace(/,.*$/, "") + ".";
+  const paint = () => {
+    const rows = rowsNow(), grp = g();
+    q(d, "#etcTyRow").style.display = tab === "Column-Footing" ? "none" : "flex";
+    q(d, "#etcSch").style.display = etcTabs[tab].sched ? "" : "none";
+    q(d, "#etcTy").innerHTML = opts(Object.keys(etcTabs[tab].types), type);
+    q(d, "#etcPL").textContent = "Preview - " + etcTabs[tab].types[type][0];
+    q(d, "#etcP").innerHTML = etcPreview(tab, type);
+    q(d, "#etcB").innerHTML = rows.map((r, i) => {
+      const k = grp + "|" + etcItem(r.label), v = val(grp, r), shown = etcIsLen(r.label) ? String(etcToShow(v)) : v;
+      const cls = r.grey ? "gy" : (cur[k] ?? "") !== (start[k] ?? "") ? "r" : k in cur && cur[k] !== r.def ? "k" : "b";
+      const list = r.list === "mat:S" ? mats("S") : r.list === "mat:C" ? mats("C") : r.list;
+      const cell = r.grey ? esc(shown) : list && (list === etcYes || list === etcCols) ? `<select data-i="${i}">${opts(list, v)}</select>` : `<input data-i="${i}" value="${esc(shown)}" ${list ? `list="etcL${i}"` : ""}>${list ? `<datalist id="etcL${i}">${list.map(x => `<option value="${esc(x)}">`).join("")}</datalist>` : ""}`;
+      return `<tr data-r="${i}" class="${picked.has(k) || i === at ? "on" : ""}"><td>${i === at ? "&#9654; " : ""}${String(i + 1).padStart(2, "0")}</td><td class="${cls}">${esc(etcShowLabel(r.label))}</td><td class="${cls}">${cell}</td></tr>`;
+    }).join("");
+    q(d, "#etcD").value = rows[at] ? desc(rows[at]) : "";
+    d.querySelectorAll("#etcB tr").forEach(tr => tr.onclick = e => {
+      const i = +tr.dataset.r, k = grp + "|" + etcItem(rows[i].label);
+      if (e.ctrlKey) { picked.has(k) ? picked.delete(k) : picked.add(k); } else if (e.target.tagName !== "INPUT" && e.target.tagName !== "SELECT") { picked.clear(); picked.add(k); }
+      if (at !== i) { at = i; paint(); } else { d.querySelectorAll("#etcB tr").forEach(x => x.classList.toggle("on", picked.has(grp + "|" + etcItem(rows[+x.dataset.r].label)) || +x.dataset.r === at)); q(d, "#etcD").value = desc(rows[i]); }
+    });
+    d.querySelectorAll("#etcB [data-i]").forEach(x => x.onchange = () => {
+      const r = rows[+x.dataset.i], k = grp + "|" + etcItem(r.label);
+      let v = x.value.trim();
+      if (etcIsLen(r.label) || /Number of Bolts|Weld Thickness/.test(r.label)) { const n = Number(v); if (!v || !isFinite(n) || n < 0) { formError(d, etcItem(r.label) + " is a number, not negative."); x.value = etcIsLen(r.label) ? etcToShow(val(grp, r)) : val(grp, r); return; } v = String(etcIsLen(r.label) ? etcFromShow(n) : n); }
+      formError(d, ""); cur[k] = v; paint();
+    });
+  };
+  const setTo = (keys, from) => { for (const k of keys) { if (from === "def") { const r = rowsNow().find(x => g() + "|" + etcItem(x.label) === k); if (r && !r.grey) cur[k] = r.def; } else if (k in start) cur[k] = start[k]; else delete cur[k]; } paint(); };
+  const allKeys = () => rowsNow().filter(r => !r.grey).map(r => g() + "|" + etcItem(r.label)), selKeys = () => { const s = [...picked].filter(k => k.startsWith(g() + "|")); if (!s.length && rowsNow()[at]) s.push(g() + "|" + etcItem(rowsNow()[at].label)); return s; };
+  q(d, "#etcDA").onclick = () => setTo(allKeys(), "def"); q(d, "#etcDS").onclick = () => setTo(selKeys(), "def");
+  q(d, "#etcRA").onclick = () => setTo(allKeys(), "prev"); q(d, "#etcRS").onclick = () => setTo(selKeys(), "prev");
+  d.querySelectorAll("#etcT [data-t]").forEach(b => b.onclick = () => { tab = b.dataset.t; type = Object.keys(etcTabs[tab].types)[0]; at = 0; picked.clear(); d.querySelectorAll("#etcT [data-t]").forEach(x => x.classList.toggle("on", x === b)); paint(); });
+  q(d, "#etcTy").onchange = e => { type = e.target.value; at = 0; picked.clear(); paint(); };
+  q(d, "#etcC").onchange = e => { code = e.target.value; q(d, ".dt b").textContent = "Steel Connection Design Preferences for " + code; };
+  q(d, "#etcSch").onclick = () => etcSchedule(cur);
+  q(d, "#etcCT").onclick = () => etcDefaultType();
+  paint();
+  return d;
+}
+// Select Design Combinations: the combinations the connection design uses (no picture yet: the two lists of ETABS's other
+// designs' Design Load Combinations Selection; the Design thread's etdDesignCombos takes over when it has the picture).
+async function etcCombos() {
+  hm.defs = null;
+  const defs = await hmDefs(), st = await etcRead(), all = (defs.combinations || []).map(c => c.name);
+  let chosen = (st.connection || []).filter(r => r.Group === "Combinations" && r.Value === "Yes").map(r => r.Item).filter(n => all.includes(n));
+  const was = [...chosen];
+  const d = dialog("Design Load Combinations Selection", `<fieldset><legend>Strength</legend><div style="display:grid;grid-template-columns:1fr 90px 1fr;gap:8px;align-items:center">
+      <div><div>List of Load Combinations</div><select id="ecL" multiple size="10" style="width:100%"></select></div>
+      <div style="display:flex;flex-direction:column;gap:6px"><button id="ecAdd">Add &gt;&gt;</button><button id="ecRem">&lt;&lt; Remove</button></div>
+      <div><div>Design Load Combinations</div><select id="ecR" multiple size="10" style="width:100%"></select></div></div></fieldset>`,
+    [["OK", async () => {
+      const items = [...new Set([...was, ...chosen])].map(n => ({group: "Combinations", item: n, value: chosen.includes(n) ? "Yes" : ""}));
+      if (!items.length) return;
+      const j = await hmRun("set_connection_preferences", {items}); if (j.ok) hmSay(`${chosen.length} design combination${chosen.length === 1 ? "" : "s"} for steel connection design.`);
+    }], ["Cancel"]], {width: 520});
+  const paint = () => { q(d, "#ecL").innerHTML = opts(all.filter(n => !chosen.includes(n)), ""); q(d, "#ecR").innerHTML = opts(chosen, ""); };
+  q(d, "#ecAdd").onclick = () => { chosen = chosen.concat([...q(d, "#ecL").selectedOptions].map(o => o.value)); paint(); };
+  q(d, "#ecRem").onclick = () => { const out = [...q(d, "#ecR").selectedOptions].map(o => o.value); chosen = chosen.filter(n => !out.includes(n)); paint(); };
+  paint();
+  return d;
+}
+const etcConnCodes = ["AISC 360-10", "AISC 360-16", "AISC 360-22"];
+// Plate Depth Schedule (pictures 86-87): Default Mode and the beam depths of the auto mode; kept with the form's OK.
+function etcSchedule(cur) {
+  const v = k => cur["Schedule|" + k] ?? etcSchedDef[k], L = etcLen();
+  const d = dialog("Plate Depth Schedule", `<fieldset><legend>Default Mode</legend><div style="display:flex;gap:16px;align-items:center"><span style="flex:1">Auto mode uses the schedule below.</span><select id="psM" style="width:110px">${opts(["Auto", "Horizontal", "Partial Depth with Top", "Full Depth", "Partial Depth"], v("Default Mode"))}</select></div></fieldset>
+    <fieldset><legend>Plate Schedule for Auto Mode</legend><div style="display:grid;grid-template-columns:auto 80px auto;gap:8px 8px;align-items:center">
+      <span>Use horizontal plate for beam &lt;=</span><input id="psH" value="${esc(String(etcToShow(v("Horizontal"))))}"><span>${L}</span>
+      <span>Use partial plate for beam &lt;=</span><input id="psP" value="${esc(String(etcToShow(v("Partial"))))}"><span>${L}&nbsp;&nbsp;&nbsp; and &gt; above.</span>
+      <span style="grid-column:1/4">Use full plate for beam depth greater than the above value.</span></div></fieldset>`,
+    [["OK", x => {
+      const h = Number(q(x, "#psH").value), p = Number(q(x, "#psP").value);
+      if (!isFinite(h) || !isFinite(p) || h < 0 || p < 0) { formError(x, "The depths are numbers, not negative."); return false; }
+      if (p < h) { formError(x, "The partial plate depth is the horizontal plate's or more."); return false; }
+      cur["Schedule|Default Mode"] = q(x, "#psM").value; cur["Schedule|Horizontal"] = String(etcFromShow(h)); cur["Schedule|Partial"] = String(etcFromShow(p));
+    }], ["Cancel"]], {width: 360});
+  return d;
+}
+// Connection Type > Set Default... (picture 85): ETABS shows the three connection types at Auto, greyed.
+function etcDefaultType() {
+  return dialog("Default Connection Type", ["Beam-beam Connection", "Beam-column Connection", "Column-footing Connection"].map(t => `<fieldset><legend>${t}</legend><select disabled style="width:110px;display:block;margin:4px auto"><option>Auto</option></select></fieldset>`).join(""), [["OK"], ["Cancel"]], {width: 200});
+}
+// Design > Live Load Reduction Factors (pictures 90-96). Rates and areas are kept in m; shown per ft² / in² in a US model.
+const etcAreaU = () => etcUS() ? {big: "ft", small: "in", b: 0.3048, s: 0.0254} : {big: "m", small: "mm", b: 1, s: 0.001};
+async function etcLiveLoadReduction() {
+  const st = await etcRead(), rows = st.live_load_reduction || [], f = rows.find(r => r.Row === "Form") || {};
+  const line = st.rllf_line || [], lineCode = (() => { const i = line.indexOf("METHOD"); return i >= 0 ? String(line[i + 1] || "").replace(/^"|"$/g, "") : ""; })();
+  const U = etcAreaU(), b2 = U.b * U.b, s2 = U.s * U.s;
+  const s = {method: f.Method || "Code", code: f.Code || (lineCode && lineCode !== "NONE" ? lineCode : "ASCE7-10"), rate: +(f.Rate || 0.08 / 0.09290304), minA: +(f.MinArea || 21600 * 0.00064516),
+    defMin: f.DefaultMin ? f.DefaultMin === "Yes" : true, single: +(f.Single || 0.5), multiple: +(f.Multiple || 0.4), all: f.Columns === "All Forces/Components",
+    curves: [], stories: rows.filter(r => r.Row === "Stories").map(r => [+r.Number, +r.Reduction])};
+  for (const r of rows.filter(r => r.Row === "Curve")) { const n = +r.Curve - 1; (s.curves[n] = s.curves[n] || {dl_ll: +r.DLLL, points: []}).points.push([+r.Area, +r.Factor]); }
+  s.curves = s.curves.filter(Boolean);
+  const m = [["None", "No Live Load Reduction"], ["Code", "Tributary Area (Based on Design Code)"], ["User", "User Parameters (per Section 1607.5, UBC 1997)"], ["Curves", "User Defined Curves (By Tributary Area)"], ["Stories", "User Defined (By Stories Supported)"]];
+  const rd = (k, l) => `<label style="display:block;margin:10px 0"><input type="radio" name="llM" value="${k}" ${s.method === k ? "checked" : ""}> ${esc(l)}</label>`;
+  const d = dialog("Live Load Reduction Factor", `<div style="display:grid;grid-template-columns:430px 240px;gap:10px">
+    <fieldset style="margin:0"><legend>Live Load Reduction Method</legend>${rd(...m[0])}${rd(...m[1])}<select id="llC" style="margin-left:40px;width:160px">${opts(etcLlrfCodes, s.code)}</select>${rd(...m[2])}
+      <div style="display:grid;grid-template-columns:200px 96px auto;gap:6px 6px;align-items:center;margin-left:40px"><span>Rate of Live Load Reduction, r</span><input id="llR"><span>1/${U.big}²</span><span>Minimum Tributary Area, Amin</span><input id="llA"><span>${U.small}²</span></div>
+      <div style="display:grid;grid-template-columns:1fr 96px;gap:4px;align-items:center">${rd(...m[3])}<button id="llDC">Define...</button>${rd(...m[4])}<button id="llDS">Define...</button></div></fieldset>
+    <div><fieldset style="margin:0"><legend>Minimum Factor</legend><div style="display:grid;grid-template-columns:1fr 96px;gap:6px;align-items:center"><span>Single Story</span><input id="llS"><span>Multiple Stories</span><input id="llMu"></div><label style="display:block;margin-top:6px"><input type="checkbox" id="llDef"> Use default minimum factors</label></fieldset>
+      <fieldset><legend>Application</legend><label style="color:#888"><input type="checkbox" checked disabled> Design Forces</label></fieldset>
+      <fieldset><legend>Application to Columns</legend><label style="display:block"><input type="radio" name="llCol" value="ax" ${s.all ? "" : "checked"}> Apply to Axial Load Only</label><label style="display:block"><input type="radio" name="llCol" value="all" ${s.all ? "checked" : ""}> Apply to All Forces/Components</label></fieldset></div></div>`,
+    [["OK", async x => {
+      const meth = q(x, "input[name=llM]:checked").value;
+      const num = id => Number(q(x, id).value);
+      if (!q(x, "#llDef").checked && ["Code", "User"].includes(meth)) { s.single = num("#llS"); s.multiple = num("#llMu"); }
+      if ([s.single, s.multiple].some(v => !isFinite(v) || v < 0 || v > 1)) { formError(x, "The minimum factors are between 0 and 1."); return false; }
+      if (meth === "User") { s.rate = num("#llR") * b2; s.minA = num("#llA") * s2; if (![s.rate, s.minA].every(v => isFinite(v) && v >= 0)) { formError(x, "The rate and the minimum tributary area are numbers, not negative."); return false; } }
+      if (meth === "Curves" && !s.curves.some(c => c.points.length)) { formError(x, "Define a curve first (Define...)."); return false; }
+      if (meth === "Stories" && !s.stories.length) { formError(x, "Define the stories supported first (Define...)."); return false; }
+      const j = await hmRun("set_live_load_reduction", {method: meth, code: q(x, "#llC").value, rate: s.rate, min_area: s.minA, default_min: q(x, "#llDef").checked, single: s.single, multiple: s.multiple, all_forces: q(x, "input[name=llCol]:checked").value === "all",
+        curves: s.curves.map(c => ({dl_ll: c.dl_ll, points: c.points.map(p => [p[0] * b2, p[1]])})), stories: s.stories});
+      if (j.ok) hmSay("Live load reduction set.");
+    }], ["Cancel"]], {width: 720});
+  const sync = () => {
+    const meth = q(d, "input[name=llM]:checked").value, code = meth === "Code", user = meth === "User", mins = code || user;
+    const C = q(d, "#llC"); C.disabled = !code; if (!code) C.selectedIndex = -1; else if (C.selectedIndex < 0) C.value = s.code;
+    for (const [id, v] of [["#llR", +(s.rate / b2).toPrecision(6)], ["#llA", +(s.minA / s2).toPrecision(8)]]) { const e = q(d, id); e.disabled = !user; e.value = user ? v : ""; }
+    q(d, "#llDC").disabled = meth !== "Curves"; q(d, "#llDS").disabled = meth !== "Stories";
+    const def = q(d, "#llDef"); def.disabled = !mins; if (!mins) def.checked = false; else if (code && s.defMin && !def.dataset.touched) def.checked = true;
+    for (const [id, v] of [["#llS", s.single], ["#llMu", s.multiple]]) { const e = q(d, id); e.disabled = !mins || def.checked; e.value = mins ? v : ""; }
+    q(d, "#llS").closest("fieldset").style.color = mins ? "" : "#888";
+  };
+  d.querySelectorAll("input[name=llM]").forEach(r => r.onchange = () => { if (r.value === "User" && s.defMin) { s.single = 0.6; s.multiple = 0.4; } sync(); });
+  q(d, "#llDef").onchange = e => { e.target.dataset.touched = "1"; s.defMin = e.target.checked; if (e.target.checked) { s.single = 0.5; s.multiple = 0.4; } sync(); };
+  q(d, "#llS").onchange = e => s.single = Number(e.target.value); q(d, "#llMu").onchange = e => s.multiple = Number(e.target.value);
+  q(d, "#llR").onchange = e => s.rate = Number(e.target.value) * b2; q(d, "#llA").onchange = e => s.minA = Number(e.target.value) * s2;
+  q(d, "#llDC").onclick = () => etcLlrfCurves(s, U);
+  q(d, "#llDS").onclick = () => etcLlrfStories(s);
+  sync();
+  return d;
+}
+const etcLlrfCodes = ["ASCE7-95", "ASCE7-05", "ASCE7-10", "AS/NZS 1170.1-2002", "Chinese GB 50009-2012", "Eurocode 1991:2002", "Hong Kong COP 2011", "Indian IS 875-1987", "NBCC95", "NBCC2005", "NBCC2010", "UBC97", "KBC 2009"];
+// A two-column list with an entry row on top and Add / Modify / Delete, as ETABS's curve and stories forms have it.
+function etcPairList(d, host, rows, after) {
+  let at = rows.length ? 0 : -1;
+  const el = q(d, host), paint = () => {
+    el.querySelector(".pl").innerHTML = rows.map((r, i) => `<div data-i="${i}" style="display:grid;grid-template-columns:1fr 1fr;cursor:default;${i === at ? "background:#0078d7;color:#fff" : ""}"><span style="padding:0 4px">${esc(String(r[0]))}</span><span style="padding:0 4px;border-left:1px solid #888">${esc(String(r[1]))}</span></div>`).join("");
+    el.querySelectorAll(".pl [data-i]").forEach(x => x.onclick = () => { at = +x.dataset.i; el.querySelector(".a").value = rows[at][0]; el.querySelector(".b").value = rows[at][1]; paint(); });
+    if (after) after();
+  };
+  const entry = () => { const a = Number(el.querySelector(".a").value), b = Number(el.querySelector(".b").value); if (!isFinite(a) || !isFinite(b)) { formError(d, "Type two numbers."); return null; } formError(d, ""); return [a, b]; };
+  q(d, host + " .add").onclick = () => { const e = entry(); if (!e) return; rows.push(e); rows.sort((x, y) => x[0] - y[0]); at = rows.indexOf(e); paint(); };
+  q(d, host + " .mod").onclick = () => { const e = entry(); if (!e || at < 0) return; rows[at] = e; rows.sort((x, y) => x[0] - y[0]); at = rows.indexOf(e); paint(); };
+  q(d, host + " .del").onclick = () => { if (at < 0) return; rows.splice(at, 1); at = Math.min(at, rows.length - 1); paint(); };
+  paint();
+  return {paint};
+}
+const etcPairHtml = (h1, h2, w) => `<div style="display:grid;grid-template-columns:${w || 210}px 80px;gap:10px"><div><div style="display:grid;grid-template-columns:1fr 1fr;text-align:center;margin-bottom:4px"><span>${h1}</span><span>${h2}</span></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr"><input class="a" value="1"><input class="b" value="1"></div><div class="pl" style="height:100px;overflow:auto;border:1px solid #888;background:#fff;background-image:linear-gradient(#888,#888);background-size:1px 100%;background-position:50% 0;background-repeat:no-repeat"></div></div>
+  <div style="display:flex;flex-direction:column;gap:6px;justify-content:center"><button class="add">Add</button><button class="mod">Modify</button><button class="del">Delete</button></div></div>`;
+// Live Load Reduction Factor Curves (picture 94): curves by number, each a list of tributary area and factor with its DL/LL ratio, plotted.
+function etcLlrfCurves(s, U) {
+  const work = s.curves.length ? s.curves.map(c => ({dl_ll: c.dl_ll, points: c.points.map(p => [+(p[0] / (U.b * U.b)).toPrecision(8), p[1]])})) : [{dl_ll: 1, points: []}];
+  let n = 0;
+  const d = dialog("Live Load Reduction Factor Curves", `<div style="display:grid;grid-template-columns:370px 430px;gap:12px">
+    <div><fieldset style="margin:0"><div style="display:grid;grid-template-columns:auto 100px;gap:10px;align-items:center;justify-content:center"><span>Live Load Reduction Factor Curve #</span><select id="lcN"></select><button id="lcA">Add Curve</button><button id="lcD">Delete Curve</button></div></fieldset>
+      <fieldset id="lcF"><legend>Curve Data</legend><div style="display:flex;gap:10px">${etcPairHtml(`Trib. Area, ${U.big}²`, "Red. Factor")}</div><div style="display:grid;grid-template-columns:1fr 100px;margin-top:6px"><span></span><span>DL/LL Ratio<input id="lcR" style="width:100%"></span></div></fieldset></div>
+    <fieldset style="margin:0"><legend>Plots for Live Load Reduction Factor Curves</legend><div id="lcP" style="height:260px"></div><div style="border:1px solid #888;height:20px;margin-top:6px"></div></fieldset></div>`,
+    [["OK", () => { s.curves = work.filter(c => c.points.length).map(c => ({dl_ll: c.dl_ll, points: c.points.map(p => [p[0] * U.b * U.b, p[1]])})); }], ["Cancel"]], {width: 840});
+  let list;
+  const plot = () => {
+    const pts = (work[n] || {points: []}).points, xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const x0 = xs.length ? Math.min(...xs) : -6e-6, x1 = xs.length ? Math.max(...xs) : 6e-6, y0 = ys.length ? Math.min(0, ...ys) : -6e-6, y1 = ys.length ? Math.max(...ys) : 6e-6;
+    const X = v => 70 + (v - x0) / ((x1 - x0) || 1) * 300, Y = v => 200 - (v - y0) / ((y1 - y0) || 1) * 180;
+    const tx = Array.from({length: 11}, (_, i) => x0 + (x1 - x0) * i / 10), ty = Array.from({length: 11}, (_, i) => y0 + (y1 - y0) * i / 10), f = v => Math.abs(v) < 1e-3 && v ? v.toExponential(1) : +v.toFixed(2);
+    q(d, "#lcP").innerHTML = `<svg viewBox="0 0 400 260" style="width:100%;height:100%;font:9px Arial">${tx.map(v => `<path d="M${X(v)} 20V200" stroke="#ccc"/><text x="${X(v)}" y="214" text-anchor="middle">${f(v)}</text>`).join("")}${ty.map(v => `<path d="M70 ${Y(v)}H370" stroke="#ccc"/><text x="64" y="${Y(v) + 3}" text-anchor="end">${f(v)}</text>`).join("")}
+      <rect x="70" y="20" width="300" height="180" fill="none" stroke="#000"/>${pts.length ? `<polyline points="${pts.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="#1d2fd6" stroke-width="1.5"/>` : ""}
+      <text x="220" y="232" text-anchor="middle" font-size="11">Tributary Area, ${U.big}²</text><text transform="translate(14 110) rotate(-90)" text-anchor="middle" font-size="11">Live Load Red. Factor</text></svg>`;
+  };
+  const show = () => {
+    q(d, "#lcN").innerHTML = work.map((_, i) => `<option value="${i}" ${i === n ? "selected" : ""}>${i + 1}</option>`).join("");
+    q(d, "#lcR").value = work[n].dl_ll;
+    list = etcPairList(d, "#lcF", work[n].points, plot);
+  };
+  q(d, "#lcN").onchange = e => { n = +e.target.value; show(); };
+  q(d, "#lcR").onchange = e => { const v = Number(e.target.value); if (isFinite(v) && v >= 0) work[n].dl_ll = v; };
+  q(d, "#lcA").onclick = () => { work.push({dl_ll: 1, points: []}); n = work.length - 1; show(); };
+  q(d, "#lcD").onclick = () => { if (work.length > 1) { work.splice(n, 1); n = Math.max(0, n - 1); } else work[0] = {dl_ll: 1, points: []}; show(); };
+  show();
+  return d;
+}
+// Live Load Reduction By Stories Supported (picture 96).
+function etcLlrfStories(s) {
+  const rows = s.stories.map(r => [...r]);
+  const d = dialog("Live Load Reduction By Stories Supported", `<fieldset id="lsF"><legend>Reduced Live Load Factor Data</legend>${etcPairHtml("Number of", "Reduction", 150)}</fieldset>`,
+    [["OK", x => { if (rows.some(r => r[0] < 0 || r[1] < 0 || r[1] > 1)) { formError(x, "The reduction is between 0 and 1, the number of stories not negative."); return false; } s.stories = rows; }], ["Cancel"]], {width: 290});
+  etcPairList(d, "#lsF", rows);
+  return d;
+}
+// Design > Set Lateral Displacement Targets (pictures 97-98): ETABS's "Design Optimization - Lateral Displacement Targets".
+async function etcDisplacementTargets() {
+  hm.defs = null;
+  const defs = await hmDefs(), st = await etcRead(), L = hmU().l;
+  const cases = (defs.load_cases || []).filter(c => !/^Modal/i.test(c.type || "")).map(c => c.name);
+  const stories = (defs.stories || []).map(s => s.name).reverse();
+  const was = st.displacement_targets || [], rows = was.map(r => ({c: r.StaticCase, s: r.Story, j: r.Label, v: r.MaxDispl, u: r.UniqueName || ""}));
+  let ignore = was.length > 0 && was.every(r => r.Active === "No");
+  const d = dialog("Lateral Displacement Targets", `<div style="display:grid;grid-template-columns:1fr 340px;gap:12px">
+    <fieldset style="margin:0"><legend>Targets</legend><div style="display:flex;gap:16px"><div id="dtG" style="width:520px;height:230px;overflow:auto;border:1px solid #444;background:#fff"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:66px"><button id="dtA" style="margin-top:50px">Add</button><button id="dtD">Delete</button><button id="dtS" style="margin-top:auto">Sort</button></div></div></fieldset>
+    <div><fieldset id="dtAuto" style="margin:0"><legend>Automatic Target Data for Selected Point Objects</legend><div style="display:grid;grid-template-columns:1fr 150px;gap:6px;align-items:center"><span>Drift Ratio</span><input id="dtR"><span>Base Story for Drift</span><select id="dtB">${opts(["Base", ...stories.slice().reverse()], "Base")}</select></div><button id="dtAp" style="display:block;margin:8px auto 0">Apply Auto Targets</button></fieldset>
+      <label style="display:block;margin:16px 0"><input type="checkbox" id="dtI" ${ignore ? "checked" : ""}> Ignore Specified Target Displacements</label><div id="dtF"></div></div></div>`,
+    [["OK", async x => {
+      for (const r of rows) if (!isFinite(Number(r.v)) || Number(r.v) <= 0) { formError(x, "Each target's maximum displacement is a number above 0."); return false; }
+      ignore = q(x, "#dtI").checked;
+      const by = new Map(); for (const r of rows) { if (!by.has(r.c)) by.set(r.c, []); by.get(r.c).push({Story: r.s, Label: r.j, UniqueName: r.u, MaxDispl: String(r.v), Active: ignore ? "No" : "Yes"}); }
+      for (const c of new Set(was.map(r => r.StaticCase))) if (!by.has(c)) by.set(c, []);
+      for (const [c, list] of by) { const j = await hmRun("define_table_rows", {table: "Design Optimization - Lateral Displacement Targets", name: c, rows: list}); if (!j.ok) return; }
+      hmSay(`${rows.length} lateral displacement target${rows.length === 1 ? "" : "s"} set.`);
+    }], ["Cancel"]], {width: 980});
+  dfInto(d, "#dtF", true);
+  const g = etdGrid(d, "#dtG", [{head: "Load Case", key: "c", list: () => cases}, {head: "Story", key: "s", list: () => stories}, {head: "Joint Label", key: "j", list: () => [...new Set([...pointXyz.keys()])]}, {head: `Maximum<br>Displacement (${esc(L)})`, key: "v"}], rows,
+    () => ({c: cases[0] || "", s: stories[0] || "", j: [...pointXyz.keys()][0] || "1", v: +(0.0381 / (lenM(L) || 1)).toPrecision(6), u: ""}));
+  q(d, "#dtA").onclick = g.add; q(d, "#dtD").onclick = g.del;
+  q(d, "#dtS").onclick = () => { rows.sort((a, b) => cases.indexOf(a.c) - cases.indexOf(b.c) || stories.indexOf(a.s) - stories.indexOf(b.s) || String(a.j).localeCompare(String(b.j), undefined, {numeric: true})); g.paint(); };
+  // Greyed with no point selected, as ETABS greys it (picture 97).
+  const pts = [...selJ].filter(n => pointXyz.has(n)), auto = q(d, "#dtAuto");
+  auto.querySelectorAll("input,select,button").forEach(e => e.disabled = !pts.length); auto.style.color = pts.length ? "" : "#888";
+  q(d, "#dtAp").onclick = () => {
+    const r = Number(q(d, "#dtR").value); if (!isFinite(r) || r <= 0) return formError(d, "The drift ratio is a number above 0.");
+    let z = 0; const elev = new Map([["Base", (defs.base || {}).elevation || 0]]); (defs.stories || []).forEach(s => { z += Number(s.height) || 0; elev.set(s.name, ((defs.base || {}).elevation || 0) + z); });
+    const z0 = elev.get(q(d, "#dtB").value) || 0, near = h => { let best = stories[0], dz = Infinity; for (const [n, e] of elev) if (n !== "Base" && Math.abs(e - h) < dz) { dz = Math.abs(e - h); best = n; } return best; };
+    for (const p of pts) { const h = pointXyz.get(p)[2], s = near(h); if (h <= z0) continue; rows.push({c: cases[0] || "", s, j: p, v: +((h - z0) * r).toPrecision(6), u: ""}); }
+    formError(d, ""); g.paint();
+  };
+  return d;
+}
+// Design > Set Time Period Targets (pictures 99, 99b): ETABS's "Design Optimization - Time Period Targets"; Current Period
+// from the modal results when there are any.
+async function etcPeriodTargets() {
+  hm.defs = null;
+  const defs = await hmDefs(), st = await etcRead();
+  const cases = (defs.load_cases || []).filter(c => /^Modal/i.test(c.type || "")).map(c => c.name);
+  const was = st.period_targets || [], rows = was.map(r => ({c: r.ModalCase, n: r.ModeNum, t: r.TargetPeriod}));
+  const period = (c, n) => { for (const t of Object.values(P ? P.tables : {})) { if (!/modal.*period/i.test(norm(t.name)) || !t.rows) continue; const ci = col(t.fields, "Case", "OutputCase"), mi = col(t.fields, "Mode", "StepNum"), pi = col(t.fields, "Period"); if (pi < 0) continue; const r = t.rows.find(x => (ci < 0 || x[ci] === c) && mi >= 0 && +x[mi] === +n); if (r) return (+r[pi]).toFixed(3); } return "Not Available"; };
+  const d = dialog("Time Period Targets", `<fieldset style="margin:0"><legend>Targets</legend><div style="display:flex;gap:16px"><div id="ptG" style="width:560px;height:190px;overflow:auto;border:1px solid #444;background:#fff"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:66px"><button id="ptA" style="margin-top:20px">Add</button><button id="ptD">Delete</button><button id="ptS" style="margin-top:auto">Sort</button></div></div>
+      <label style="display:block;margin-top:10px"><input type="checkbox" id="ptI" ${was.length && was.every(r => r.Active === "No") ? "checked" : ""}> Ignore Specified Time Period Targets</label></fieldset>`,
+    [["OK", async x => {
+      for (const r of rows) if (!(Number.isInteger(Number(r.n)) && Number(r.n) >= 1) || !(Number(r.t) > 0)) { formError(x, "Each target has a mode number of 1 or more and a target period above 0."); return false; }
+      const ignore = q(x, "#ptI").checked, by = new Map();
+      for (const r of rows) { if (!by.has(r.c)) by.set(r.c, []); by.get(r.c).push({ModeNum: String(r.n), TargetPeriod: String(r.t), Active: ignore ? "No" : "Yes"}); }
+      for (const c of new Set(was.map(r => r.ModalCase))) if (!by.has(c)) by.set(c, []);
+      for (const [c, list] of by) { const j = await hmRun("define_table_rows", {table: "Design Optimization - Time Period Targets", name: c, rows: list}); if (!j.ok) return; }
+      hmSay(`${rows.length} time period target${rows.length === 1 ? "" : "s"} set.`);
+    }], ["Cancel"]], {width: 700});
+  const g = etdGrid(d, "#ptG", [{head: "Modal Case", key: "c", list: () => cases}, {head: "Mode Number", key: "n"}, {head: "Target Period (sec)", key: "t"}, {head: "Current Period (sec)", key: "x", fixed: i => period(rows[i].c, rows[i].n)}], rows,
+    () => ({c: cases[0] || "", n: 1, t: 1}));
+  q(d, "#ptA").onclick = g.add; q(d, "#ptD").onclick = g.del;
+  q(d, "#ptS").onclick = () => { rows.sort((a, b) => cases.indexOf(a.c) - cases.indexOf(b.c) || a.n - b.n); g.paint(); };
+  return d;
+}
 // ---- ETABS 23.2's Analyze menu and its run windows, from the pictures in field/reference-forms/etabs/Analyze (thread
 // 'Make remaining ETABS menu forms identical', 2026-11-27): the menu in ETABS's order and words; Run Analysis shows
 // ETABS's "Analyzing" window (File Name, Start/Finish Time, Elapsed Time, Run Status, Cancel Run, the Run 1 log) and its
@@ -6670,6 +7048,544 @@ function etnDrawMenu() {
     ["Draw Section Cut...", "m:st:cut", "", !engine.res], 0,
     ["Snap Options...", "m:drawHelp"], ["Draw Using Snap Only", "m:etn:snapOnly"], 0,
     ["Engine Extras", [["Draw Circular Floors (centre, then edge)", "d:circ"], 0, ["Design Strips...", "m:ex:strips"], ["Tendons...", "m:ex:tendons"], ["Slab Rebar...", "m:ex:slabrebar"]]]];
+}
+// ---- ETABS 23.2's Detailing menu and its Bar Selection and Curtailment Rule forms, from the pictures in
+// field/reference-forms/etabs/Detailing (thread 'Make ETABS Detailing rule forms identical', 2026-11-28): the menu in
+// ETABS's order and words; Beam, Slab/Mat/Footing, Column Stack and Wall Stack rules with every sub-form ETABS opens from
+// them (Bar Development Rules, Rebar Curtailment Rules, Rebar Selection Rules, Longitudinal Rebars in Sections, Rebar
+// Selection Rules for Strip and for Footing, Slab Rebar Curtailment Rules, Confinement, Bar Splices, Pier and Spandrel
+// Rebar Rules), with ETABS's defaults. ETABS keeps these rules in its model database only (no .e2k line, no database
+// table), so the Engine keeps them with the model (detailing_rules / set_detailing_rules). A sub-form's OK changes its
+// rule form; the rule form's OK keeps it, Cancel drops it, as in ETABS. Lengths are kept in metres and shown in the
+// model's length unit. Drawing Management > Drawing Sheet Setup and Drawing Format Properties are the drawing format
+// thread's forms: etlSheetSetupForm() and etlDrawingFormatForm() (PR 343, above openDesign).
+// UNVERIFIED (no picture yet, asked of the capture thread): the choices of drop-downs shown closed (hook types, % of bars,
+// bar numbers, coating and concrete types, hoop and tie types, splice options, skin bar placement); the Non Seismic beam
+// Rebar Selection Rules and Non Seismic Confinement values (the Seismic ones are used); the Middle Strip and Slabs On
+// Beams strip rules (the Column Strip values are used); the Mat tab's Edit Rebar Selection Rules form (the strip form);
+// Clear Detailing, Open/Clear Drawing Manager, Generate/Show Beam Groups, Detailing Comments and Log and the Show/Edit
+// forms (the Engine's schedules), which ETABS greys on a model without design. ----
+const etq = {rules: null, bars: [], done: {}, log: [], drawings: []};
+const etqL = x => +(x / 39.37008).toPrecision(12);
+const etqKinds = {beam: "Beam", slab: "Slab/Mat/Footing", column: "Column Stack", wall: "Wall Stack", sbeam: "Beam", scolumn: "Column Stack"};
+const etqHooks = ["Straight", "90 Deg", "135 Deg", "180 Deg"], etqPct = ["25%", "33%", "50%", "67%", "75%", "100%"], etqNums = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const etqUsBars = ["#3", "#4", "#5", "#6", "#7", "#8", "#9", "#10", "#11", "#14", "#18"];
+function etqBeamSel() {
+  const bar = {}; ["A", "B", "C", "D", "F", "G", "H", "J"].forEach((c, i) => bar[c] = {small: "#4", large: "#9", pref: "#6", minN: i % 2 ? 0 : 2, maxN: 100});
+  const z = (a, b, c) => [a, b, b, b, c], stir = {};
+  const rows = {small: z("#3", "#3", "#3"), large: z("#6", "#6", "#6"), pref: z("#4", "#4", "#4"), minSp: z(etqL(3), etqL(3), etqL(3)), maxSp: z(etqL(6), etqL(18), etqL(6)), maxSpD: z(0.25, 0.5, 0.25), maxSpM: z(6, null, 6), maxSpT: z(16, 48, 16),
+    minLeg: z(2, 2, 2), maxLeg: z(4, 4, 4), legSp: z(14, 28, 14), legSpW: z(1, 1, 1), legSpM: z(16, 16, 16), legSpT: z(48, null, 48), type: z("135 Deg", "135 Deg", "135 Deg"), zoneLen: z(2, null, 2)};
+  ["A", "B", "C", "D", "E"].forEach((c, i) => { stir[c] = {}; for (const [k, v] of Object.entries(rows)) if (v[i] !== null) stir[c][k] = v[i]; });
+  return {bar, stir};
+}
+function etqDev() { return {method: "ACI", coating: "Uncoated", concrete: "Normal Weight"}; }
+function etqTyp(top, bot) { return {detail: "all", typAll: true, topA: top, topB: top, topSpA: etqL(9), topSpB: etqL(9), botA: bot, botB: bot, botSpA: etqL(9), botSpB: etqL(9)}; }
+function etqSlabCurt(kind) {
+  const t = {t1: 6, t2: 6, t3: 6};
+  if (kind === "ms" || kind === "msd") return {hA: "90 Deg", hG: "Straight", hF: "90 Deg", ...t, a1: 0.22, a2: 0.22, a3: 0.2, p1: "100%", p2: "100%", p3: "100%", g1: 0, g2: 0.15, g3: 0.2, q1: "50%", q2: "50%", q3: "50%", f1: etqL(6), f2: etqL(6)};
+  const a = {cs: 0.3, csd: 0.33, sb: 0.25}[kind];
+  return {hA: "90 Deg", hB: "90 Deg", hG: "Straight", hF: "90 Deg", ...t, a1: a, a2: a, a3: a, p1: "50%", p2: "50%", p3: "50%", b1: 0.2, b2: 0.2, b3: 0.2, f1: etqL(6)};
+}
+function etqStrip(pref) { const o = {}; ["A", "B", "C", "D", "F", "G"].forEach(c => o[c] = {small: "#4", large: "#9", pref: pref || "#5", minSp: etqL(3), maxSp: etqL(18), fac: 2.5}); return o; }
+function etqDefaults(form) {
+  const L = etqL;
+  if (form === "beam") return {
+    main: {curt: "computed", checkDev: false, detail: "all", typAll: true, topSize: "#5", topNum: "2", botSize: "#5", botNum: "2", typWhere: "required", enforce: false, minTop: 0.5, minBot: 0.5, minWhere: "required"},
+    dev: etqDev(),
+    curt: {mode: "seismic",
+      seismic: {base: "clear", hA: "90 Deg", hB: "90 Deg", hG: "Straight", hF: "90 Deg", A: 0.5, pA: "50%", C: 0.5, pC: "50%", B: 0.25, D: 0.25, G: 0.25, J: 0.3, F: 0.5, pF: "50%", H: 0.5, pH: "50%", minLen: L(36), maxLen: L(480), minSplice: L(24), spliceFac: 36, minimize: false},
+      non: {base: "clear", hA: "90 Deg", hB: "90 Deg", hF: "90 Deg", A: 0.25, pA: "100%", C: 0.3, pC: "50%", B: 0.2, D: 0.2, Fl: 0.13, G: 0.13, pG: "100%", Fr: 0.13, pFr: "100%", minLen: L(36), maxLen: L(480), minSplice: L(18), spliceFac: 24, minimize: false}},
+    sel: {mode: "seismic", seismic: etqBeamSel(), non: etqBeamSel()},
+    long: {how: "abs", maxSp: L(6), minSp: L(1), layerSp: L(1), rMax: 0, rMin: 0, rLayer: 0, minBars: "2", maxLayers: "4", webH: L(30), webFac: 1, webBar: "#4", skin: "Full Length", webSp: L(12)}};
+  if (form === "slab") return {
+    slab: {curt: "computedRules", alt: false, addDev: false, checkDev: false, ...etqTyp("#5", "#4"), open: true, openBar: "#4", openN: 2, openExt: L(24),
+      enforce: false, csTop: 0.18, csBot: 0.18, msTop: 0.18, msBot: 0.18, sbTop: 0.18, sbBot: 0.18, integ: true, integN: "2", integBar: "#8", integFac: 0.25,
+      waffle: true, wTopBar: "#3", wTopSp: L(12), wRibTop: "#4", wRibTopN: 2, wRibBot: "#5", wRibBotN: 2, wStir: true, wStirBar: "#3", wStirSp: L(9), combine: false, combineLen: L(100), drop: true, dropBar: "#4", dropSp: L(9)},
+    mat: {alt: false, addDev: false, ...etqTyp("#4", "#5"), enforce: false, top: 0.18, bot: 0.18, open: true, openBar: "#4", openN: 2, openExt: L(24)},
+    footing: {alt: false, addDev: true, ...etqTyp("#4", "#5"), enforce: false, top: 0.18, bot: 0.18},
+    dev: {slab: etqDev(), mat: etqDev(), footing: etqDev()},
+    curt: {base: "clear", cs: etqSlabCurt("cs"), csd: etqSlabCurt("csd"), ms: etqSlabCurt("ms"), msd: etqSlabCurt("msd"), sb: etqSlabCurt("sb")},
+    strip: {mode: "cs", cs: etqStrip(), ms: etqStrip(), sb: etqStrip()},
+    matStrip: {mode: "cs", cs: etqStrip(), ms: etqStrip(), sb: etqStrip()},
+    footSel: {top: {small: "#4", large: "#9", pref: "#6", minSp: L(3), maxSp: L(18), fac: 2.5}, bot: {small: "#4", large: "#9", pref: "#6", minSp: L(3), maxSp: L(18), fac: 2.5}}};
+  if (form === "column") {
+    const tie = (a, b, c, d, e, f) => ({small: a, large: b, pref: c, minSp: L(d), maxSp: L(e), fac: f}), conf = {colH: 0.17, secSize: 1, minLen: L(18), hoop: "Rectangle-135", internal: true, tieType: "L-Ties", every: "alternate"};
+    return {main: {vert: "section", keep: "keep", prefer: "number", tie: "auto"},
+      sel: {mode: "non", non: {vert: {small: "#4", large: "#9", pref: "#6", minN: 4, maxN: "-", minSp: L(3), maxSp: L(12)}, A: tie("#3", "#6", "#3", 4, 18, 1)},
+        seismic: {vert: {small: "#5", large: "#10", pref: "#6", minN: 4, maxN: "-", minSp: L(3), maxSp: L(12)}, A: tie("#3", "#6", "#3", 3, 6, 0.25), B: tie("#3", "#6", "#3", 3, 18, 0.5), C: tie("#3", "#6", "#3", 3, 6, 0.5)}},
+      conf: {seismic: {...conf}, non: {...conf}},
+      splice: {every: "Every Story", where: "At Floor Level", type: "Lap Splice", fac: 40, kicker: L(4), minLen: L(24)}};
+  }
+  if (form === "wall") {
+    const v = (a, b, c, d, f) => ({small: a, large: b, corner: c, middle: d, minSp: L(3), maxSp: L(18), fac: f}), t = (a, b, c, f) => ({small: a, large: b, pref: c, minSp: L(3), maxSp: L(18), fac: f});
+    return {main: {pier: "specified", zone: "specified", useBZ: true, ratio: 0.15, useCZ: true},
+      pier: {uv: v("#4", "#10", "#8", "#6", 1), ut: t("#3", "#8", "#4", 3), cv: v("#4", "#10", "#8", "#6", 3), ct: t("#3", "#6", "#4", 1)},
+      spandrel: {hz: {small: "#5", large: "#10", pref: "#8", minN: 2}, dg: {small: "#5", large: "#10", pref: "#8"}, web: {bar: "#4", minSp: L(6), maxSp: L(8)}, tie: {bar: "#4", minSp: L(4), maxSp: L(6)}, vert: {bar: "#4", minSp: L(4), maxSp: L(6), legs: "2"}}};
+  }
+  return {};
+}
+// A rule as the model holds it, over ETABS's defaults (so a value ETABS adds later still has its default).
+const etqMerge = (a, b) => { if (!b || typeof b !== "object" || Array.isArray(b)) return b === undefined ? a : b; const o = {...a}; for (const [k, v] of Object.entries(b)) o[k] = a && typeof a[k] === "object" && a[k] ? etqMerge(a[k], v) : v; return o; };
+const etqClone = o => JSON.parse(JSON.stringify(o));
+const etqGet = (o, p) => p.split(".").reduce((x, k) => x == null ? x : x[k], o);
+const etqSet = (o, p, v) => { const k = p.split("."), last = k.pop(); let x = o; for (const s of k) x = x[s] = x[s] && typeof x[s] === "object" ? x[s] : {}; x[last] = v; };
+async function etqLoad() {
+  const [r, dd] = await Promise.all([hmPost({tool: "detailing_rules", args: {}}).catch(() => null), hmPost({tool: "definition_data", args: {}}).catch(() => null)]);
+  etq.rules = r && r.ok && r.result ? r.result.rules || {} : etq.rules || {};
+  etq.bars = dd && dd.ok && dd.result ? (dd.result.rebar_sizes || []).map(b => ({name: b.name, d: +b.diameter})) : etq.bars;
+}
+const etqRule = form => etqMerge(etqDefaults(form), (etq.rules || {})[form]);
+async function etqSave(form, w) {
+  const j = await hmRun("set_detailing_rules", {form, values: JSON.stringify(w) === JSON.stringify(etqDefaults(form)) ? null : w}, true);
+  if (!j.ok) return j.error || "The rule was not kept.";
+  etq.rules = etq.rules || {}; etq.rules[form] = w; return "";
+}
+// The model's bar sizes; a default ETABS names in US bars (#5) is the model's nearest bar where the model has others.
+const etqUnitF = () => uLen[hmU().l] || 1;
+const etqBarList = () => etq.bars.length ? etq.bars.map(b => b.name) : etqUsBars;
+function etqBar(v) {
+  const list = etqBarList(); if (list.includes(v)) return v;
+  const m = /^#(\d+)$/.exec(v || ""); if (!m || !etq.bars.length) return v;
+  const want = +m[1] / 8 / 39.37008 * etqUnitF();
+  return etq.bars.reduce((b, x) => Math.abs(x.d - want) < Math.abs(b.d - want) ? x : b).name;
+}
+const etqFmt = (v, dec) => v === "" || v === null || v === undefined || !isFinite(+v) ? String(v ?? "") : dec === undefined || dec === "" ? String(+(+v).toPrecision(6)) : (+v).toFixed(+dec);
+// Fields: a number box (u "l" in the model's length unit), a drop-down, a bar size, a check box, a radio button.
+const etqN = (p, dec, u, w) => `<span class="etqNum"><input type="number" step="any" data-p="${p}" data-dec="${dec ?? ""}" ${u ? `data-u="l"` : ""} style="width:${w || 70}px">${u === "l" ? `<span class="etqU">${esc(hmU().l)}</span>` : ""}</span>`;
+const etqT = (p, w) => `<input data-p="${p}" data-t="1" style="width:${w || 70}px">`;
+const etqS = (p, list, w) => `<select data-p="${p}" style="width:${w || 80}px">${list.map(x => `<option>${esc(x)}</option>`).join("")}</select>`;
+const etqB = (p, w) => `<select data-p="${p}" data-bar="1" style="width:${w || 80}px">${etqBarList().map(x => `<option>${esc(x)}</option>`).join("")}</select>`;
+const etqC = (p, label) => `<label class="etqCk"><input type="checkbox" data-p="${p}">${label}</label>`;
+const etqR = (p, v, label) => `<label class="etqCk"><input type="radio" name="etq_${p.replace(/\W/g, "_")}" data-p="${p}" value="${v}">${label}</label>`;
+function etqFill(d, w) {
+  const f = etqUnitF();
+  d.querySelectorAll("[data-p]").forEach(el => {
+    const v = etqGet(w, el.dataset.p);
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.type === "radio") el.checked = el.value === v;
+    else if (el.dataset.bar) { const b = etqBar(v); if (![...el.options].some(o => o.value === b)) el.add(new Option(b, b)); el.value = b; }
+    else if (el.tagName === "SELECT") { if (![...el.options].some(o => o.value === String(v))) el.add(new Option(String(v), String(v))); el.value = String(v); }
+    else if (el.dataset.t) el.value = v ?? "";
+    // A length keeps ETABS's decimals in inches; in another unit as many as it needs (6 in = 152.4 mm = 0.1524 m).
+    else el.value = el.dataset.u === "l" ? etqFmt(+v * f, hmU().l === "in" ? el.dataset.dec : "") : etqFmt(v, el.dataset.dec);
+  });
+}
+function etqRead(d, w) {
+  const f = etqUnitF();
+  for (const el of d.querySelectorAll("[data-p]")) {
+    if (el.type === "radio") { if (el.checked) etqSet(w, el.dataset.p, el.value); continue; }
+    if (el.type === "checkbox") { etqSet(w, el.dataset.p, el.checked); continue; }
+    if (el.tagName === "SELECT" || el.dataset.t) { etqSet(w, el.dataset.p, el.value.trim()); continue; }
+    const v = parseFloat(el.value);
+    if (!isFinite(v) || v < 0) return "Each value must be a number of 0 or more.";
+    if (el.dataset.lo && (v < +el.dataset.lo * f || v > +el.dataset.hi * f)) return `Value must be in range ${etqFmt(el.dataset.lo * f)} ${hmU().l} & ${etqFmt(el.dataset.hi * f)} ${hmU().l}`;
+    etqSet(w, el.dataset.p, el.dataset.u === "l" ? +(v / f).toPrecision(12) : v);
+  }
+  return "";
+}
+function etqCss() {
+  if (document.getElementById("etqCss")) return;
+  const s = document.createElement("style"); s.id = "etqCss";
+  s.textContent = `.dlg .etqCk{display:flex;align-items:center;gap:5px;white-space:nowrap;margin:5px 0}.dlg fieldset button{white-space:nowrap}.dlg .etqNum{display:inline-flex;align-items:center;gap:5px}.dlg .etqU{color:var(--mute)}
+.dlg .etqG{display:grid;gap:6px 10px;align-items:center}.dlg .etqIn{padding-left:22px}.dlg .etqBox{border:1px solid var(--line);padding:8px;margin:4px 0}
+.dlg .etqPic{position:relative;font-size:12px}.dlg .etqPic > *{position:absolute}.dlg .etqPic > span,.dlg .etqPic > b{margin-top:-11px}.dlg .etqPic svg{left:0;top:0}.dlg .etqPic .etqNum input{width:52px}.dlg .etqPic select{width:68px}.dlg .etqBl{color:#1a1a9c}
+.dlg table.etqT{border-collapse:collapse;width:100%;font-size:12px}.dlg table.etqT th{background:#bcdcf4;color:#000;border:1px solid #444;font-weight:400;padding:3px}.dlg table.etqT td{border:1px solid #444;padding:0;height:22px;text-align:center;background:#fff;color:#000}
+.dlg table.etqT td.etqL{background:#d4d4d4;text-align:left;padding-left:14px}.dlg table.etqT tr.etqH td{background:#d4d4d4;font-weight:700;text-align:left;padding-left:3px}.dlg table.etqT tr.etlH1 td{background:#0a78d7;color:#fff;font-weight:700;text-align:left;padding-left:3px}
+.dlg table.etqT td.etqX{background:#d4d4d4}.dlg table.etqT input,.dlg table.etqT select{width:100%;border:0;background:transparent;text-align:center;text-align-last:center;color:#000;height:21px}
+.dlg .etqTabs{display:flex;gap:0;align-items:center}.dlg .etqTabs button{border:1px solid transparent;background:none;color:#1a1a9c;padding:2px 6px}.dlg .etqTabs button.on{border-color:#3a8ee6;background:#9fd0f5}.dlg .etqTabs i{border-left:1px solid #999;height:14px}
+.dlg .etqLink{color:#06c;text-decoration:underline;cursor:pointer;background:none;border:0;padding:0}.dlg .etqPrev{border:1px solid var(--line);background:#fff;margin-top:8px}.dlg .etqTool{display:flex;gap:6px;align-items:center;padding:4px;font-size:12px}.dlg .etqTool button{padding:0 4px}`;
+  document.head.appendChild(s);
+}
+// A rule form: its working copy w (all its sub-forms' values too); fill, the enabling of its parts, OK keeps it.
+function etqForm(title, html, w, sync, ok, opts) {
+  etqCss();
+  const d = dialog(title, html, [["OK", x => {
+    const e = etqRead(x, w); if (e) { formError(x, e); return false; }
+    const r = ok(x); if (r && r.then) { r.then(v => { if (v !== false) x.close(); }); return false; } return r;
+  }], ["Cancel"]], {width: opts.width});
+  if (opts.dfInto) dfInto(d, opts.dfInto, true);
+  d.etqW = w;
+  etqFill(d, w);
+  const run = () => { if (sync) sync(d); };
+  d.querySelectorAll("[data-p]").forEach(el => el.addEventListener("change", () => { if (el.type === "radio" || el.type === "checkbox") etqSet(w, el.dataset.p, el.type === "checkbox" ? el.checked : el.value); run(); }));
+  run();
+  return d;
+}
+const etqOff = (d, sel, off) => d.querySelectorAll(sel).forEach(el => { el.querySelectorAll("input,select,button").forEach(i => i.disabled = off); el.style.opacity = off ? 0.55 : ""; });
+// A sub-form: it edits the part of the rule form's copy it is given; OK puts its values back.
+function etqSub(title, html, w, sync, width, after) {
+  const part = etqClone(w);
+  return etqForm(title, html, part, sync, x => { Object.keys(w).forEach(k => delete w[k]); Object.assign(w, part); if (after) after(x); }, {width});
+}
+const etqRows = (pairs, cols) => `<div class="etqG" style="grid-template-columns:${cols || "1fr auto"}">${pairs.map(([a, b]) => `<span>${a}</span>${b}`).join("")}</div>`;
+// A table of rules, as ETABS's grids: a blue header row, grey item names, grey cells where the column has no value.
+function etqTable(w, cols, rows, base, colW) {
+  const head = `<tr><th>Item</th>${cols.map(c => `<th style="width:${colW || 40}px">${esc(c[1])}</th>`).join("")}</tr>`;
+  return `<table class="etqT">${head}${rows.map(r => {
+    if (typeof r === "string") return `<tr class="${r.startsWith("!") ? "etlH1" : "etqH"}"><td>${esc(r.replace(/^!/, ""))}</td>${cols.map(() => "<td></td>").join("")}</tr>`;
+    const [k, label, kind, dec] = r;
+    return `<tr><td class="etqL">${esc(label)}</td>${cols.map(([c]) => {
+      const p = base ? `${base}.${c}.${k}` : `${c}.${k}`; if (etqGet(w, p) === undefined) return `<td class="etqX"></td>`;
+      return `<td>${kind === "bar" ? etqB(p) : kind === "sel" ? etqS(p, r[4]) : kind === "text" ? etqT(p) : etqN(p, dec, kind === "l" ? "lt" : "")}</td>`;
+    }).join("")}</tr>`;
+  }).join("")}</table>`;
+}
+// In a table the unit is in the item's name, as ETABS writes "(in)": lengths there are data-u "lt", read as lengths.
+const etqUnitRows = s => s.replace(/data-u="lt"/g, 'data-u="l"');
+const etqUl = () => esc(hmU().l);
+
+// ---- the menu ----
+function etqDesignHas(k, kind) { return typeof design !== "undefined" && design.some(f => f.key === k && f.list.some(i => !kind || i.objs.some(o => o.kind === kind))); }
+function etqDesigned(kind) {
+  return {beam: etqDesignHas("concrete", "beam"), slab: etqDesignHas("slab"), column: etqDesignHas("concrete", "column"), wall: etqDesignHas("pier"), sbeam: etqDesignHas("steel", "beam"), scolumn: etqDesignHas("steel", "column")}[kind];
+}
+function etqDetailingMenu() {
+  const run = (k, w) => [`Run/Update ${w} Detailing/Check`, "m:etq:run:" + k, "", !etqDesigned(k)];
+  const show = (k, w) => [`Show/Edit ${w} Detailing...`, "m:etq:show:" + k, "", !etq.done[k]];
+  const clear = (k, w) => [`Clear ${w} Detailing...`, "m:etq:clear:" + k, "", !etq.done[k]];
+  const conc = [["beam", "Beam"], ["slab", "Slab/Mat/Footing"], ["column", "Column Stack"], ["wall", "Wall Stack"]], steel = [["sbeam", "Beam"], ["scolumn", "Column Stack"]];
+  const any = Object.keys(etq.done).length > 0;
+  return [["Bar Selection and Curtailment Rule", [["Beam Bar Selection and Curtailment Rule...", "m:etq:beam"], ["Slab/Mat/Footing Bar Selection and Curtailment Rule...", "m:etq:slab"], ["Column Stack Bar Selection and Curtailment Rule...", "m:etq:column"], ["Wall Stack Bar Selection and Curtailment Rule...", "m:etq:wall"]]], 0,
+    ["Clear Detailing...", "m:etq:clearAll"], 0,
+    ["Concrete Detailing", [...conc.map(([k, w]) => run(k, w)), 0, ...conc.map(([k, w]) => show(k, w)), 0, ...conc.map(([k, w]) => clear(k, w))]], 0,
+    ["Steel Detailing", [...steel.map(([k, w]) => run(k, w)), 0, ...steel.map(([k, w]) => show(k, w)), 0, ...steel.map(([k, w]) => clear(k, w))]], 0,
+    ["Drawing Management", [["Drawing Sheet Setup...", "m:etq:sheet"], ["Drawing Format Properties...", "m:etq:format"], 0, ["Open Drawing Manager...", "m:etq:manager"], 0, ["Clear Drawing Manager...", "m:etq:clearManager"]]], 0,
+    ["Generate/Show Beam Groups...", "m:etq:groups", "", !etq.done.beam], 0,
+    ["DetailingComments and Log...", "m:etq:log", "", !any],
+    0, ["Engine Extras", detailingItems()]];
+}
+async function etqAct(a) {
+  const [what, k] = a.split(":");
+  if (["beam", "slab", "column", "wall"].includes(what)) { await etqLoad(); return ({beam: etqBeamForm, slab: etqSlabForm, column: etqColumnForm, wall: etqWallForm})[what](); }
+  if (what === "sheet") return typeof etlSheetSetupForm === "function" ? etlSheetSetupForm() : hmSay("Drawing Sheet Setup is being made identical to ETABS's form.", true);
+  if (what === "format") return typeof etlDrawingFormatForm === "function" ? etlDrawingFormatForm() : hmSay("Drawing Format Properties is being made identical to ETABS's form.", true);
+  if (what === "run") return etqRun(k);
+  if (what === "show") { const s = {beam: "beam", slab: "slab", column: "column", wall: "pier", sbeam: "steel", scolumn: "steel"}[k]; return openSchedule(s); }
+  if (what === "clear") return etqConfirm(`Clear ${etqKinds[k]} Detailing`, `Clear the ${({sbeam: "steel beam", scolumn: "steel column stack"})[k] || "concrete " + etqKinds[k].toLowerCase()} detailing and its drawings?`, () => etqClear([k]));
+  if (what === "clearAll") return etqConfirm("Clear Detailing", "Clear all detailing and its drawings?", () => etqClear(Object.keys(etqKinds)));
+  if (what === "manager") return etqManager();
+  if (what === "clearManager") return etqConfirm("Clear Drawing Manager", "Clear all drawings from the drawing manager?", () => { etq.drawings = []; hmSay("The drawing manager is clear."); });
+  if (what === "groups") return etqGroups();
+  if (what === "log") return etqLogForm();
+}
+function etqConfirm(title, text, yes) { return dialog(title, `<p style="max-width:380px">${esc(text)}</p>`, [["OK", () => { yes(); }], ["Cancel"]], {width: 420}); }
+function etqRun(k) {
+  if (!etqDesigned(k)) return hmSay("Run the design first: detailing is made from the design results.", true);
+  const fam = {beam: "concrete", slab: "slab", column: "concrete", wall: "pier", sbeam: "steel", scolumn: "steel"}[k], kind = {beam: "beam", column: "column", sbeam: "beam", scolumn: "column"}[k];
+  const f = design.find(x => x.key === fam), n = f ? f.list.filter(i => !kind || i.objs.some(o => o.kind === kind)).length : 0;
+  const name = ({sbeam: "Steel Beam", scolumn: "Steel Column Stack"})[k] || "Concrete " + etqKinds[k];
+  etq.done[k] = {at: Date.now(), n};
+  etq.drawings = etq.drawings.filter(x => x.k !== k).concat([{k, name: name + " Schedule", n}]);
+  etq.log.push(`${new Date().toLocaleString("en-US")}  ${name} detailing: ${n} ${k === "wall" ? "piers" : "members"} from the design results, with the ${({sbeam: "beam", scolumn: "column"})[k] || k} bar selection and curtailment rule.`);
+  hmSay(`${name} detailing done: ${n} ${k === "wall" ? "piers" : "members"}.`);
+}
+function etqClear(kinds) { kinds.forEach(k => delete etq.done[k]); etq.drawings = etq.drawings.filter(x => !kinds.includes(x.k)); etq.log.push(`${new Date().toLocaleString("en-US")}  Cleared: ${kinds.map(k => etqKinds[k]).join(", ")}.`); hmSay("Detailing cleared."); }
+function etqManager() {
+  const d = dialog("Drawing Manager", `<div style="height:220px;overflow:auto;border:1px solid var(--line);background:var(--field)"><table class="list" style="width:100%"><tr><th>Drawing</th><th>Members</th></tr>${etq.drawings.map((x, i) => `<tr data-i="${i}"><td>${esc(x.name)}</td><td class="r">${x.n}</td></tr>`).join("") || `<tr><td colspan="2" class="kv">No drawings yet: run a detailing (Detailing &gt; Concrete Detailing or Steel Detailing).</td></tr>`}</table></div>`, [["Close"]], {width: 460});
+  d.querySelectorAll("[data-i]").forEach(tr => tr.ondblclick = () => etqAct("show:" + etq.drawings[+tr.dataset.i].k));
+  return d;
+}
+function etqGroups() {
+  const f = design.find(x => x.key === "concrete"), groups = new Map();
+  for (const it of (f ? f.list : []).filter(i => i.objs.some(o => o.kind === "beam"))) { const s = (it.objs[0] || {}).section || ""; if (!groups.has(s)) groups.set(s, []); groups.get(s).push(it.label + " (" + it.story + ")"); }
+  return dialog("Beam Groups", `<div style="max-height:320px;overflow:auto"><table class="list" style="width:100%"><tr><th>Group</th><th>Section</th><th>Beams</th></tr>${[...groups].map(([s, l], i) => `<tr><td>BG${i + 1}</td><td>${esc(s)}</td><td>${esc(l.join(", "))}</td></tr>`).join("")}</table></div>`, [["Close"]], {width: 620});
+}
+function etqLogForm() { return dialog("Detailing Comments and Log", `<textarea readonly style="width:100%;height:260px;font-family:Consolas,monospace;font-size:12px">${esc(etq.log.join("\n"))}</textarea>`, [["Close"]], {width: 640}); }
+
+// ---- Concrete Beam: Bar Selection and Curtailment Rule ----
+function etqBeamForm() {
+  const w = etqRule("beam"), m = "main";
+  const html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <fieldset><legend>Rebar Curtailment Options</legend>
+      ${etqR(m + ".curt", "rules", "Use Curtailment Rules Only")}${etqR(m + ".curt", "computed", "Use Computed Reinforcement and Curtailment Rules")}<div class="etqIn" id="etqCD">${etqC(m + ".checkDev", "Check Development Length")}</div>
+      <div style="display:flex;gap:40px;margin:22px 0 40px 22px"><button id="etqDev" style="width:140px">Development Length...</button><button id="etqCur" style="width:140px">Curtailment Rules...</button></div></fieldset>
+    <fieldset><legend>Rebar Detail Options</legend>
+      <div style="display:flex;gap:16px">${etqR(m + ".detail", "all", "Detail All Bars")}${etqR(m + ".detail", "above", "Detail Bars Above Typical Bars ( For NonDuctile Only )")}</div>
+      <fieldset id="etqTyp" style="margin:6px 4px 0"><legend>Typical Bars</legend>${etqR(m + ".typAll", "true", "Apply to All Floors")}
+        <div class="etqBox" style="margin:6px 0">${etqRows([["Top Bars, Bar Size", etqB(m + ".topSize", 72)], ["Number", etqS(m + ".topNum", etqNums, 58)], ["Bottom Bars, Bar Size", etqB(m + ".botSize", 72)], ["Nubmer", etqS(m + ".botNum", etqNums, 58)]], "1fr auto 60px auto")}</div>
+        <div style="display:flex;gap:40px">${etqR(m + ".typWhere", "required", "Only Where Required")}${etqR(m + ".typWhere", "full", "Along Full Length")}</div></fieldset></fieldset>
+    <fieldset><legend>${etqC(m + ".enforce", "Enforce User Minimum Reinforcement")}</legend><div id="etqMin" style="display:grid;grid-template-columns:60px 120px 1fr;gap:6px 8px;align-items:center">
+      <span>Top</span><span>${etqN(m + ".minTop", 2)} %</span>${etqR(m + ".minWhere", "required", "Only Where Required")}<span>Bottom</span><span>${etqN(m + ".minBot", 2)} %</span>${etqR(m + ".minWhere", "full", "Along Full Length")}</div></fieldset>
+    <fieldset><legend>&nbsp;</legend><div style="display:flex;gap:24px;justify-content:center;margin-top:10px"><button id="etqSel" style="width:180px">Rebar Selection Rules...</button><button id="etqLong" style="width:180px">Longitudinal Rebars in Section ...</button></div></fieldset></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px"><button id="etqDef" style="width:160px">Set to Default Values</button><div id="etqOk"></div></div>`;
+  // ETABS 23.2 sets the typical-bar "Apply to All Floors" radio as its one choice: kept as a string for the radio.
+  w.main.typAll = String(w.main.typAll);
+  const d = etqForm("Concrete Beam: Bar Selection and Curtailment Rule", html, w, d => {
+    etqOff(d, "#etqCD", w.main.curt !== "computed"); etqOff(d, "#etqTyp", w.main.detail !== "above"); etqOff(d, "#etqMin", !w.main.enforce);
+  }, async x => { w.main.typAll = true; const e = await etqSave("beam", w); if (e) { formError(x, e); return false; } hmSay("The beam bar selection and curtailment rule is set."); }, {width: 960, dfInto: "#etqOk"});
+  etqWire(d, "beam", w, {"#etqDev": () => etqDevForm(w.dev), "#etqCur": () => etqBeamCurt(w.curt), "#etqSel": () => etqBeamSelForm(w.sel), "#etqLong": () => etqLongForm(w.long)});
+  return d;
+}
+// The rule form's buttons; Set to Default Values puts ETABS's defaults in the form and in every sub-form.
+function etqWire(d, form, w, buttons) {
+  for (const [sel, f] of Object.entries(buttons)) { const b = q(d, sel); if (b) b.onclick = e => { e.preventDefault(); f(); }; }
+  const def = q(d, "#etqDef");
+  if (def) def.onclick = () => { const n = etqDefaults(form); Object.keys(w).forEach(k => delete w[k]); Object.assign(w, n); for (const x of Object.values(w)) if (x && "typAll" in x) x.typAll = String(x.typAll); etqFill(d, w); d.querySelectorAll("[data-p]")[0].dispatchEvent(new Event("change")); };
+}
+function etqDevForm(w) {
+  return etqSub("Bar Development Rules", `<div class="etqBox" style="padding:12px"><div style="display:grid;grid-template-columns:auto 110px auto 110px;gap:14px 18px;align-items:center">
+    <span>Method</span>${etqS("method", ["ACI"], 100)}<span></span><span></span><span>Bar Coating Type</span>${etqS("coating", ["Uncoated", "Epoxy Coated", "Zinc and Epoxy Dual Coated"], 100)}<span>Concrete Type</span>${etqS("concrete", ["Normal Weight", "Lightweight"], 100)}</div></div>`, w, null, 500);
+}
+const etqBeamNotes = {seismic: ["1. SEE BEAM SCHEDULE FOR STIRRUP TYPE AND SPACING.", "2. ZONE A LENGTH SHALL BE TWICE THE BEAM DEPTH, H.", "3. THE FIRST STIRRUP IN ZONE A SHALL BE LOCATED 2\" MAXIMUM FROM THE FACE OF THE SUPPORT.", "4. LAP SPLICES SHALL NOT BE LOCATED WITHIN THE BEAM/COLUMN JOINT, NOR WITHIN A DISTANCE OF 2H.", "5. LAP SPLICE LENGTH SHALL NOT BE LESS THAN 12\"."], non: ["1. SEE BEAM SCHEDULE FOR STIRRUP TYPE AND SPACING."]};
+// The Typical Beam Elevation ETABS draws under its curtailment rules: spans, bars, stirrup zones A to E, the notes.
+function etqBeamElev(spans, mode, v) {
+  const W = 360, x0 = 20, y = 50, h = 30, sw = W / spans, out = [];
+  out.push(`<line x1="${x0}" y1="10" x2="${x0 + W}" y2="10" stroke="#000"/><text x="${x0 + W / 2}" y="8" font-size="7" text-anchor="middle">${v.base === "cc" ? "Lc" : "Ln"}</text>`);
+  for (let s = 0; s <= spans; s++) { const x = x0 + s * sw; out.push(`<line x1="${x - 4}" y1="${y - 20}" x2="${x - 4}" y2="${y + h + 20}" stroke="#000" stroke-width=".6"/><line x1="${x + 4}" y1="${y - 20}" x2="${x + 4}" y2="${y + h + 20}" stroke="#000" stroke-width=".6"/>`); }
+  out.push(`<rect x="${x0}" y="${y}" width="${W}" height="${h}" fill="none" stroke="#00008b" stroke-width="1.4" rx="4"/>`);
+  for (let s = 0; s < spans; s++) {
+    const a = x0 + s * sw, zone = sw * 0.18;
+    for (let x = a + 6; x < a + sw - 4; x += (x < a + zone || x > a + sw - zone) ? 3 : 9) out.push(`<line x1="${x}" y1="${y + 2}" x2="${x}" y2="${y + h - 2}" stroke="#00008b" stroke-width=".7"/>`);
+    ["ZONE A", "ZONE B", "ZONE C", "ZONE D", "ZONE E"].forEach((z, i) => out.push(`<text x="${a + sw * [0.09, 0.26, 0.5, 0.74, 0.91][i]}" y="${y + h + 32}" font-size="5.5" text-anchor="middle">${z}</text>`));
+    const tl = (v.A || 0.25) * sw, tr = (v.C || 0.3) * sw;
+    out.push(`<line x1="${a + 2}" y1="${y + 6}" x2="${a + tl}" y2="${y + 6}" stroke="#00008b" stroke-width="1.6"/><line x1="${a + sw - tr}" y1="${y + 6}" x2="${a + sw - 2}" y2="${y + 6}" stroke="#00008b" stroke-width="1.6"/>`);
+  }
+  out.push(`<text x="${x0 + W / 2}" y="${y - 8}" font-size="5.5" text-anchor="middle">BEAM HEIGHT</text>`);
+  etqBeamNotes[mode].forEach((n, i) => out.push(`<text x="${x0}" y="${y + h + 48 + i * 7}" font-size="4.8">${i ? "" : "NOTES:  "}${esc(n)}</text>`));
+  out.push(`<circle cx="${x0 + 6}" cy="${y + h + 96}" r="6" fill="none" stroke="#000"/><text x="${x0 + 18}" y="${y + h + 96}" font-size="7" font-weight="700">Typical Beam Elevation 1</text><line x1="${x0 + 12}" y1="${y + h + 99}" x2="${x0 + W}" y2="${y + h + 99}" stroke="#000"/>`);
+  return `<svg viewBox="0 0 400 190" width="100%" height="100%">${out.join("")}</svg>`;
+}
+function etqPreview(id) {
+  return `<div class="etqPrev"><div class="etqTool"><button data-z="fit" title="Zoom to fit">&#x26F6;</button><button data-z="1.25" title="Zoom in">&#x2295;</button><button data-z="0.8" title="Zoom out">&#x2296;</button><button data-z="pan" title="Pan">&#x270B;</button>
+    ${id === "beam" ? `<button class="etqLink" data-sp="1" style="text-decoration:none;color:inherit">Single Span</button><button class="etqLink" data-sp="2" style="text-decoration:none;color:inherit">Double Span</button><button class="etqLink" data-sp="3" style="text-decoration:none;color:inherit">Multiple Span</button>` : ""}</div>
+    <div class="etqPv" style="height:260px;overflow:hidden;display:flex;justify-content:center"><div class="etqPvIn" style="width:560px;transform-origin:50% 0"></div></div></div>`;
+}
+function etqPreviewWire(d, draw) {
+  let z = 1, spans = 1;
+  const paint = () => { q(d, ".etqPvIn").innerHTML = draw(spans); q(d, ".etqPvIn").style.transform = `scale(${z})`; };
+  d.querySelectorAll("[data-z]").forEach(b => b.onclick = () => { if (b.dataset.z === "fit") z = 1; else if (b.dataset.z !== "pan") z = Math.max(0.4, Math.min(4, z * +b.dataset.z)); paint(); });
+  d.querySelectorAll("[data-sp]").forEach(b => b.onclick = () => { spans = +b.dataset.sp; paint(); });
+  d.addEventListener("change", paint); paint();
+}
+// Rebar Curtailment Rules: ETABS's drawing of the bars with each cut-off length beside its bar (pictures 1 seismic, 2 non seismic).
+function etqBeamCurt(w) {
+  const part = etqClone(w), seis = "seismic", non = "non";
+  const top = (p, x, y, label, unit) => `<span style="left:${x - 15}px;top:${y + 3}px">${label || ""}</span><span style="left:${x}px;top:${y}px">${etqN(p, 2)} <span class="etqBl" style="position:static">x ${unit || "Ln"}</span></span>`;
+  const sel = (p, list, x, y) => `<span style="left:${x}px;top:${y}px">${etqS(p, list)}</span>`;
+  const ln = (x1, y1, x2, y2, c) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c || "#00008b"}" stroke-width="${c ? 1 : 2}"/>`;
+  const sup = `${ln(124, 5, 124, 240, "#888")}${ln(137, 5, 137, 240, "#888")}${ln(150, 5, 150, 240, "#888")}<line x1="497" y1="5" x2="497" y2="240" stroke="#999" stroke-dasharray="4 3"/><line x1="512" y1="5" x2="512" y2="240" stroke="#999" stroke-dasharray="4 3"/><line x1="527" y1="5" x2="527" y2="240" stroke="#999" stroke-dasharray="4 3"/>`;
+  const s = "seismic.", n = "non.";
+  const seisPic = `<div class="etqPic" data-mode="seismic" style="height:240px;width:800px"><svg width="800" height="240">${sup}${ln(124, 32, 305, 32)}${ln(124, 32, 124, 60)}${ln(139, 100, 265, 100)}${ln(139, 100, 139, 125)}${ln(357, 32, 657, 32)}${ln(396, 100, 617, 100)}
+      ${ln(14, 107, 797, 107, "#888")}${ln(139, 153, 265, 153)}${ln(124, 181, 305, 181)}${ln(124, 155, 124, 181)}${ln(396, 153, 617, 153)}${ln(357, 181, 657, 181)}</svg>
+    <b style="left:24px;top:18px;font-weight:400">Top bars</b>${sel(s + "hA", etqHooks, 40, 43)}${sel(s + "hB", etqHooks, 40, 73)}
+    ${top(s + "A", 210, 16, "A")}${sel(s + "pA", etqPct, 212, 54)}${top(s + "B", 210, 84, "B")}${top(s + "C", 477, 16, "C")}${sel(s + "pC", etqPct, 477, 54)}${top(s + "D", 477, 84, "D")}
+    <b style="left:24px;top:128px;font-weight:400">Bottom bars</b>${sel(s + "hG", etqHooks, 40, 148)}${sel(s + "hF", etqHooks, 40, 180)}
+    ${top(s + "G", 210, 138, "G")}${top(s + "J", 477, 134, "J")}${top(s + "F", 210, 170, "F")}${top(s + "H", 477, 170, "H")}${sel(s + "pF", etqPct, 212, 206)}${sel(s + "pH", etqPct, 477, 206)}</div>`;
+  const nonPic = `<div class="etqPic" data-mode="non" style="height:250px;width:800px"><svg width="800" height="250">${sup}${ln(124, 56, 287, 56)}${ln(124, 56, 124, 84)}${ln(287, 62, 382, 62)}${ln(372, 56, 639, 56)}${ln(139, 121, 252, 121)}${ln(139, 121, 139, 148)}${ln(407, 121, 605, 121)}
+      ${ln(14, 134, 797, 134, "#888")}${ln(222, 166, 420, 166)}${ln(592, 166, 797, 166)}${ln(124, 193, 797, 193)}${ln(124, 166, 124, 193)}</svg>
+    <b style="left:24px;top:18px;font-weight:400">Top bars</b>${sel(n + "hA", etqHooks, 40, 39)}${sel(n + "hB", etqHooks, 40, 105)}
+    ${top(n + "A", 210, 39, "A")}${sel(n + "pA", etqPct, 212, 78)}<span class="etqBl" style="left:333px;top:52px">E</span>${top(n + "C", 477, 39, "C")}${sel(n + "pC", etqPct, 477, 78)}${top(n + "B", 210, 105, "B")}${top(n + "D", 477, 105, "D")}
+    <b style="left:24px;top:154px;font-weight:400">Bottom bars</b>${sel(n + "hF", etqHooks, 40, 200)}<span style="left:195px;top:184px">F</span>
+    ${top(n + "Fl", 210, 150, "", "Lc")}${top(n + "G", 477, 150, "G")}${top(n + "Fr", 647, 150, "", "Lc")}${sel(n + "pG", etqPct, 477, 183)}${sel(n + "pFr", etqPct, 647, 183)}</div>`;
+  const lengths = m => `<fieldset data-mode="${m}"><legend>Curtail based on</legend>${etqR(m + ".base", "clear", "Clear Span, Ln")}${etqR(m + ".base", "cc", "C/C Span, Lc")}
+    <fieldset style="margin-top:${m === seis ? 14 : 22}px"><legend>Bar Lengths</legend>${etqRows([[m === seis ? "Minimum Bar Length" : "Minimum Length", etqN(m + ".minLen", 1, "l", 80)], [m === seis ? "Maximum Bar Length" : "Maximum Length", etqN(m + ".maxLen", 1, "l", 80)], ["Minimum Splice Length", etqN(m + ".minSplice", 1, "l", 80)], ["Splice length, factor of Bar Dia", etqN(m + ".spliceFac", 2, "", 80)]])}
+    <div style="margin-top:6px">${etqC(m + ".minimize", "Minimize Splices")}</div></fieldset></fieldset>`;
+  const html = `<div style="display:flex;gap:16px;margin:0 0 8px 8px">${etqR("mode", seis, "Seismic Detailing")}${etqR("mode", non, "Non Seismic Detailing")}</div>
+    <div style="display:grid;grid-template-columns:820px 1fr;gap:10px"><fieldset><legend>Curtailment Rules</legend>${seisPic}${nonPic}</fieldset><div>${lengths(seis)}${lengths(non)}</div></div>${etqPreview("beam")}`;
+  const d = etqForm("Rebar Curtailment Rules", html, part, d => d.querySelectorAll("[data-mode]").forEach(x => x.style.display = x.dataset.mode === part.mode ? "" : "none"),
+    () => { Object.assign(w, part); }, {width: 1240});
+  etqPreviewWire(d, spans => { etqRead(d, part); return etqBeamElev(spans, part.mode, part[part.mode]); });
+  return d;
+}
+function etqBeamSelForm(w) {
+  const part = etqClone(w), barCols = ["A", "B", "C", "D", "F", "G", "H", "J"].map(c => [c, c]), zones = ["A", "B", "C", "D", "E"].map(c => [c, "Zone " + c]), U = etqUl();
+  const table = m => `<div data-mode="${m}"><fieldset><legend>Bar Size</legend>${etqTable(part, barCols, ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Bar Numbers", ["minN", "Minimum Number of Bars", "n"], ["maxN", "Maximum Number of Bars", "n"]], m + ".bar")}</fieldset>
+    <fieldset><legend>Stirrups Legs</legend><div style="max-height:330px;overflow-y:auto">${etqUnitRows(etqTable(part, zones, ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Spacing",
+      ["minSp", `Minimum Spacing (${U})`, "l"], ["maxSp", `Maximum Spacing (${U})`, "l"], ["maxSpD", "Maximum Spacing (Factor of beam depth)", "n"], ["maxSpM", "Maximum Spacing (Factor of main bar dia)", "n"], ["maxSpT", "Maximum Spacing (Factor of tie dia)", "n"], "Stirrups Legs",
+      ["minLeg", "Minimum Number of Legs", "n"], ["maxLeg", "Maximum Number of Legs", "n"], ["legSp", "Maximum Spacing of Legs", "n"], ["legSpW", "Maximum Spacing of Legs (Factor of beam web width)", "n", 1], ["legSpM", "Maximum Spacing of Legs (Factor of main bar dia)", "n"], ["legSpT", "Maximum Spacing of Legs (Factor of tie bar dia)", "n"], "Others",
+      ["type", "Stirrup Type", "sel", "", ["90 Deg", "135 Deg", "180 Deg"]], ["zoneLen", "Zone Length (Factor of beam height)", "n"]], m + ".stir", 60))}</div></fieldset></div>`;
+  const d = etqForm("Rebar Selection Rules", `<div style="display:flex;gap:16px;margin:0 0 6px 6px">${etqR("mode", "seismic", "Seismic Detailing")}${etqR("mode", "non", "Non Seismic Detailing")}</div>${table("seismic")}${table("non")}
+    <div style="margin-top:8px"><button class="etqLink" id="etqElev">Click to see Typical Beam Elevations</button></div>`, part,
+    d => d.querySelectorAll("[data-mode]").forEach(x => x.style.display = x.dataset.mode === part.mode ? "" : "none"), () => { Object.assign(w, part); }, {width: 860});
+  q(d, "#etqElev").onclick = () => { const e = dialog("Typical Beam Elevations", `<div style="width:640px;height:300px">${etqBeamElev(1, part.mode, {base: "clear", A: 0.25, C: 0.3})}</div>`, [["Close"]], {width: 680}); return e; };
+  return d;
+}
+function etqLongForm(w) {
+  return etqSub("Longitudinal Rebars in Sections", `<fieldset><legend>Longitudinal Rebar Layout in Section</legend><div style="display:grid;grid-template-columns:210px 190px 1fr;gap:8px 14px;align-items:center">
+      <span></span>${etqR("how", "abs", "Absolute")}${etqR("how", "rel", "Relative to Largest Bar Dia")}
+      <span>Maximum Bar Spacing, x</span><span class="etqA">${etqN("maxSp", 1, "l", 120)}</span><span class="etqRl">${etqN("rMax", "", "", 120)}</span>
+      <span>Minimum Bar Spacing, x</span><span class="etqA">${etqN("minSp", 1, "l", 120)}</span><span class="etqRl">${etqN("rMin", "", "", 120)}</span>
+      <span>Spacing Between Layers, y1</span><span class="etqA">${etqN("layerSp", 1, "l", 120)}</span><span class="etqRl">${etqN("rLayer", "", "", 120)}</span>
+      <span>Minimum Number of Bars in each Layer</span>${etqS("minBars", etqNums, 135)}<span></span><span>Maximum Number of Layers</span>${etqS("maxLayers", etqNums, 135)}<span></span></div></fieldset>
+    <fieldset><legend>Additional Bars in Beam Web</legend><div style="display:grid;grid-template-columns:210px 190px 140px 1fr;gap:8px 14px;align-items:center">
+      <span>Provided for Beam Depth Greater Than, h</span>${etqN("webH", 1, "l", 120)}<span>Factor of Beam Height, h</span>${etqN("webFac", 2, "", 120)}
+      <span>Bar Size</span>${etqB("webBar", 135)}<span>Placement of Skin Bars</span>${etqS("skin", ["Full Length", "Only Where Required"], 135)}
+      <span>Maximum Bar Spacing, s</span>${etqN("webSp", 1, "l", 120)}<span></span><span></span></div></fieldset><p style="margin:6px 0 0">Note: These rules may not be satisfied in all conditions</p>`, w,
+    d => { etqOff(d, ".etqA", q(d, "[data-p=how][value=rel]").checked); etqOff(d, ".etqRl", q(d, "[data-p=how][value=abs]").checked); }, 760);
+}
+
+// ---- Slab/Mat/Footing: Bar Selection and Curtailment Rule ----
+function etqTypBars(p) {
+  return `<fieldset style="margin-top:6px" class="etqTypB"><legend>Typical Bars</legend>${etqR(p + ".typAll", "true", "Apply to All Floors")}<div class="etqBox" style="display:grid;grid-template-columns:170px 100px 100px;gap:8px 4px;align-items:center;margin-top:6px">
+    <span></span><span>Along Layer-A</span><span>Along Layer-B</span><span>Top Bars, Bar Size</span>${etqB(p + ".topA", 60)}${etqB(p + ".topB", 60)}<span>Spacing</span>${etqN(p + ".topSpA", 1, "l", 62)}${etqN(p + ".topSpB", 1, "l", 62)}
+    <span>Bottom Bars, Bar Size</span>${etqB(p + ".botA", 60)}${etqB(p + ".botB", 60)}<span>Spacing</span>${etqN(p + ".botSpA", 1, "l", 62)}${etqN(p + ".botSpB", 1, "l", 62)}</div></fieldset>`;
+}
+function etqSlabForm() {
+  const w = etqRule("slab"), s = "slab", U = etqUl();
+  ["slab", "mat", "footing"].forEach(k => w[k].typAll = String(w[k].typAll));
+  const detail = p => `<fieldset><legend>Rebar Detail Options</legend>${etqR(p + ".detail", "all", "Detail All Bars")}${etqR(p + ".detail", "above", "Detail Bars Above Typical Bars")}${etqTypBars(p)}</fieldset>`;
+  const openings = p => `<fieldset><legend>${etqC(p + ".open", "Add Rebars around Openings")}</legend><div class="etqOpen">${etqRows([["Bar Size", etqB(p + ".openBar", 80)], ["No. of Bars on each Edge", etqN(p + ".openN", p === s ? 2 : "", "", 70)], ["Bar Extension into Slab", etqN(p + ".openExt", 1, "l", 70)]], "160px 1fr")}</div></fieldset>`;
+  const rulesBox = (id) => `<fieldset><legend>&nbsp;</legend><label class="etqCk" style="opacity:.55"><input type="checkbox" checked disabled>Use Bar Selection Rules for Strips</label><div style="text-align:center;margin:6px"><button id="${id}" style="width:240px">Edit Rebar Selection Rules...</button></div></fieldset>`;
+  const slabTab = `<div class="ipage on" data-page="Slab"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div><fieldset><legend>Rebar Curtailment Options</legend>${etqR(s + ".curt", "computed", "Use Computed Reinforcement Only")}<div class="etqIn" id="etqSA">${etqC(s + ".alt", "Curtail Alternate Bars")}${etqC(s + ".addDev", "Add Development Length")}</div>
+        ${etqR(s + ".curt", "rules", "Use Curtailment Rules Only")}${etqR(s + ".curt", "computedRules", "Use Computed Reinforcement and Rules")}<div class="etqIn" id="etqSC">${etqC(s + ".checkDev", "Check Development Length")}</div>
+        <div style="display:flex;gap:40px;margin:6px 0 0 14px"><button id="etqSDev" style="width:140px">Development Length...</button><button id="etqSCur" style="width:140px">Curtailment Rules...</button></div></fieldset>
+      ${detail(s)}${openings(s)}</div>
+    <div><fieldset><legend>${etqC(s + ".enforce", "Enforce User Minimum Reinforcement")}</legend><div id="etqSMin" style="display:grid;grid-template-columns:120px 100px 1fr 100px;gap:6px 8px;align-items:center">
+        <span>Column Strip, Top</span><span>${etqN(s + ".csTop", 2, "", 60)} %</span><span style="text-align:right">Bottom</span><span>${etqN(s + ".csBot", 2, "", 60)} %</span>
+        <span>Middle Strip, Top</span><span>${etqN(s + ".msTop", 2, "", 60)} %</span><span style="text-align:right">Bottom</span><span>${etqN(s + ".msBot", 2, "", 60)} %</span>
+        <span>Slab on Beams, Top</span><span>${etqN(s + ".sbTop", 2, "", 60)} %</span><span style="text-align:right">Bottom</span><span>${etqN(s + ".sbBot", 2, "", 60)} %</span></div></fieldset>
+      <fieldset><legend>Integrity Rebars on Columns for Flat Slabs</legend>${etqC(s + ".integ", "Provide Additional Bottom Bars Over Columns")}<div id="etqSI" style="display:grid;grid-template-columns:120px 90px 1fr 90px;gap:6px 8px;align-items:center;margin-top:4px">
+        <span>Number</span>${etqS(s + ".integN", etqNums, 80)}<span style="text-align:right">Bar Size</span>${etqB(s + ".integBar", 90)}<span>Factor of Span Length</span>${etqN(s + ".integFac", 2, "", 70)}</div></fieldset>
+      <fieldset><legend>${etqC(s + ".waffle", "User Minimum Reinforcement-Waffles and Ribs")}</legend><div id="etqSW" style="display:grid;grid-template-columns:110px 90px 1fr 110px;gap:5px 8px;align-items:center">
+        <b style="grid-column:1/5;font-weight:400">Top Slab Rebars</b><span class="etqIn" style="padding-left:10px">Bar Size</span>${etqB(s + ".wTopBar", 90)}<span style="text-align:right">Spacing</span>${etqN(s + ".wTopSp", 1, "l", 60)}
+        <b style="grid-column:1/5;font-weight:400">Rib Rebars</b><span style="padding-left:10px">Top Bar Size</span>${etqB(s + ".wRibTop", 90)}<span style="text-align:right">Min. Number</span>${etqN(s + ".wRibTopN", 2, "", 60)}
+        <span style="padding-left:10px">Bottom Bar Size</span>${etqB(s + ".wRibBot", 90)}<span style="text-align:right">Min. Number</span>${etqN(s + ".wRibBotN", 2, "", 60)}
+        <span style="padding-left:10px">${etqC(s + ".wStir", "Stirrups")}</span>${etqB(s + ".wStirBar", 90)}<span style="text-align:right">Spacing</span>${etqN(s + ".wStirSp", 1, "l", 60)}</div></fieldset>
+      <fieldset><legend>${etqC(s + ".combine", "Combine Adjacent Short Span Bottom Bars")}</legend><div id="etqSK">${etqRows([["Maximum Short Span Length to Combine", etqN(s + ".combineLen", 1, "l", 90)]])}</div></fieldset>
+      ${rulesBox("etqSSel")}
+      <fieldset><legend>${etqC(s + ".drop", "Add Bottom Bars in Drop Panels")}</legend><div id="etqSD">${etqRows([["Drop Panel Bot Bar Area", etqB(s + ".dropBar", 100)], ["Drop Panel Bot Bar Spacing", etqN(s + ".dropSp", 1, "l", 90)]], "200px 1fr")}</div></fieldset></div></div></div>`;
+  const other = p => `<div class="ipage" data-page="${p === "mat" ? "Mat" : "Footing"}"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div><fieldset><legend>Rebar Curtailment Options</legend><label class="etqCk"><input type="radio" checked>Use Computed Reinforcement</label><div class="etqIn">${etqC(p + ".alt", "Curtail Alternate Bars")}${etqC(p + ".addDev", "Add Development Length")}</div>
+      <div style="margin:6px 0 0 14px"><button data-dev="${p}" style="width:140px">Development Length...</button></div></fieldset>${detail(p)}</div>
+    <div><fieldset><legend>${etqC(p + ".enforce", "Enforce User Minimum Reinforcement")}</legend><div class="etqMin_${p}" style="display:grid;grid-template-columns:110px 1fr;gap:6px;align-items:center"><span>Top</span><span>${etqN(p + ".top", 2, "", 60)} %</span><span>Bottom</span><span>${etqN(p + ".bot", 2, "", 60)} %</span></div></fieldset>
+      ${p === "mat" ? openings(p) : ""}${rulesBox(p === "mat" ? "etqMSel" : "etqFSel")}</div></div></div>`;
+  const html = `<div class="itabs"><button class="on" data-page="Slab">Slab</button><button data-page="Mat">Mat</button><button data-page="Footing">Footing</button></div>${slabTab}${other("mat")}${other("footing")}
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px"><button id="etqDef" style="width:160px">Set to Default Values</button><div id="etqOk"></div></div>`;
+  const d = etqForm("Slab/Mat/Footing: Bar Selection and Curtailment Rule", html, w, d => {
+    const sl = w.slab;
+    etqOff(d, "#etqSA", sl.curt !== "computed"); etqOff(d, "#etqSC", sl.curt !== "computedRules"); q(d, "#etqSCur").disabled = sl.curt === "computed";
+    d.querySelectorAll(".ipage").forEach((pg, i) => { const k = ["slab", "mat", "footing"][i]; pg.querySelectorAll(".etqTypB").forEach(x => { x.querySelectorAll("input,select").forEach(e => e.disabled = w[k].detail !== "above"); x.style.opacity = w[k].detail !== "above" ? 0.55 : ""; }); });
+    etqOff(d, "#etqSMin", !sl.enforce); etqOff(d, "#etqSI", !sl.integ); etqOff(d, "#etqSW", !sl.waffle); etqOff(d, "#etqSK", !sl.combine); etqOff(d, "#etqSD", !sl.drop);
+    if (sl.waffle) q(d, `[data-p="slab.wStirBar"]`).disabled = q(d, `[data-p="slab.wStirSp"]`).disabled = !sl.wStir;
+    d.querySelectorAll(".ipage .etqOpen").forEach((x, i) => { const k = i ? "mat" : "slab"; x.querySelectorAll("input,select").forEach(e => e.disabled = !w[k].open); x.style.opacity = w[k].open ? "" : 0.55; });
+    etqOff(d, ".etqMin_mat", !w.mat.enforce); etqOff(d, ".etqMin_footing", !w.footing.enforce);
+  }, async x => { ["slab", "mat", "footing"].forEach(k => w[k].typAll = true); const e = await etqSave("slab", w); if (e) { formError(x, e); return false; } hmSay("The slab/mat/footing bar selection and curtailment rule is set."); }, {width: 1000, dfInto: "#etqOk"});
+  etqWire(d, "slab", w, {"#etqSDev": () => etqDevForm(w.dev.slab), "#etqSCur": () => etqSlabCurtForm(w.curt), "#etqSSel": () => etqStripForm(w.strip), "#etqMSel": () => etqStripForm(w.matStrip), "#etqFSel": () => etqFootSelForm(w.footSel)});
+  d.querySelectorAll("[data-dev]").forEach(b => b.onclick = () => etqDevForm(w.dev[b.dataset.dev]));
+  return d;
+}
+function etqStripForm(w) {
+  const part = etqClone(w), cols = ["A", "B", "C", "D", "F", "G"].map(c => [c, c]), U = etqUl();
+  const table = m => `<div data-mode="${m}">${etqUnitRows(etqTable(part, cols, ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Bar Numbers & Spacing",
+    ["minSp", `Minimum Spacing (${U})`, "l"], ["maxSp", `Maximum Spacing (${U})`, "l"], ["fac", "Maximum Spacing (Factor of d)", "n"]], m))}<div style="height:90px;background:#888;border:1px solid #444;border-top:0"></div></div>`;
+  return etqForm("Rebar Selection Rules for Strip", `<div style="display:flex;gap:16px;margin:0 0 6px 6px">${etqR("mode", "cs", "Column Strip")}${etqR("mode", "ms", "Middle Strip")}${etqR("mode", "sb", "Slabs On Beams")}</div>
+    <div style="border:1px solid #888;text-align:center;padding:3px;margin-bottom:4px">Longitudinal Bars</div>${table("cs")}${table("ms")}${table("sb")}`, part,
+    d => d.querySelectorAll("[data-mode]").forEach(x => x.style.display = x.dataset.mode === part.mode ? "" : "none"), () => { Object.assign(w, part); }, {width: 580});
+}
+function etqFootSelForm(w) {
+  const U = etqUl();
+  return etqSub("Rebar Selection Rules for Footing", `<div style="border:1px solid #888;text-align:center;padding:3px;margin-bottom:4px">Longitudinal Bars</div>${etqUnitRows(etqTable(w, [["top", "Top Bars"], ["bot", "BottomBars"]], ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Bar Numbers & Spacing",
+    ["minSp", `Minimum Spacing (${U})`, "l"], ["maxSp", `Maximum Spacing (${U})`, "l"], ["fac", "Maximum Spacing (Factor of d)", "n"]], "", 180))}`, w, null, 580);
+}
+// Slab Rebar Curtailment Rules: five strip kinds, each ETABS's drawing of the exterior and interior span with its lengths.
+function etqSlabCurtForm(w) {
+  const part = etqClone(w), kinds = [["cs", "Column Strip"], ["csd", "Column Strip With Drop Panels"], ["ms", "Middle Strip"], ["msd", "Middle Strip With Drop Panels"], ["sb", "Slabs With Beams"]];
+  let cur = "cs";
+  const ln = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#00008b" stroke-width="2"/>`, lab = (t, x, y) => `<span class="etqBl" style="left:${x}px;top:${y}px">${t}</span>`;
+  const num = (p, x, y, word, dec) => `<span style="left:${x}px;top:${y}px">${etqN(p, dec ?? 2, "")} <span class="etqBl" style="position:static">${word}</span></span>`;
+  const pct = (p, x, y, word) => `<span style="left:${x}px;top:${y}px">${etqS(p, etqPct, 64)} <span class="etqBl" style="position:static">${word}</span></span>`;
+  const hook = (p, x, y) => `<span style="left:${x}px;top:${y}px">${etqS(p, etqHooks, 84)}</span>`;
+  const len = (p, x, y) => `<span style="left:${x}px;top:${y}px">${etqN(p, 1, "l")}</span>`;
+  const frame = `<svg width="820" height="380">${[125, 133, 143, 425, 433, 443].map(x => `<line x1="${x}" y1="32" x2="${x}" y2="368" stroke="#777" stroke-dasharray="${x % 2 ? "" : "4 3"}"/>`).join("")}<line x1="0" y1="163" x2="810" y2="163" stroke="#888"/>
+    <line x1="145" y1="313" x2="423" y2="313" stroke="#333" marker-start="url(#etqAr)" marker-end="url(#etqAr)"/><line x1="445" y1="313" x2="810" y2="313" stroke="#333" marker-start="url(#etqAr)"/><line x1="135" y1="338" x2="433" y2="338" stroke="#333" marker-start="url(#etqAr)" marker-end="url(#etqAr)"/><line x1="433" y1="338" x2="810" y2="338" stroke="#333" marker-start="url(#etqAr)"/>
+    <defs><marker id="etqAr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="#333"/></marker></defs>__BARS__</svg>
+    <b style="left:11px;top:16px" class="etqBl">Top Bars</b><b style="left:11px;top:172px" class="etqBl">Bottom Bars</b>
+    ${lab("Clear Span - Ln", 236, 285)}${lab("Clear Span - Ln", 477, 285)}${lab("C/C Span - Lc", 236, 310)}${lab("C/C Span - Lc", 477, 310)}${lab("Exterior Span", 236, 340)}${lab("Interior Span", 477, 340)}`;
+  const pic = k => {
+    const p = k + ".";
+    if (k === "ms" || k === "msd") return `<div class="etqPic" data-kind="${k}" style="height:380px;width:820px">${frame.replace("__BARS__", ln(125, 54, 235, 54) + ln(125, 54, 125, 73) + ln(340, 54, 525, 54) + ln(125, 193, 380, 193) + ln(485, 193, 810, 193) + ln(125, 250, 435, 250) + ln(125, 232, 125, 250) + ln(427, 245, 810, 245))}
+      ${hook(p + "hA", 22, 49)}${[1, 2, 3].map((i, j) => num(p + "t" + i, [150, 305, 450][j], 14, "x T") + num(p + "a" + i, [150, 305, 450][j], 39, "x L") + pct(p + "p" + i, [150, 305, 450][j], 69, "of Ast")).join("")}${lab("A", 229, 52)}${lab("C", 530, 52)}
+      ${hook(p + "hG", 22, 189)}${hook(p + "hF", 22, 249)}${[1, 2, 3].map((i, j) => num(p + "g" + i, [150, 305, 450][j], 178, "x L") + pct(p + "q" + i, [150, 305, 450][j], 209, "% of Ast")).join("")}${lab("G", 383, 190)}${lab("G", 803, 190)}${lab("F", 199, 244)}${lab("F", 803, 244)}
+      ${len(p + "f1", 150, 269)}${len(p + "f2", 425, 269)}</div>`;
+    return `<div class="etqPic" data-kind="${k}" style="height:380px;width:820px">${frame.replace("__BARS__", ln(125, 54, 235, 54) + ln(125, 54, 125, 73) + ln(340, 54, 525, 54) + ln(125, 124, 200, 124) + ln(125, 124, 125, 141) + ln(365, 124, 500, 124) + ln(125, 202, 810, 202) + ln(125, 250, 810, 250) + ln(125, 232, 125, 250))}
+      ${hook(p + "hA", 22, 49)}${hook(p + "hB", 22, 119)}${[1, 2, 3].map((i, j) => num(p + "t" + i, [150, 305, 450][j], 14, "x T") + num(p + "a" + i, [150, 305, 450][j], 39, "x L") + pct(p + "p" + i, [150, 305, 450][j], 69, "of Ast") + num(p + "b" + i, [150, 305, 450][j], 107, "x L")).join("")}
+      ${lab("A", 229, 52)}${lab("C", 530, 52)}${lab("B", 201, 124)}${lab("D", 501, 124)}${hook(p + "hG", 22, 189)}${hook(p + "hF", 22, 249)}${lab("G", 389, 190)}${lab("F", 389, 249)}${len(p + "f1", 150, 269)}</div>`;
+  };
+  const html = `<div style="display:grid;grid-template-columns:840px 1fr;gap:10px"><fieldset><legend>Curtailment Rules</legend><div class="etqTabs">${kinds.map(([k, t], i) => `${i ? "<i></i>" : ""}<button data-k="${k}" class="${k === cur ? "on" : ""}" title="${t}">${t}</button>`).join("")}</div>${kinds.map(([k]) => pic(k)).join("")}</fieldset>
+    <div style="display:flex;flex-direction:column"><fieldset><legend>Curtail based on</legend>${etqR("base", "clear", "Clear Span, Ln")}${etqR("base", "cc", "C/C Span, Lc")}</fieldset><p class="etqBl" style="margin:24px 12px">T= Slab Thickness</p><span style="flex:1"></span><div id="etqOk"></div></div></div>${etqPreview("slab")}`;
+  const d = etqForm("Slab Rebar Curtailment Rules", html, part, d => d.querySelectorAll("[data-kind]").forEach(x => x.style.display = x.dataset.kind === cur ? "" : "none"), () => { Object.assign(w, part); }, {width: 1100});
+  dfInto(d, "#etqOk");
+  d.querySelectorAll(".etqTabs button").forEach(b => b.onclick = () => { cur = b.dataset.k; d.querySelectorAll(".etqTabs button").forEach(x => x.classList.toggle("on", x === b)); d.querySelectorAll("[data-kind]").forEach(x => x.style.display = x.dataset.kind === cur ? "" : "none"); d.dispatchEvent(new Event("change")); });
+  etqPreviewWire(d, () => {
+    etqRead(d, part); const v = part[cur], t = kinds.find(k => k[0] === cur)[1], L = part.base === "cc" ? "Lc" : "Ln";
+    const rows = [["Top Bars", `${v.a1}x${L}`, `${v.a2}x${L}`, `${v.a3}x${L}`], ...(v.b1 !== undefined ? [["", `${v.b1}x${L}`, `${v.b2}x${L}`, `${v.b3}x${L}`]] : []), ["Bottom Bars", ...(v.g1 !== undefined ? [`${v.g1}x${L}`, `${v.g2}x${L}`, `${v.g3}x${L}`] : ["continuous", "", "continuous"])]];
+    return `<svg viewBox="0 0 400 190" width="100%" height="100%"><text x="200" y="14" font-size="9" font-weight="700" text-anchor="middle">${esc(t)}</text><rect x="110" y="22" width="200" height="${rows.length * 34}" fill="none" stroke="#000"/>
+      ${rows.map((r, i) => `<text x="105" y="${42 + i * 34}" font-size="6" text-anchor="end">${r[0]}</text>${r.slice(1).map((x, j) => `<text x="${140 + j * 62}" y="${36 + i * 34}" font-size="5.5">${esc(x)}</text><line x1="${130 + j * 62}" y1="${40 + i * 34}" x2="${170 + j * 62}" y2="${40 + i * 34}" stroke="#000"/>`).join("")}`).join("")}
+      <line x1="150" y1="22" x2="150" y2="${22 + rows.length * 34}" stroke="#000" stroke-dasharray="2 2"/><line x1="270" y1="22" x2="270" y2="${22 + rows.length * 34}" stroke="#000" stroke-dasharray="2 2"/></svg>`;
+  });
+  return d;
+}
+
+// ---- Concrete Column Stack: Bar Layout and Selection Rule ----
+function etqColumnForm() {
+  const w = etqRule("column"), m = "main";
+  const html = `<div style="display:grid;grid-template-columns:1.6fr 1fr;gap:12px"><div><fieldset><legend>Vertical Bars Layout</legend>
+      ${etqR(m + ".vert", "section", "Use Layout Specified in Section Definition")}<div class="etqIn" id="etqCK">${etqR(m + ".keep", "keep", "Keep Bar Sizes and Numbers same as in Section Definition")}${etqR(m + ".keep", "select", "Select Bar Sizes to Satisfy Required As/Ratio")}</div>
+      ${etqR(m + ".vert", "auto", "Automatically Select Bar Layout ( using Bar Selection Rules )")}<div class="etqIn" id="etqCP">${etqR(m + ".prefer", "number", "Prefer Larger Bar Number")}${etqR(m + ".prefer", "size", "Prefer Larger Bar Size")}</div></fieldset>
+    <fieldset><legend>Transverse Tie Layout</legend>${etqR(m + ".tie", "section", "Use Layout Specified in Section Definition")}${etqR(m + ".tie", "auto", "Automatically Select to Match Vertical Bars and Rules")}</fieldset></div>
+    <fieldset><legend>Rules</legend><div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:16px"><button id="etqCSel" style="width:190px">Rebar Selection Rules...</button><button id="etqCSpl" style="width:190px">Bar Splicing Rules...</button></div></fieldset></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px"><button id="etqDef" style="width:160px">Set to Default Values</button><div id="etqOk"></div></div>`;
+  const d = etqForm("Concrete Column Stack: Bar Layout and Selection Rule", html, w, d => { etqOff(d, "#etqCK", w.main.vert !== "section"); etqOff(d, "#etqCP", w.main.vert !== "auto"); },
+    async x => { const e = await etqSave("column", w); if (e) { formError(x, e); return false; } hmSay("The column stack bar layout and selection rule is set."); }, {width: 700, dfInto: "#etqOk"});
+  etqWire(d, "column", w, {"#etqCSel": () => etqColSelForm(w), "#etqCSpl": () => etqSpliceForm(w.splice)});
+  return d;
+}
+function etqColSelForm(rule) {
+  const part = {sel: etqClone(rule.sel), conf: etqClone(rule.conf)}, U = etqUl();
+  const table = (m, cols) => `<div data-mode="${m}">${etqUnitRows(etqTable(part, cols, ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Bar Numbers & Spacing",
+    ["minN", "Minimum Number of Bars", "n"], ["maxN", "Maximum Number of Bars", "text"], ["minSp", `Minimum Spacing (${U})`, "l", 2], ["maxSp", `Maximum Spacing (${U})`, "l", 2], ["fac", "Maximum Spacing (Factor * d)", "n"]], "sel." + m, m === "non" ? 130 : 90))}<div style="height:52px;background:#888;border:1px solid #444;border-top:0"></div></div>`;
+  const d = etqForm("Rebar Selection Rules", `<div style="display:flex;gap:16px;margin:0 0 6px 6px">${etqR("sel.mode", "non", "Non Seismic Detailing")}${etqR("sel.mode", "seismic", "Seismic Detailing")}</div>
+    ${table("non", [["vert", "Vertical Bars"], ["A", "Tie Zone A"]])}${table("seismic", [["vert", "Vertical Bars"], ["A", "Tie Zone A"], ["B", "Tie Zone B"], ["C", "Tie Zone C"]])}
+    <div style="text-align:right;margin-top:6px"><button id="etqConf" style="width:150px">Confinement...</button></div>`, part,
+    d => d.querySelectorAll("[data-mode]").forEach(x => x.style.display = x.dataset.mode === part.sel.mode ? "" : "none"), () => { rule.sel = part.sel; rule.conf = part.conf; }, {width: 800});
+  q(d, "#etqConf").onclick = () => etqConfForm(part.conf[part.sel.mode], part.sel.mode);
+  return d;
+}
+function etqConfForm(w, mode) {
+  return etqSub("Confinement: " + (mode === "seismic" ? "Seismic Detailing" : "Non Seismic Detailing"), `<fieldset><legend>Confinement Zone</legend>${etqRows([["Factor of Column Height", etqN("colH", 2, "", 90)], ["Factor of Section Size", etqN("secSize", 2, "", 90)], ["Minimum Length", etqN("minLen", 1, "l", 90)]], "130px 1fr")}</fieldset>
+    <fieldset><legend>Outer Hoop</legend>${etqRows([["Hoop Type", etqS("hoop", ["Rectangle-135", "Rectangle-90"], 170)]], "70px 1fr")}</fieldset>
+    <fieldset><legend>Internal Ties</legend>${etqC("internal", "Provide Internal Ties")}<div class="etqIn" id="etqTi"><div class="etqG" style="grid-template-columns:90px 1fr">${"<span>Tie Type</span>" + etqS("tieType", ["L-Ties", "Cross-Ties"], 118)}</div>
+      ${etqR("every", "every", "Every Bar")}${etqR("every", "alternate", "Alternate Bar")}${etqR("every", "third", "Every Third Bar")}</div></fieldset>`, w, d => etqOff(d, "#etqTi", !q(d, "[data-p=internal]").checked), 340);
+}
+function etqSpliceForm(w) {
+  return etqSub("Bar Splices", `<fieldset><legend>Bar Splices</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="etqBox">${etqRows([["Splice Bars at Every", etqS("every", ["Every Story", "Every Other Story"], 105)], ["Splice Location in Story", etqS("where", ["At Floor Level", "At Mid Height"], 105)], ["Bar Splice Type", etqS("type", ["Lap Splice", "Mechanical Splice"], 105)]])}</div>
+    <div class="etqBox">${etqRows([["Splice Length, Factor of Bar Dia", etqN("fac", 2, "", 90)], ["Kicker Height", etqN("kicker", 1, "l", 90)], ["Min Splice Length", etqN("minLen", 1, "l", 90)]])}</div></div></fieldset>`, w, null, 690);
+}
+
+// ---- Concrete Wall Stack: Detailing Rules ----
+function etqWallForm() {
+  const w = etqRule("wall"), m = "main";
+  const html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><fieldset><legend>Pier Rebar Layout</legend>
+      <fieldset><legend>Bar Layout Based on</legend>${etqR(m + ".pier", "specified", "Specified Bar Size and Spacing")}${etqR(m + ".pier", "rules", "Satisfy Required As using Rules")}<div style="text-align:center;margin-top:4px"><button id="etqPier" style="width:140px">Pier Rebar Rules...</button></div></fieldset>
+      <fieldset><legend>Boundary Zone Options</legend>${etqR(m + ".zone", "specified", "Specified Boundary/Confinement")}${etqR(m + ".zone", "rules", "Based on Rules")}
+        <div class="etqBox" id="etqBZ">${etqC(m + ".useBZ", "Use Boundary Zones")}<div class="etqIn">${etqRows([["Default Boundary Length Ratio", etqN(m + ".ratio", 2, "", 50)]], "180px 1fr")}</div>${etqC(m + ".useCZ", "Use Confinement Zones")}</div></fieldset></fieldset>
+    <fieldset><legend>Spandrels Rebar Layout</legend><fieldset><legend>Layout Bars Based on</legend><label class="etqCk" style="opacity:.55"><input type="checkbox" checked disabled>Satisfy Required As using Rules</label>
+      <div style="text-align:center;margin:4px 0 160px"><button id="etqSpan" style="width:170px">Spandrel Rebar Rules...</button></div></fieldset></fieldset></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px"><button id="etqDef" style="width:160px">Set to Default Values</button><div id="etqOk"></div></div>`;
+  const d = etqForm("Concrete Wall Stack: Detailing Rules", html, w, d => { q(d, "#etqPier").disabled = w.main.pier !== "rules"; etqOff(d, "#etqBZ", w.main.zone !== "rules"); if (w.main.zone === "rules") q(d, `[data-p="main.ratio"]`).disabled = !w.main.useBZ; },
+    async x => { const e = await etqSave("wall", w); if (e) { formError(x, e); return false; } hmSay("The wall stack detailing rules are set."); }, {width: 720, dfInto: "#etqOk"});
+  etqWire(d, "wall", w, {"#etqPier": () => etqPierForm(w.pier), "#etqSpan": () => etqSpandrelForm(w.spandrel)});
+  return d;
+}
+function etqPierForm(w) {
+  const v = (p, t) => `<fieldset><legend>${t}</legend>${etqRows([["Smallest Bar Size", etqB(p + ".small", 96)], ["Largest Bar Size", etqB(p + ".large", 96)], ["Preferred Corner/Joint Bar Size", etqB(p + ".corner", 96)], ["Preferred Middle Bar Size", etqB(p + ".middle", 96)],
+    ["Min. Spacing of Bars", etqN(p + ".minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN(p + ".maxSp", 1, "l", 84).replace("data-p=", 'data-lo="0.0254" data-hi="0.6096" data-p=')], ["Max. Spacing, Factor of T", etqN(p + ".fac", 2, "", 84)]], "200px 1fr")}</fieldset>`;
+  const t = (p, l) => `<fieldset><legend>${l}</legend>${etqRows([["Smallest Bar Size", etqB(p + ".small", 96)], ["Largest Bar Size", etqB(p + ".large", 96)], ["Preferred Bar Size", etqB(p + ".pref", 96)], ["&nbsp;", "<span></span>"],
+    ["Min. Spacing of Bars", etqN(p + ".minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN(p + ".maxSp", 1, "l", 84).replace("data-p=", 'data-lo="0.0254" data-hi="0.6096" data-p=')], ["Max. Spacing, Factor of T", etqN(p + ".fac", 2, "", 84)]], "200px 1fr")}</fieldset>`;
+  const d = etqSub("Pier Rebar Rules", `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${v("uv", "Vertical Bars - Unconfined Zones")}${t("ut", "Transverse Bars - Unconfined Zones")}${v("cv", "Vertical Bars - Confined Zones")}${t("ct", "Transverse Bars - Confined Zones")}</div><p style="margin:6px 0 0">T = Wall Thickness</p>`, w, null, 780);
+  // ETABS's tooltip on its spacing boxes: the range it takes.
+  d.querySelectorAll("[data-lo]").forEach(i => i.title = `Value must be in range ${etqFmt(0.0254 * etqUnitF())} ${hmU().l} & ${etqFmt(0.6096 * etqUnitF())} ${hmU().l}`);
+  return d;
+}
+function etqSpandrelForm(w) {
+  const g = (t, rows) => `<fieldset><legend>${t}</legend>${etqRows(rows, "160px 1fr")}</fieldset>`;
+  return etqSub("Spandrel Rebar Rules", `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    ${g("Horizontal Top/Bottom", [["Smallest Bar Size", etqB("hz.small", 96)], ["Largest Bar Size", etqB("hz.large", 96)], ["Preferred Bar Size", etqB("hz.pref", 96)], ["Minimum Number of Bars", etqN("hz.minN", 2, "", 84)]])}
+    ${g("Diagonal Bars", [["Smallest Bar Size", etqB("dg.small", 96)], ["Largest Bar Size", etqB("dg.large", 96)], ["Preferred Bar Size", etqB("dg.pref", 96)]])}
+    ${g("Horizontal Web Bars", [["Bar Size", etqB("web.bar", 96)], ["Min. Spacing of Bars", etqN("web.minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN("web.maxSp", 1, "l", 84)]])}
+    ${g("Diagonal Bar Ties", [["Stirrup Bar Size", etqB("tie.bar", 96)], ["Min. Spacing of Ties", etqN("tie.minSp", 1, "l", 84)], ["Max. Spacing of Ties", etqN("tie.maxSp", 1, "l", 84)]])}
+    <div style="grid-column:1/3">${g("Vertical Bars/Ties", [["Stirrup Bar Size", etqB("vert.bar", 96)], ["Min. Spacing of Bars", etqN("vert.minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN("vert.maxSp", 1, "l", 84)], ["Number of Legs", etqS("vert.legs", ["2", "3", "4"], 96)]])}</div></div>`, w, null, 680);
 }
 // ---- ETABS 23.2's Options menu and its forms, from the pictures in field/reference-forms/etabs/Options: Display
 // Units, Database, Tolerances, Arrange Windows, Graphics Preferences (with Set Line Thickness), Graphics Colors
@@ -7312,10 +8228,13 @@ document.addEventListener("keydown", e => {
 async function modelAct(a) {
   hideMenus();
   if (a.startsWith("etn:")) return etnAct(a.slice(4));
+  if (a.startsWith("etq:")) return etqAct(a.slice(4));
+  if (a.startsWith("etc:")) return etcAct(a.slice(4));
   if (a.startsWith("ets:")) return etsForm(a.slice(4));
   if (a.startsWith("etv:")) return etvAct(a.slice(4));
   if (a.startsWith("eto:")) { await hmDefs(); return etoForm(a.slice(4)); }
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
+  if (a.startsWith("etf:")) return etfAct(a.slice(4));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("sapa:")) return hmSapAssign(a.slice(5));
   if (a.startsWith("eta:")) return hmEtabsAssign(a.slice(4));
@@ -25011,7 +25930,7 @@ function modelFilter(prog) {
 }
 const modelFolder = () => { const f = (hm.state && hm.state.file) || ""; return f ? f.replace(/[\\/][^\\/]*$/, "") : ""; };
 async function hmOpen() {
-  const p = await hostPick({kind: "open", title: "Open Model", filter: modelFilter(program), folder: modelFolder()});
+  const p = await hostPick({kind: "open", title: "Open Model" + (program === "etabs" ? " File" : ""), filter: modelFilter(program), folder: modelFolder()});
   if (p) { if (!p.cancelled) await hmOpenFile(p.path); return; }
   hmOpenTyped();
 }
@@ -25023,7 +25942,7 @@ async function hmOpenFile(path, d) {
   if (!j.ok) { if (d) formError(d, j.error); return j; }
   if (d) d.close();
   const r = j.result || {};
-  if (!r.needs_choice) { hmSay("Opened " + path); return j; }
+  if (!r.needs_choice) { etfRemember(path); hmSay("Opened " + path); return j; }
   return new Promise(done => {
     const go = convert => { hmRun("open_model_file", {path, for_program: program, convert}).then(k => { if (k.ok) hmSay(convert ? `Opened ${path}, converted from ${r.file_program} to ${r.window_program}.` : `Opened ${path} for ${r.file_program}.`); done(k); }); };
     const f = dialog("Open Model", `<p class="kv" style="max-width:440px;margin-top:0"><b>${esc(path.split(/[\\/]/).pop())}</b> is a ${esc(r.file_program)} model, and this window works in ${esc(r.window_program)}.</p>
@@ -25079,12 +25998,12 @@ function hmOpenTyped() {
 }
 async function hmSave(as) {
   const file = (hm.state && hm.state.file) || "";
-  if (!as && file) return hmRun("save_model", {}).then(j => j.ok && hmSay("Saved " + file));
+  if (!as && file) return hmRun("save_model", {}).then(j => { if (j.ok) { etfRemember(file); hmSay("Saved " + file); } });
   // The program's own model extension (.cpme, .cpms, .cpmf); the program's text file is written beside it either way.
   const k = progExt[program] ? program : "etabs", ext = progExt[k], text = progText[k][0];
-  const p = await hostPick({kind: "save", title: "Save Model As", ext, folder: modelFolder(), name: file ? pickParts(file).name : ((P && P.manifest && P.manifest.model) || "Model"),
+  const p = await hostPick({kind: "save", title: "Save Model As".replace("Model", k === "etabs" ? "Model File" : "Model"), ext, folder: modelFolder(), name: file ? pickParts(file).name : ((P && P.manifest && P.manifest.model) || "Model"),
     filter: `${progLabel(k)} model (*.${ext})|*.${ext}|${progLabel(k)} text file (*.${text})|*.${text}`});
-  if (p) { if (!p.cancelled) { const x = pickParts(p.path); const j = await hmRun("save_model_as", {name: x.name, folder: x.folder}); if (j.ok) hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || p.path)); } return; }
+  if (p) { if (!p.cancelled) { const x = pickParts(p.path); const j = await hmRun("save_model_as", {name: x.name, folder: x.folder}); if (j.ok) { etfRemember((j.result && (j.result.modeler_file || j.result.file)) || p.path); hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || p.path)); } } return; }
   dialog("Save Model As", `<div class="g2"><span>File name</span><input id="sv" value="${esc(file ? file.split(/[\\/]/).pop().replace(/\.e2k$/i, "") : ((P && P.manifest && P.manifest.model) || "Model"))}"><span>Folder</span><input id="sf" placeholder="Documents\\CSI ProMax\\Models" value="${esc(file ? file.replace(/[\\/][^\\/]*$/, "") : "")}"></div><p class="kv">${{etabs: "Saves an ETABS text file (.e2k, for File > Import in ETABS)", sap2000: "Saves a SAP2000 text file (.s2k, for File > Import in SAP2000) and an .e2k", safe: "Saves a SAFE text file (.f2k of the floor with the most slab, for File > Import in SAFE) and an .e2k"}[program]} with the model's own file beside it (.${progExt[program] || "cpme"}). An empty folder means Documents\\CSI ProMax\\Models.</p>`,
     [["Save", d => submit(d, "save_model_as", {name: q(d, "#sv").value.trim(), folder: q(d, "#sf").value.trim() || undefined}, j => hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || ""))), true], ["Cancel"]], {width: 500});
 }
@@ -25109,6 +26028,372 @@ async function hmExport(kind) {
       });
       return false;
     }, true], ["Cancel"]], {width: 460});
+}
+
+// ---- ETABS 23.2's File menu, item for item (Ahmed 2026-11-27: every form identical to ETABS's, every button working
+// as there; pictures in field/reference-forms/etabs/File). etf* = ETABS File. The Engine's own file items that ETABS
+// has not got (Model for ETABS, the review pack's results, SAP2000 .s2k) sit under Engine Extras at the end. ----
+function etfFileMenu() {
+  const recent = etfRecent();
+  return [["New Model...", "m:new", "Ctrl+N"], ["Open...", "m:open", "Ctrl+O"], ["Close...", "m:etf:close", "Shift+Ctrl+E"], 0,
+    ["Save", "m:save", "Ctrl+S"], ["Save As...", "m:saveAs", "Shift+Ctrl+S"], 0,
+    ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"]]],
+    ["Export", [["ETABS .e2k Text File...", "m:etf:xE2k"], 0,
+      ["ETABS Database Tables to Excel...", "m:xlsxOut"], ["ETABS Database Tables to Text...", "m:etf:xTxt"], ["ETABS Database Tables to XML...", "m:etf:xXml"], 0,
+      ["Story as SAFE V12 .f2k File...", "m:f2k"], 0,
+      [".DXF/.DWG File...", "m:etf:xDxf"], 0,
+      ["IFC File...", "m:etf:xIfc"], ["IGES .igs File...", "m:etf:xIges"], ["3D Printing .stl File...", "m:etf:xStl"], ["3D Image .obj File...", "m:etf:xObj"], 0,
+      ["Perform3D Text File...", "m:etf:p3dTxt", "", true], ["Perform3D Structure File...", "m:etf:p3dStr", "", true]]], 0,
+    // ETABS greys Create Video until the model has a run to animate (pictured greyed on a model with no results).
+    ["Create Video...", [], "", true], 0,
+    ["Print Graphics...", "m:etf:print", "Ctrl+P"], 0,
+    ...recent.map((p, i) => [`${i + 1} ${etfShort(p)}`, "m:etf:recent:" + i]), ...(recent.length ? [0] : []),
+    ["Exit", "m:etf:exit"], 0,
+    ["Engine Extras", [["Model for ETABS (change)...", "m:program"], ["Results from a Review Pack (.cpmx)...", "eng:import"], ["SAP2000 .s2k Text File...", "m:s2k"]]]];
+}
+// ETABS's recent files: the last six opened or saved, newest first, shortened as ETABS shows them (C:\...\name.EDB).
+const etfRecentKey = "cpm.recent." + "etabs";
+function etfRecent() { try { const a = JSON.parse(localStorage.getItem(etfRecentKey) || "[]"); return Array.isArray(a) ? a.filter(x => typeof x === "string").slice(0, 6) : []; } catch (e) { return []; } }
+function etfRemember(path) {
+  if (!path || program !== "etabs") return;
+  try { localStorage.setItem(etfRecentKey, JSON.stringify([path, ...etfRecent().filter(p => p.toLowerCase() !== path.toLowerCase())].slice(0, 6))); } catch (e) { }
+}
+function etfShort(p) {
+  const parts = String(p).split(/[\\/]/);
+  if (parts.length <= 3) return p;
+  return parts[0] + "\\...\\" + parts[parts.length - 1];
+}
+// Not awaited by the menu: a form waiting for its answer (the save box, a Save As) does not hold the menu up.
+function etfAct(a) { etfDo(a).catch(e => hmSay(String(e && e.message || e), true)); }
+async function etfDo(a) {
+  if (a.startsWith("recent:")) { const p = etfRecent()[+a.slice(7)]; if (!p) return; if (await etfSaveFirst()) { const j = await hmOpenFile(p); if (!j || !j.ok) hmSay(`${p} could not be opened: ${(j && j.error) || "no answer"}`, true); } return; }
+  switch (a) {
+    case "close": return etfClose();
+    case "exit": return etfExit();
+    case "print": return etfPrintGraphics();
+    case "xE2k": return etfExportE2k();
+    case "xTxt": return etfExportTables("text");
+    case "xXml": return etfExportTables("xml");
+    case "xDxf": return etfExportGeometry("dxf");
+    case "xIfc": return etfExportGeometry("ifc");
+    case "xIges": return etfExportGeometry("iges");
+    case "xStl": return etfExportGeometry("stl");
+    case "xObj": return etfExportGeometry("obj");
+  }
+}
+const etfModelName = () => { const f = (hm.state && hm.state.file) || ""; return f ? f.split(/[\\/]/).pop().replace(/\.[^.]*$/, "") : ((P && P.manifest && P.manifest.model) || "Untitled"); };
+// ETABS's "<model> has changed. Save current changes?" box: Yes saves, No goes on without saving, Cancel stops.
+// Resolves true to go on.
+function etfSaveFirst() {
+  if (!hm.state || hm.state.saved !== false) return Promise.resolve(true);
+  return new Promise(done => {
+    const d = dialog("ETABS", `<p style="margin:4px 8px 2px">${esc(etfModelName())} has changed.</p><p style="margin:2px 8px 10px">Save current changes?</p>`,
+      [["Yes", () => { hmSave(false).then(() => done(!!(hm.state && hm.state.saved))); }], ["No", () => done(true)], ["Cancel", () => done(false)]], {width: 260});
+    d.classList.add("etfAsk");
+  });
+}
+// File > Close: asks to save a changed model, then leaves the window with an empty model, as ETABS leaves its window
+// with no model in it (File > New Model or Open goes on from there).
+async function etfClose() {
+  if (!(await etfSaveFirst())) return;
+  const j = await hmRun("new_model", {title: "Untitled", template: "empty", program: "etabs"});
+  if (j.ok) hmSay("The model was closed.");
+}
+async function etfExit() {
+  if (!(await etfSaveFirst())) return;
+  window.close();
+  setTimeout(() => hmSay("Close the window with its X at the top right."), 400);
+}
+
+// ---- File > Export ----
+// A Save As picker for an export: Windows' own (the Engine's window), or, in a plain browser or the field check, a
+// form of the same fields where the full path is typed. Resolves the path, or null when cancelled.
+async function etfSaveAs(title, types, name) {
+  const filter = types.map(t => `${t[0]}|*.${t[1]}`).join("|");
+  const p = await hostPick({kind: "save", title, ext: types[0][1], filter, folder: modelFolder(), name});
+  if (p) return p.cancelled ? null : p.path;
+  const folder = modelFolder();
+  return new Promise(done => {
+    let answered = false; const end = v => { if (!answered) { answered = true; done(v); } };
+    const d = dialog(title, `<div class="g2"><span>File name:</span><input id="efN" style="min-width:380px" value="${esc(folder ? folder + "\\" + name + "." + types[0][1] : "")}" placeholder="C:\\Users\\...\\${esc(name)}.${esc(types[0][1])}">
+      <span>Save as type:</span><select id="efT">${types.map((t, i) => `<option value="${i}">${esc(t[0])}</option>`).join("")}</select></div>`,
+      [["Save", f => {
+        let v = q(f, "#efN").value.trim().replace(/^"|"$/g, "");
+        if (!/^([a-z]:[\\/]|\\\\|\/)/i.test(v)) { formError(f, "Type the file's full path, as C:\\Folder\\Name." + types[0][1]); return false; }
+        const ext = types[+q(f, "#efT").value][1];
+        if (ext !== "*" && !new RegExp("\\." + ext + "$", "i").test(v)) v += "." + ext;
+        end(v);
+      }], ["Cancel", () => end(null)]], {width: 560});
+  });
+}
+const etfSaid = (j, path) => { if (j.ok) { hmSay("Exported " + ((j.result && j.result.saved) || path)); return true; } return false; };
+// ETABS .e2k Text File: Windows' Save As ("Export ETABS Model Text File As", ETABS Model Files (*.e2k)), then ETABS's
+// Consistent Units form (Length, Force, Temperature Unit, as a grid with drop-downs; OK, Cancel): the file is written in them.
+async function etfExportE2k() {
+  const path = await etfSaveAs("Export ETABS Model Text File As", [["ETABS Model Files (*.e2k)", "e2k"]], etfModelName());
+  if (!path) return;
+  const u = modelU(), L = String(u.length || "m").toLowerCase(), F = String(u.force || "kN").toLowerCase(), T = String(u.temperature || "C").toUpperCase().slice(0, 1);
+  const pick = (list, v) => list.map(x => `<option${x.toLowerCase() === v.toLowerCase() ? " selected" : ""}>${x}</option>`).join("");
+  dialog("Consistent Units", `<table class="list etfCU" style="width:270px;border-collapse:collapse">
+      <tr><td style="padding:1px 6px">Length Unit</td><td><select id="ecL" style="width:100%">${pick(["in", "ft", "mm", "cm", "m"], L === "inch" ? "in" : L)}</select></td></tr>
+      <tr><td style="padding:1px 6px">Force Unit</td><td><select id="ecF" style="width:100%">${pick(["lb", "kip", "N", "kN", "kgf", "tonf"], F === "ton" ? "tonf" : F)}</select></td></tr>
+      <tr><td style="padding:1px 6px">Temperature Unit</td><td><select id="ecT" style="width:100%">${pick(["F", "C"], T)}</select></td></tr></table>`,
+    [["OK", d => submit(d, "export_e2k", {path, length: q(d, "#ecL").value, force: q(d, "#ecF").value, temperature: q(d, "#ecT").value}, j => etfSaid(j, path))], ["Cancel"]], {width: 300});
+}
+// ETABS Database Tables to Text / XML: the tables to take (all with rows ticked), then Windows' Save As.
+async function etfExportTables(format) {
+  const j = await hmPost({tool: "model_tables", args: {}}).catch(() => null);
+  if (!j || !j.ok) return hmSay((j && j.error) || "The Engine is not answering.", true);
+  const list = j.result.tables;
+  const d = dialog(format === "xml" ? "Choose Tables for Export to XML" : "Choose Tables for Export to Text File", `<div style="display:flex;gap:10px">
+      <fieldset style="flex:1;margin:0;max-height:380px;overflow:auto"><legend>Tables</legend>${list.map(t => `<label style="display:flex;gap:6px;white-space:nowrap"><input type="checkbox" data-t="${esc(t.name)}" ${t.rows ? "checked" : ""}>${esc(t.name)}<span style="margin-left:auto;padding-left:12px;opacity:.7">${t.rows}</span></label>`).join("")}</fieldset>
+      <fieldset style="width:150px;margin:0"><legend>Options</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="etA">Select All</button><button id="etN">Select None</button></div></fieldset></div>`,
+    [["OK", f => {
+      const tables = [...f.querySelectorAll("[data-t]")].filter(c => c.checked).map(c => c.dataset.t);
+      if (!tables.length) { formError(f, "Pick a table at least."); return false; }
+      const ext = format === "xml" ? "xml" : "txt";
+      etfSaveAs(format === "xml" ? "Export Tables to XML File" : "Export Tables to Text File", [[format === "xml" ? "XML Files (*.xml)" : "Text Files (*.txt)", ext]], etfModelName()).then(path => {
+        if (path) submit(f, "export_tables_file", {path, format, tables}, k => etfSaid(k, path));
+      });
+      return false;
+    }], ["Cancel"]], {width: 560});
+  q(d, "#etA").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = true);
+  q(d, "#etN").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = false);
+}
+// The model as solids, as the window draws it extruded: each frame its section's outline along it, each floor and wall
+// its thickness. Gives [{name, kind, section, story, tris: [[p, q, r], ...]}] in the model's units.
+function etfSolids() {
+  const out = [];
+  for (const f of frames) {
+    const sh = shapeOf(f.section), o = {name: f.name, kind: f.kind, section: f.section, story: f.story, line: [f.a, f.b], tris: []};
+    out.push(o);
+    if (!sh) continue;
+    const ax = memberAxes(f), drop = f.kind === "beam" ? sh.d / 2 : 0;
+    const at = (end, p) => { const q0 = end ? f.b : f.a; return [0, 1, 2].map(k => q0[k] + ax.e2[k] * (p[0] - drop) + ax.e3[k] * p[1]); };
+    const A = sh.pts.map(p => at(0, p)), B = sh.pts.map(p => at(1, p)), m = A.length;
+    for (let i = 0; i < m; i++) { const j = (i + 1) % m; o.tris.push([A[i], A[j], B[j]], [A[i], B[j], B[i]]); }
+    for (const t of sh.tris) { o.tris.push([A[t[0]], A[t[2]], A[t[1]]]); o.tris.push([B[t[0]], B[t[1]], B[t[2]]]); }
+    o.profile = {pts: sh.pts, drop, axes: ax};
+  }
+  for (const a of areas) {
+    if (a.kind === "opening" || a.kind === "solid" || (a.pts || []).length < 3) continue;
+    const t = slabT[a.section] || 0, n0 = newell(a.pts), n = a.kind === "wall" ? n0 : (n0[2] < 0 ? mul(n0, -1) : n0), m = a.pts.length;
+    const top = a.pts.map(p => a.kind === "wall" && t ? add(p, mul(n, t / 2)) : p), bot = top.map(p => add(p, mul(n, -t)));
+    const o = {name: a.name, kind: a.kind, section: a.section, story: a.story, outline: a.pts, normal: n, thick: t, tris: []};
+    out.push(o);
+    for (const tr of earclip(etfPlane(top, n))) { o.tris.push([top[tr[0]], top[tr[1]], top[tr[2]]]); if (t) o.tris.push([bot[tr[0]], bot[tr[2]], bot[tr[1]]]); }
+    if (t) for (let i = 0; i < m; i++) { const j = (i + 1) % m; o.tris.push([top[i], bot[i], bot[j]], [top[i], bot[j], top[j]]); }
+  }
+  return out;
+}
+// A planar outline in 2D, in its own plane (for triangulating a floor or wall of any shape).
+function etfPlane(pts, n) {
+  const ux = unitv(sub(pts[1], pts[0])), uy = unitv([n[1] * ux[2] - n[2] * ux[1], n[2] * ux[0] - n[0] * ux[2], n[0] * ux[1] - n[1] * ux[0]]);
+  return pts.map(p => { const d = sub(p, pts[0]); return [d[0] * ux[0] + d[1] * ux[1] + d[2] * ux[2], d[0] * uy[0] + d[1] * uy[1] + d[2] * uy[2]]; });
+}
+const etfNum = v => { const x = Math.abs(v) < 1e-12 ? 0 : +(+v).toPrecision(12); return String(x); };
+const etfLayer = o => ({column: "Columns", beam: "Beams", brace: "Braces", floor: "Floors", slab: "Floors", wall: "Walls", ramp: "Ramps"})[o.kind] || "Other";
+async function etfExportGeometry(kind) {
+  const types = {
+    dxf: ["Export to DXF File", [["AutoCAD .dxf Files (*.dxf)", "dxf"]]],
+    ifc: ["Export to IFC File", [["IFC Files (*.ifc)", "ifc"]]],
+    iges: ["Export to IGES File", [["IGES Files (*.igs)", "igs"]]],
+    stl: ["Export 3D Printing File", [["STL Files (*.stl)", "stl"]]],
+    obj: ["Export 3D Image File", [["OBJ Files (*.obj)", "obj"]]],
+  }[kind];
+  if (!frames.length && !areas.length) return hmSay("The model has no objects to export.", true);
+  const path = await etfSaveAs(types[0], types[1], etfModelName());
+  if (!path) return;
+  const solids = etfSolids(), name = etfModelName();
+  const text = kind === "dxf" ? etfDxf(solids) : kind === "ifc" ? etfIfc(solids, name, path) : kind === "iges" ? etfIges(solids, name, path) : kind === "stl" ? etfStl(solids, name) : etfObj(solids, name);
+  const j = await hmRun("write_export_file", {path, text});
+  if (!etfSaid(j, path)) hmSay(j.error || "The file was not written.", true);
+}
+// DXF (AutoCAD R12 entities): each frame a LINE on its layer (Columns, Beams, Braces), each floor and wall its faces
+// as 3DFACEs (Floors, Walls), in the model's units.
+function etfDxf(solids) {
+  const out = ["0", "SECTION", "2", "HEADER", "9", "$INSUNITS", "70", String({in: 1, inch: 1, ft: 2, mm: 4, cm: 5, m: 6}[String(modelU().length).toLowerCase()] || 0), "0", "ENDSEC",
+    "0", "SECTION", "2", "TABLES", "0", "TABLE", "2", "LAYER", "70", "6"];
+  const layers = [["Columns", 1], ["Beams", 5], ["Braces", 3], ["Floors", 8], ["Walls", 4], ["Other", 7]];
+  for (const [l, c] of layers) out.push("0", "LAYER", "2", l, "70", "0", "62", String(c), "6", "CONTINUOUS");
+  out.push("0", "ENDTAB", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES");
+  const P3 = (p, k) => [String(10 + k), etfNum(p[0]), String(20 + k), etfNum(p[1]), String(30 + k), etfNum(p[2])];
+  for (const o of solids) {
+    if (o.line) { out.push("0", "LINE", "8", etfLayer(o), ...P3(o.line[0], 0), ...P3(o.line[1], 1)); continue; }
+    const pts = o.outline;
+    for (let i = 1; i + 1 < pts.length; i += 2) {
+      const quad = [pts[0], pts[i], pts[i + 1], pts[i + 2] || pts[i + 1]];
+      out.push("0", "3DFACE", "8", etfLayer(o), ...quad.flatMap((p, k) => P3(p, k)));
+    }
+  }
+  out.push("0", "ENDSEC", "0", "EOF");
+  return out.join("\r\n") + "\r\n";
+}
+function etfStl(solids, name) {
+  const out = ["solid " + name.replace(/\s+/g, "_")];
+  for (const o of solids) for (const t of o.tris) {
+    const n = unitv([(t[1][1] - t[0][1]) * (t[2][2] - t[0][2]) - (t[1][2] - t[0][2]) * (t[2][1] - t[0][1]), (t[1][2] - t[0][2]) * (t[2][0] - t[0][0]) - (t[1][0] - t[0][0]) * (t[2][2] - t[0][2]), (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[1][1] - t[0][1]) * (t[2][0] - t[0][0])]);
+    out.push(`  facet normal ${n.map(etfNum).join(" ")}`, "    outer loop", ...t.map(p => `      vertex ${p.map(etfNum).join(" ")}`), "    endloop", "  endfacet");
+  }
+  out.push("endsolid " + name.replace(/\s+/g, "_"));
+  return out.join("\n") + "\n";
+}
+function etfObj(solids, name) {
+  const out = [`# ${name}, from CSI ProMax Engine (${modelU().length || "model"} units)`];
+  let base = 1;
+  for (const o of solids) {
+    if (!o.tris.length) continue;
+    out.push(`g ${(o.kind || "object")}_${String(o.name).replace(/\s+/g, "_")}`);
+    for (const t of o.tris) for (const p of t) out.push("v " + p.map(etfNum).join(" "));
+    for (let i = 0; i < o.tris.length; i++, base += 3) out.push(`f ${base} ${base + 1} ${base + 2}`);
+  }
+  return out.join("\n") + "\n";
+}
+// IGES 5.3: each frame a Line (entity 110), each floor and wall edge a Line, in the model's units.
+function etfIges(solids, name, path) {
+  const segs = [];
+  for (const o of solids) {
+    if (o.line) { segs.push(o.line); continue; }
+    const p = o.outline; for (let i = 0; i < p.length; i++) segs.push([p[i], p[(i + 1) % p.length]]);
+  }
+  const card = (text, letter, n) => text.padEnd(72).slice(0, 72) + letter + String(n).padStart(7, "0");
+  const H = s => s.length + "H" + s;
+  const unit = {in: [1, "IN"], inch: [1, "IN"], ft: [4, "FT"], mm: [2, "MM"], cm: [10, "CM"], m: [6, "M"]}[String(modelU().length).toLowerCase()] || [6, "M"];
+  const now = new Date(), stamp = `${String(now.getFullYear())}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}.${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+  const max = Math.max(1, ...segs.flat().flat().map(v => Math.abs(v)));
+  const g = [H(","), H(";"), H(name), H(path.split(/[\\/]/).pop()), H("CSI ProMax Engine"), H("CSI ProMax Engine"), "32", "38", "6", "308", "15", H(name), "1.0", String(unit[0]), H(unit[1]), "1", "0.0", H(stamp), "1.0E-6", etfNum(max), H(""), H(""), "11", "0", H(stamp)].join(",") + ";";
+  const lines = s => { const out = []; let rest = s; while (rest.length > 72) { let cut = rest.lastIndexOf(",", 72); if (cut < 1) cut = 72; out.push(rest.slice(0, cut + 1)); rest = rest.slice(cut + 1); } out.push(rest); return out; };
+  const S = [card("CSI ProMax Engine IGES export of " + name, "S", 1)];
+  const G = lines(g).map((t, i) => card(t, "G", i + 1));
+  const D = [], Pp = [];
+  segs.forEach((s, i) => {
+    const dn = 2 * i + 1, text = "110," + [...s[0], ...s[1]].map(v => etfNum(v).includes(".") || /e/i.test(etfNum(v)) ? etfNum(v).toUpperCase() : etfNum(v) + ".0").join(",") + ";";
+    const parts = []; let rest = text; while (rest.length > 64) { let cut = rest.lastIndexOf(",", 64); if (cut < 1) cut = 64; parts.push(rest.slice(0, cut + 1)); rest = rest.slice(cut + 1); } parts.push(rest);
+    const first = Pp.length + 1;
+    parts.forEach(p => Pp.push(p.padEnd(64) + String(dn).padStart(8) + "P" + String(Pp.length + 1).padStart(7, "0")));
+    const f8 = v => String(v).padStart(8);
+    D.push([110, first, 0, 0, 0, 0, 0, 0, "00000000"].map(f8).join("") + "D" + String(dn).padStart(7, "0"));
+    D.push([110, 0, 0, parts.length, 0, "", "", "LINE", 0].map(f8).join("") + "D" + String(dn + 1).padStart(7, "0"));
+  });
+  const T = card(`S${String(S.length).padStart(7, "0")}G${String(G.length).padStart(7, "0")}D${String(D.length).padStart(7, "0")}P${String(Pp.length).padStart(7, "0")}`, "T", 1);
+  return [...S, ...G, ...D, ...Pp, T].join("\r\n") + "\r\n";
+}
+// IFC 2x3 (Coordination View): the project, site, building and its stories; each column, beam and brace an
+// IfcColumn, IfcBeam or IfcMember swept along it with its section's outline; each floor an IfcSlab and each wall an
+// IfcWall, its outline extruded by its thickness. In the model's length unit.
+function etfIfc(solids, name, path) {
+  const L = [], add1 = s => { L.push(s); return "#" + L.length; };
+  const S = s => "'" + String(s == null ? "" : s).replace(/\\/g, "\\\\").replace(/'/g, "''") + "'";
+  const R = v => { let s = etfNum(v); if (!/[.eE]/.test(s)) s += "."; return s.replace("e", "E"); };
+  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+  const guid = () => { let s = chars[Math.floor(Math.random() * 4)]; for (let i = 1; i < 22; i++) s += chars[Math.floor(Math.random() * 64)]; return S(s); };
+  const pt = p => add1(`IFCCARTESIANPOINT((${p.map(R).join(",")}))`), dir = d => add1(`IFCDIRECTION((${d.map(R).join(",")}))`);
+  const person = add1("IFCPERSON($,$,'',$,$,$,$,$)"), org = add1("IFCORGANIZATION($,'CSI ProMax',$,$,$)"), po = add1(`IFCPERSONANDORGANIZATION(${person},${org},$)`);
+  const app = add1(`IFCAPPLICATION(${org},'1','CSI ProMax Engine','CSIProMax')`);
+  const own = add1(`IFCOWNERHISTORY(${po},${app},$,.ADDED.,$,$,$,${Math.floor(Date.now() / 1000)})`);
+  const lu0 = String(modelU().length || "m").toLowerCase();
+  let len;
+  if (lu0 === "m") len = add1("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)");
+  else if (lu0 === "mm") len = add1("IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)");
+  else if (lu0 === "cm") len = add1("IFCSIUNIT(*,.LENGTHUNIT.,.CENTI.,.METRE.)");
+  else {
+    const metre = add1("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)"), dims = add1("IFCDIMENSIONALEXPONENTS(1,0,0,0,0,0,0)");
+    const feet = lu0 === "ft", mw = add1(`IFCMEASUREWITHUNIT(IFCLENGTHMEASURE(${feet ? "0.3048" : "0.0254"}),${metre})`);
+    len = add1(`IFCCONVERSIONBASEDUNIT(${dims},.LENGTHUNIT.,${feet ? "'FOOT'" : "'INCH'"},${mw})`);
+  }
+  const units = add1(`IFCUNITASSIGNMENT((${len}))`);
+  const o0 = pt([0, 0, 0]), z0 = dir([0, 0, 1]), x0 = dir([1, 0, 0]), world = add1(`IFCAXIS2PLACEMENT3D(${o0},${z0},${x0})`);
+  const ctx = add1(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,${world},$)`);
+  const proj = add1(`IFCPROJECT(${guid()},${own},${S(name)},$,$,$,$,(${ctx}),${units})`);
+  const sitePl = add1(`IFCLOCALPLACEMENT($,${world})`), site = add1(`IFCSITE(${guid()},${own},'Site',$,$,${sitePl},$,$,.ELEMENT.,$,$,$,$,$)`);
+  const bPl = add1(`IFCLOCALPLACEMENT(${sitePl},${world})`), bld = add1(`IFCBUILDING(${guid()},${own},'Building',$,$,${bPl},$,$,.ELEMENT.,$,$,$)`);
+  const storeys = new Map();
+  for (const s of stories) {
+    const sp = add1(`IFCLOCALPLACEMENT(${bPl},${add1(`IFCAXIS2PLACEMENT3D(${pt([0, 0, s.elevation || 0])},$,$)`)})`);
+    storeys.set(s.name, {id: add1(`IFCBUILDINGSTOREY(${guid()},${own},${S(s.name)},$,$,${sp},$,$,.ELEMENT.,${R(s.elevation || 0)})`), items: []});
+  }
+  const loose = [];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  for (const o of solids) {
+    let place, profile, depth, extrude = z0;
+    if (o.line) {
+      if (!o.profile) continue;
+      const [A, B] = o.line, ax = o.profile.axes, length = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
+      if (!(length > 0)) continue;
+      place = add1(`IFCAXIS2PLACEMENT3D(${pt(A)},${dir(unitv(sub(B, A)))},${dir(ax.e2)})`);
+      const poly = o.profile.pts.map(p => pt2(p[0] - o.profile.drop, p[1]));
+      profile = add1(`IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,${S(o.section)},${add1(`IFCPOLYLINE((${[...poly, poly[0]].join(",")}))`)})`);
+      depth = length;
+    } else {
+      const pts = o.outline, n = o.normal, t = o.thick || 0;
+      if (!(t > 0)) continue;
+      const ux = unitv(sub(pts[1], pts[0])), uy = cross(n, ux), base = o.kind === "wall" ? add(pts[0], mul(n, t / 2)) : pts[0];
+      place = add1(`IFCAXIS2PLACEMENT3D(${pt(base)},${dir(n)},${dir(ux)})`);
+      const flat = pts.map(p => { const d = sub(p, pts[0]); return [d[0] * ux[0] + d[1] * ux[1] + d[2] * ux[2], d[0] * uy[0] + d[1] * uy[1] + d[2] * uy[2]]; });
+      const poly = flat.map(p => pt2(p[0], p[1]));
+      profile = add1(`IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,${S(o.section)},${add1(`IFCPOLYLINE((${[...poly, poly[0]].join(",")}))`)})`);
+      depth = t; extrude = dir([0, 0, -1]);
+    }
+    const solid = add1(`IFCEXTRUDEDAREASOLID(${profile},${add1(`IFCAXIS2PLACEMENT3D(${o0},$,$)`)},${extrude},${R(depth)})`);
+    const shape = add1(`IFCSHAPEREPRESENTATION(${ctx},'Body','SweptSolid',(${solid}))`), pds = add1(`IFCPRODUCTDEFINITIONSHAPE($,$,(${shape}))`);
+    const lp = add1(`IFCLOCALPLACEMENT(${bPl},${place})`);
+    const head = `${guid()},${own},${S(o.name)},$,${S(o.section)},${lp},${pds},${S(o.name)}`;
+    const el = add1(o.kind === "column" ? `IFCCOLUMN(${head})` : o.kind === "beam" ? `IFCBEAM(${head})` : o.line ? `IFCMEMBER(${head})` : o.kind === "wall" ? `IFCWALL(${head})` : `IFCSLAB(${head},.FLOOR.)`);
+    (storeys.get(o.story) || {items: loose}).items.push(el);
+  }
+  function pt2(u, v) { return add1(`IFCCARTESIANPOINT((${R(u)},${R(v)}))`); }
+  add1(`IFCRELAGGREGATES(${guid()},${own},$,$,${proj},(${site}))`);
+  add1(`IFCRELAGGREGATES(${guid()},${own},$,$,${site},(${bld}))`);
+  if (storeys.size) add1(`IFCRELAGGREGATES(${guid()},${own},$,$,${bld},(${[...storeys.values()].map(s => s.id).join(",")}))`);
+  for (const s of storeys.values()) if (s.items.length) add1(`IFCRELCONTAINEDINSPATIALSTRUCTURE(${guid()},${own},$,$,(${s.items.join(",")}),${s.id})`);
+  if (loose.length) add1(`IFCRELCONTAINEDINSPATIALSTRUCTURE(${guid()},${own},$,$,(${loose.join(",")}),${bld})`);
+  const stamp = new Date().toISOString().slice(0, 19);
+  return ["ISO-10303-21;", "HEADER;", "FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');",
+    `FILE_NAME(${S(path.split(/[\\/]/).pop())},'${stamp}',(''),(''),'CSI ProMax Engine','CSI ProMax Engine','');`, "FILE_SCHEMA(('IFC2X3'));", "ENDSEC;", "DATA;",
+    ...L.map((s, i) => `#${i + 1}=${s};`), "ENDSEC;", "END-ISO-10303-21;"].join("\r\n") + "\r\n";
+}
+
+// ---- File > Print Graphics: ETABS's Print Graphics window. Its toolbar: Print, Printer Setup, Page Setup, Add Image,
+// Preview..., the DXF button; Drawing Scale (its scale list on only when ticked) and Zoom. The page: "ETABS 23.2.0" and
+// the date at the top, the active window's drawing in a frame under them. ----
+const etfPage = {landscape: false, margin: 0.75, images: []};
+function etfPrintGraphics() {
+  const p = panes[active], c = p && p.hold && p.hold.querySelector("canvas");
+  const img = c ? c.toDataURL("image/png") : "";
+  const date = new Date().toLocaleDateString("en-US");
+  const scales = ["1/16\" = 1'", "1/8\" = 1'", "3/16\" = 1'", "1/4\" = 1'", "3/8\" = 1'", "1/2\" = 1'", "3/4\" = 1'", "1\" = 1'"];
+  const zooms = ["Whole Page", "Page Width", "500%", "200%", "150%", "100%", "75%", "50%", "25%", "10%"];
+  const page = () => `<div class="etfPg" style="background:#fff;color:#000;margin:12px auto;padding:${etfPage.margin * 64}px;width:${etfPage.landscape ? 704 : 544}px;box-shadow:0 0 0 1px #bbb">
+      <div style="display:flex;justify-content:space-between;font:13px Arial">${"<span>ETABS 23.2.0</span>"}<span>${esc(date)}</span></div>
+      <div style="border:1px solid #000;margin-top:4px;aspect-ratio:${etfPage.landscape ? "11/7" : "8.5/9.5"};display:flex;align-items:center;justify-content:center;overflow:hidden">${img ? `<img src="${img}" style="max-width:100%;max-height:100%">` : ""}</div>
+      ${etfPage.images.map(s => `<img src="${s}" style="max-width:100%;margin-top:6px">`).join("")}</div>`;
+  const d = dialog("Print Graphics", `<div class="etfPG" style="width:760px">
+      <div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--line2)">
+        <button id="pgPrint" title="Print">&#128438;</button><button id="pgSetup" title="Printer Setup">&#128424;</button><button id="pgPage" title="Page Setup">&#128459;</button><button id="pgImg" title="Add Image">&#128444;</button>
+        <button id="pgPrev">Preview...</button><button id="pgDxf" title="DXF">DXF</button>
+        <span style="margin-left:auto"></span><label><input type="checkbox" id="pgScl"> <b>Drawing Scale</b></label><select id="pgSc" disabled>${scales.map(s => `<option>${esc(s)}</option>`).join("")}</select>
+        <b>Zoom</b><select id="pgZ">${zooms.map(z => `<option${z === "100%" ? " selected" : ""}>${z}</option>`).join("")}</select></div>
+      <div id="pgView" style="height:440px;overflow:auto;background:#e6e6e6">${page()}</div></div>`, [], {width: 800});
+  const view = q(d, "#pgView"), redraw = () => { view.innerHTML = page(); zoom(); };
+  const zoom = () => { const z = q(d, "#pgZ").value, pg = view.querySelector(".etfPg"); if (!pg) return; const k = /%$/.test(z) ? parseFloat(z) / 100 : z === "Page Width" ? (view.clientWidth - 30) / pg.offsetWidth : Math.min((view.clientWidth - 30) / pg.offsetWidth, (view.clientHeight - 30) / pg.offsetHeight); pg.style.zoom = k; };
+  q(d, "#pgZ").onchange = zoom;
+  q(d, "#pgScl").onchange = e => { q(d, "#pgSc").disabled = !e.target.checked; };
+  q(d, "#pgPrint").onclick = q(d, "#pgSetup").onclick = () => etfPrintNow(page());
+  q(d, "#pgPage").onclick = () => dialog("Page Setup", `<fieldset><legend>Orientation</legend><label><input type="radio" name="pgO" value="p" ${etfPage.landscape ? "" : "checked"}> Portrait</label> <label><input type="radio" name="pgO" value="l" ${etfPage.landscape ? "checked" : ""}> Landscape</label></fieldset>
+      <fieldset><legend>Margins (inches)</legend><div class="g2"><span>Left, Right, Top, Bottom</span><input id="pgM" type="number" step="0.05" min="0" value="${etfPage.margin}"></div></fieldset>`,
+    [["OK", f => { etfPage.landscape = q(f, "[name=pgO]:checked").value === "l"; etfPage.margin = Math.max(0, +q(f, "#pgM").value || 0); redraw(); }], ["Cancel"]], {width: 320});
+  q(d, "#pgImg").onclick = () => { const i = document.createElement("input"); i.type = "file"; i.accept = "image/*"; i.onchange = () => { const r = new FileReader(); r.onload = () => { etfPage.images.push(String(r.result)); redraw(); }; if (i.files[0]) r.readAsDataURL(i.files[0]); }; i.click(); };
+  q(d, "#pgPrev").onclick = () => dialog("Print Preview", `<div style="max-height:620px;overflow:auto;background:#e6e6e6">${page()}</div>`, [["Print", () => etfPrintNow(page())], ["Close"]], {width: 820});
+  q(d, "#pgDxf").onclick = () => etfExportGeometry("dxf");
+  setTimeout(zoom, 0);
+}
+// Prints the page alone: the window's own print, with only the page shown while it prints.
+function etfPrintNow(html) {
+  let box = document.getElementById("etfPrintArea");
+  if (!box) { box = document.createElement("div"); box.id = "etfPrintArea"; document.body.appendChild(box); }
+  box.innerHTML = html; document.body.classList.add("etfPrinting");
+  if (!document.getElementById("etfPrintCss")) { const s = document.createElement("style"); s.id = "etfPrintCss"; s.textContent = "#etfPrintArea{display:none}@media print{body.etfPrinting>*:not(#etfPrintArea){display:none!important}body.etfPrinting #etfPrintArea{display:block!important}body.etfPrinting #etfPrintArea .etfPg{box-shadow:none!important;margin:0!important}}" + `@page{size:${etfPage.landscape ? "landscape" : "portrait"}}`; document.head.appendChild(s); }
+  try { window.print(); } finally { setTimeout(() => document.body.classList.remove("etfPrinting"), 500); }
 }
 
 // ---- Excel: the model's tables out and in, as SAP2000 does (File > Export / Import > Excel) ----
@@ -25573,6 +26858,10 @@ function modelerStart() {
     if (k === "Escape" && hm.chain.length) { e.stopImmediatePropagation(); hm.chain = []; hm.reshape = null; draw(); return; }
     if (ctrl && k.toLowerCase() === "z") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("undo"); }
     else if (ctrl && k.toLowerCase() === "y") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("redo"); }
+    // ETABS's File shortcuts: Shift+Ctrl+S Save As, Shift+Ctrl+E Close, Ctrl+P Print Graphics.
+    else if (ctrl && e.shiftKey && k.toLowerCase() === "s") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("saveAs"); }
+    else if (ctrl && e.shiftKey && k.toLowerCase() === "e" && etnOn()) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("etf:close"); }
+    else if (ctrl && !e.shiftKey && k.toLowerCase() === "p" && etnOn()) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("etf:print"); }
     else if (ctrl && k.toLowerCase() === "s") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("save"); }
     else if (ctrl && k.toLowerCase() === "n") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("new"); }
     else if (ctrl && k.toLowerCase() === "o") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("open"); }

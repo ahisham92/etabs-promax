@@ -38,14 +38,14 @@ public static class TableCarry
     /// definition by name, else by what the table is about.</summary>
     private static readonly string[][] Identities =
     [
-        ["Story", "Label"], ["Name"], ["Material"], ["LoadPattern"], ["LoadCase"], ["Case"], ["Combo"], ["ComboName"], ["Pier"],
+        ["Story", "Label"], ["Story", "PointBay"], ["Name"], ["Material"], ["LoadPattern"], ["LoadCase"], ["Case"], ["Combo"], ["ComboName"], ["Pier"],
         ["Spandrel"], ["Group"], ["GridSystem"], ["Function"], ["Link"], ["Tendon"], ["Strip"], ["Joint"], ["Point"], ["Frame"],
-        ["Area"], ["Object"], ["Story"], ["Label"],
+        ["Area"], ["Object"], ["Story"], ["Tower"], ["Label"],
     ];
 
     /// <summary>Fields that tell apart rows of one thing (a link's directions, a curve's points, a load's stations).</summary>
     private static readonly string[] Within =
-        ["Direction", "DOF", "Dir", "Station", "StepNum", "Point Number", "PointNum", "EdgeNum", "LayerName", "Layer", "LoadPattern", "LoadCase", "Case", "Bar", "Order"];
+        ["Direction", "DOF", "Dir", "Station", "StepNum", "Point Number", "PointNum", "EdgeNum", "LayerName", "Layer", "LoadPattern", "LoadCase", "Case", "Bar", "Order", "Tower"];
 
     /// <summary>The key fields of a table: what names the thing a row is about (<see cref="Identities"/>), and what
     /// tells apart several rows of one thing (<see cref="Within"/>, while the identity alone repeats). A table with
@@ -54,6 +54,10 @@ public static class TableCarry
     {
         bool TextEverywhere(int i) => t.Rows.All(r => i < r.Length && !IsNumber(r[i]));
         var identity = Identities.FirstOrDefault(set => set.All(k => IndexOf(t.Fields, k) >= 0))?.Select(k => t.Fields[IndexOf(t.Fields, k)]).ToList();
+        // A table of one row with nothing that names it (Miscellaneous Options, a form's settings): the row is matched
+        // with the one row there, and put by merging into it. Keyed by its text fields, a changed Yes/No made it a
+        // "lost" row that went in beside the program's own (0.4.73 Ex002: Bounding Plane Yes came back No).
+        if (identity is null && t.Rows.Count <= 1) return [];
         if (identity is null)
             return t.Fields.Select((f, i) => (f, i)).Where(x => !Bookkeeping.Contains(x.f) && TextEverywhere(x.i)).Select(x => x.f).ToList();
         foreach (var w in Within)
@@ -75,14 +79,17 @@ public static class TableCarry
     public static CarriedTables Measure(string program, IReadOnlyDictionary<string, Table> before, IReadOnlyDictionary<string, Table> after)
     {
         var carried = new CarriedTables { Program = program, Measured = DateTime.UtcNow };
-        foreach (var (key, a) in before)
+        var auto = AutoPoints(before); var autoAfter = AutoPoints(after);
+        foreach (var (key, a0) in before)
         {
+            var a = WithoutInternal(WithoutAutoPoints(a0, auto));
             if (a.Rows.Count == 0) continue;
+            if (after.TryGetValue(key, out var listed) && SameLists(key, a, WithoutInternal(listed))) continue;
             var keys = KeyFields(a);
             var fields = a.Fields.Where(f => !Bookkeeping.Contains(f)).ToList();
             var rows = new List<Dictionary<string, string>>();
             Dictionary<string, string> Whole(string[] r) => fields.ToDictionary(f => f, f => Value(a, r, f), StringComparer.OrdinalIgnoreCase);
-            if (!after.TryGetValue(key, out var b) || b.Rows.Count == 0)
+            if (!after.TryGetValue(key, out var b0) || WithoutInternal(WithoutAutoPoints(b0, autoAfter)) is not { Rows.Count: > 0 } b)
             {
                 rows.AddRange(a.Rows.Select(Whole));
             }
@@ -107,6 +114,56 @@ public static class TableCarry
             carried.Rows[key] = rows;
         }
         return carried;
+    }
+
+    /// <summary>The points the program makes itself (ETABS's diaphragm centres: "Is Auto Point" Yes in "Point Object
+    /// Connectivity"), by story and label. It places and numbers them on its own, takes none of their rows (0.4.73: "0
+    /// fatal, 3 errors" and the whole table refused), so nothing of them is carried.</summary>
+    public static HashSet<string> AutoPoints(IReadOnlyDictionary<string, Table> tables)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var t = tables.FirstOrDefault(x => x.Key.Equals("Point Object Connectivity", StringComparison.OrdinalIgnoreCase)).Value;
+        if (t is null || IndexOf(t.Fields, "IsAuto") < 0) return set;
+        foreach (var r in t.Rows)
+            if (Value(t, r, "IsAuto").Trim().Equals("Yes", StringComparison.OrdinalIgnoreCase))
+                set.Add(Value(t, r, "Story").Trim() + "\u0001" + Value(t, r, "PointBay").Trim());
+        return set;
+    }
+
+    /// <summary>A named table set (ETABS's "Database Table Named Set Definitions") lists its tables, patterns, cases and
+    /// combinations down columns, packed into as many rows as the longest list: one item fewer packs the others into
+    /// other rows. The same when each set has the same items in each column, in any row.</summary>
+    private static bool SameLists(string table, Table a, Table b)
+    {
+        if (!table.Equals("Database Table Named Set Definitions", StringComparison.OrdinalIgnoreCase) || IndexOf(a.Fields, "Name") < 0) return false;
+        string Lists(Table t) => string.Join("\n", t.Rows.GroupBy(r => Value(t, r, "Name").Trim().ToUpperInvariant()).OrderBy(g => g.Key, StringComparer.Ordinal).Select(g =>
+            g.Key + ":" + string.Join(";", t.Fields.Where(f => !Bookkeeping.Contains(f) && !f.Equals("Name", StringComparison.OrdinalIgnoreCase)).Select(f =>
+                f + "=" + string.Join(",", g.Select(r => Value(t, r, f).Trim().ToUpperInvariant()).Where(v => v.Length > 0).Distinct().OrderBy(v => v, StringComparer.Ordinal))))));
+        return Lists(a) == Lists(b);
+    }
+
+    /// <summary>ETABS's own internal items ("~LLRF", the live load reduction case it makes itself) are never carried: it
+    /// takes no row naming one (0.4.73 Ex002: the table set's rows refused, "2 errors", and the table left as it was). A
+    /// row about one is left out; one named among other values is left blank.</summary>
+    private static Table WithoutInternal(Table t)
+    {
+        static bool Internal(string v) => v.TrimStart().StartsWith('~');
+        if (!t.Rows.Any(r => r.Any(v => v is not null && Internal(v)))) return t;
+        var keys = Identities.FirstOrDefault(set => set.All(k => IndexOf(t.Fields, k) >= 0)) ?? [];
+        var at = keys.Select(k => IndexOf(t.Fields, k)).ToHashSet();
+        var rows = t.Rows.Where(r => !at.Any(i => i < r.Length && r[i] is not null && Internal(r[i])))
+            .Select(r => r.Select(v => v is not null && Internal(v) ? "" : v ?? "").ToArray()).ToList();
+        return new Table(t.Fields, rows);
+    }
+
+    private static Table WithoutAutoPoints(Table t, HashSet<string> auto)
+    {
+        if (auto.Count == 0) return t;
+        var label = IndexOf(t.Fields, "PointBay") >= 0 ? "PointBay" : IndexOf(t.Fields, "Label") >= 0 ? "Label" : null;
+        var story = IndexOf(t.Fields, "Story") >= 0;
+        if (label is null || !story) return t;
+        var rows = t.Rows.Where(r => !auto.Contains(Value(t, r, "Story").Trim() + "\u0001" + Value(t, r, label).Trim())).ToList();
+        return rows.Count == t.Rows.Count ? t : new Table(t.Fields, rows);
     }
 
     /// <summary>The order the tables go in: definitions (materials, sections, patterns, cases) before what uses them

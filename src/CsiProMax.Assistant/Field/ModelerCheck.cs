@@ -130,6 +130,43 @@ public static class ModelerCheck
           if (scope !== 2) return {fail: "it has no choice of all or selected objects"};
           return {ok: `Run Options: Analyze only / Analyze and Design / Design only, ${kinds} designs, all or selected; closed without running`};
         },
+        // The program's File menu (etf*): Close asks to save a changed model (Cancel keeps it); Exit asks the same and is not
+        // let close the window; Print Graphics opens the program's window, and its Print prints the page with the drawing.
+        "m:etf:close": async () => {
+          await hmRun("define_load_pattern", {name: "CPM-CHKCLOSE", type: "Other", self_weight: 0}, true); await wait(300);
+          const count = frames.length; act("m:etf:close"); await wait(500);
+          const box = [...document.querySelectorAll(".dlg.etfAsk")].pop(), words = box ? box.textContent : "";
+          const buttons = box ? [...box.querySelectorAll(".df button")].map(b => b.textContent).join(", ") : "";
+          if (box) formOk("Cancel"); await wait(300); await hmRun("undo"); await wait(300);
+          if (!box) return {fail: "Close did not ask to save the changed model"};
+          if (!/has changed\./.test(words) || !/Save current changes\?/.test(words) || buttons !== "Yes, No, Cancel") return {fail: "the box reads " + words.slice(0, 120) + " with " + buttons};
+          return frames.length === count ? {ok: "asks '<model> has changed. Save current changes?' Yes/No/Cancel; Cancel keeps the model"} : {fail: "Cancel did not keep the model"};
+        },
+        "m:etf:exit": async () => {
+          const real = window.close; let closed = 0; window.close = () => { closed++; };
+          try {
+            await hmRun("define_load_pattern", {name: "CPM-CHKEXIT", type: "Other", self_weight: 0}, true); await wait(300);
+            act("m:etf:exit"); await wait(500);
+            const box = [...document.querySelectorAll(".dlg.etfAsk")].pop();
+            if (box) formOk("Cancel"); await wait(300); await hmRun("undo"); await wait(300);
+            if (!box) return {fail: "Exit did not ask to save the changed model"};
+            return closed ? {fail: "Cancel still closed the window"} : {ok: "asks to save first; Cancel keeps the window open"};
+          } finally { window.close = real; }
+        },
+        "m:etf:print": async () => {
+          const real = window.print; let asked = 0;
+          window.print = () => { asked++; };
+          try {
+            await act("m:etf:print"); await wait(400);
+            const d = [...document.querySelectorAll(".dlg")].pop();
+            if (!d || !d.querySelector("#pgView .etfPg")) return {fail: "Print Graphics opened no page"};
+            const tips = ["#pgPrint", "#pgSetup", "#pgPage", "#pgImg"].map(x => (d.querySelector(x) || {}).title).join(", ");
+            if (tips !== "Print, Printer Setup, Page Setup, Add Image") return {fail: "its toolbar is " + tips};
+            if (!d.querySelector("#pgView img")) return {fail: "the page has no drawing of the active window"};
+            d.querySelector("#pgPrint").click(); await wait(200);
+            return asked === 1 ? {ok: "the program's Print Graphics window with the page; Print asked for the printer once"} : {fail: `Print asked for the printer ${asked} times`};
+          } finally { window.print = real; closeDialogs(); }
+        },
         "m:open": async () => {
           const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
           if (!saved.ok) return {fail: "the check could not save a model to open: " + saved.error};
@@ -631,6 +668,104 @@ public static class ModelerCheck
           const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
           return off.length ? {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")} : {ok: `Analyze ${an.length} items, Draw ${dr.length} items, in the program's order and words`};
         });
+        // The Detailing menu item by item and its rule forms with every sub-form they open (pictures in
+        // field/reference-forms/etabs/Detailing): titles in the program's words; a value set and OK is kept with the model,
+        // Set to Default Values and OK puts the program's defaults back.
+        await step("Detailing menu and its rule forms, as the program has them (23.2 pictures)", async () => {
+          if (program !== "etabs") { await hmRun("set_model_program", {program: "etabs"}, true); for (let i = 0; i < 30 && program !== "etabs"; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
+          const m = programMenus(), words = l => (l || []).filter(Boolean).map(x => x[0]), sub = n => ((m.Detailing || []).find(x => x && x[0] === n) || [])[1];
+          const want = {top: ["Bar Selection and Curtailment Rule", "Clear Detailing...", "Concrete Detailing", "Steel Detailing", "Drawing Management", "Generate/Show Beam Groups...", "DetailingComments and Log..."],
+            "Bar Selection and Curtailment Rule": ["Beam Bar Selection and Curtailment Rule...", "Slab/Mat/Footing Bar Selection and Curtailment Rule...", "Column Stack Bar Selection and Curtailment Rule...", "Wall Stack Bar Selection and Curtailment Rule..."],
+            "Concrete Detailing": ["Run/Update Beam Detailing/Check", "Run/Update Slab/Mat/Footing Detailing/Check", "Run/Update Column Stack Detailing/Check", "Run/Update Wall Stack Detailing/Check", "Show/Edit Beam Detailing...", "Show/Edit Slab/Mat/Footing Detailing...", "Show/Edit Column Stack Detailing...", "Show/Edit Wall Stack Detailing...", "Clear Beam Detailing...", "Clear Slab/Mat/Footing Detailing...", "Clear Column Stack Detailing...", "Clear Wall Stack Detailing..."],
+            "Steel Detailing": ["Run/Update Beam Detailing/Check", "Run/Update Column Stack Detailing/Check", "Show/Edit Beam Detailing...", "Show/Edit Column Stack Detailing...", "Clear Beam Detailing...", "Clear Column Stack Detailing..."],
+            "Drawing Management": ["Drawing Sheet Setup...", "Drawing Format Properties...", "Open Drawing Manager...", "Clear Drawing Manager..."]};
+          const got = {top: words(m.Detailing).filter(x => x !== "Engine Extras")}; for (const k of Object.keys(want)) if (k !== "top") got[k] = words(sub(k));
+          const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+          if (off.length) return {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")};
+          const top = () => { const f = document.querySelectorAll(".dlg"); return f[f.length - 1]; }, title = () => (top() && top().querySelector(".dt b") || {}).textContent || "";
+          const forms = [["m:etq:beam", "Concrete Beam: Bar Selection and Curtailment Rule", [["#etqDev", "Bar Development Rules"], ["#etqCur", "Rebar Curtailment Rules"], ["#etqSel", "Rebar Selection Rules"], ["#etqLong", "Longitudinal Rebars in Sections"]]],
+            ["m:etq:slab", "Slab/Mat/Footing: Bar Selection and Curtailment Rule", [["#etqSDev", "Bar Development Rules"], ["#etqSCur", "Slab Rebar Curtailment Rules"], ["#etqSSel", "Rebar Selection Rules for Strip"], ["#etqMSel", "Rebar Selection Rules for Strip"], ["#etqFSel", "Rebar Selection Rules for Footing"]]],
+            ["m:etq:column", "Concrete Column Stack: Bar Layout and Selection Rule", [["#etqCSel", "Rebar Selection Rules", ["#etqConf", "Confinement: Non Seismic Detailing"]], ["#etqCSpl", "Bar Splices"]]],
+            ["m:etq:wall", "Concrete Wall Stack: Detailing Rules", [["#etqSpan", "Spandrel Rebar Rules"]]]];
+          const said = [];
+          for (const [a, name, subs] of forms) {
+            await act(a); await wait(500);
+            if (title() !== name) return {fail: `${a} opened "${title()}", not "${name}"`};
+            const main = top();
+            for (const [b, t, inner] of subs) {
+              const btn = main.querySelector(b); if (!btn || btn.disabled) return {fail: `${name}: no ${b} button`};
+              btn.click(); await wait(250);
+              if (title() !== t) return {fail: `${name}: ${b} opened "${title()}", not "${t}"`};
+              if (inner) { top().querySelector(inner[0]).click(); await wait(250); if (title() !== inner[1]) return {fail: `${t}: opened "${title()}", not "${inner[1]}"`}; top().close(); }
+              top().close(); await wait(100);
+            }
+            said.push(`${name}: ${main.querySelectorAll("[data-p]").length} fields, ${subs.length} sub-forms`);
+            main.close(); await wait(100);
+          }
+          // Wall: Pier Rebar Rules opens once Satisfy Required As using Rules is chosen, as in the program.
+          await act("m:etq:wall"); await wait(500);
+          let main = top(); main.querySelector('[data-p="main.pier"][value="rules"]').click(); await wait(100);
+          main.querySelector("#etqPier").click(); await wait(250);
+          if (title() !== "Pier Rebar Rules") return {fail: "Pier Rebar Rules did not open: " + title()};
+          top().close(); formOk("OK"); await wait(900);
+          await act("m:etq:wall"); await wait(500); main = top();
+          if (!main.querySelector('[data-p="main.pier"][value="rules"]').checked) return {fail: "the wall rule chosen and OK was not kept"};
+          main.querySelector("#etqDef").click(); await wait(100); formOk("OK"); await wait(900);
+          const j = await hmRun("detailing_rules", {}, true);
+          if (!j.ok || (j.result.rules || {}).wall) return {fail: "Set to Default Values and OK did not put the defaults back: " + JSON.stringify(j.result || j.error)};
+          return {ok: `Detailing ${got.top.length} items in the program's order and words; ` + said.join("; ") + "; a wall rule was kept and put back to defaults"};
+        });
+        if (window.cpmForms) for (const [what, label] of [["beam", "Beam"], ["slab", "Slab/Mat/Footing"], ["column", "Column Stack"], ["wall", "Wall Stack"]])
+          window.cpmForms.push({path: `Detailing > Bar Selection and Curtailment Rule > ${label} Bar Selection and Curtailment Rule...`, act: "m:etq:" + what, target: "etabs"});
+        // Design > Steel Connection Design (its submenu and View/Revise Preferences), Live Load Reduction Factors and the
+        // lateral displacement and time period targets, as the 23.2 pictures show them (field/reference-forms/etabs/Design):
+        // each form set as an engineer sets it, OK, and the model holds what was set.
+        await step("Steel Connection Design, Live Load Reduction and design target forms, as the program has them (23.2 pictures)", async () => {
+          if (typeof etcPrefs !== "function") return {fail: "the forms are not on the page"};
+          const said = [], last = () => { const f = document.querySelectorAll(".dlg"); return f[f.length - 1]; };
+          const read = async () => { const j = await hmPost({tool: "design_settings", args: {}}); return j && j.ok ? j.result : {}; };
+          const words = l => (l || []).filter(Boolean).map(x => x[0]);
+          const sub = words(etcConnectionMenu()), want = ["View/Revise Preferences...", "Select Design Combinations...", "Start Design/Check", "Interactive Design", "Display Design Info...", "Verify All Connections Passed...", "Reset All Overwrites...", "Delete Design Results..."];
+          if (JSON.stringify(sub) !== JSON.stringify(want)) return {fail: "Steel Connection Design submenu: " + sub.join(" | ")};
+          await etcPrefs(); await wait(300);
+          let d = last(), title = d ? d.querySelector(".dt b").textContent : "";
+          if (!/^Steel Connection Design Preferences for AISC 360-/.test(title)) return {fail: "the preferences form is titled " + title};
+          const tabs = [...d.querySelectorAll("#etcT [data-t]")].map(b => b.textContent), types = d.querySelector("#etcTy").options.length, rows = d.querySelectorAll("#etcB tr").length;
+          if (tabs.join("|") !== "Beam-Beam|Beam-Column|Column-Footing" || types !== 4 || rows !== 18) return {fail: `tabs ${tabs.join("|")}, ${types} types, ${rows} rows (want 3 tabs, 4 types, 18 rows)`};
+          const spacing = [...d.querySelectorAll("#etcB tr")].find(tr => /^Bolt Spacing, S/.test(tr.children[1].textContent)).querySelector("input");
+          spacing.value = etcUS() ? "3.5" : "88.9"; spacing.dispatchEvent(new Event("change"));
+          formOk("OK"); await wait(1500);
+          let st = await read();
+          const kept = (st.connection || []).find(r => r.Group === "Beam-Beam|Partial Depth" && r.Item === "Bolt Spacing, S");
+          if (!kept || Math.abs(Number(kept.Value) - 3.5) > 1e-6) return {fail: "the bolt spacing was not kept: " + JSON.stringify(st.connection || [])};
+          said.push("connection preferences kept");
+          await etcLiveLoadReduction(); await wait(300); d = last();
+          const radios = d.querySelectorAll("input[name=llM]").length, codes = d.querySelector("#llC").options.length;
+          if (radios !== 5 || codes !== 13) return {fail: `Live Load Reduction Factor has ${radios} methods and ${codes} codes (want 5 and 13)`};
+          d.querySelector("input[name=llM][value=User]").click(); d.querySelector("input[name=llM][value=User]").dispatchEvent(new Event("change"));
+          formOk("OK"); await wait(1500); st = await read();
+          const llrf = (st.live_load_reduction || []).find(r => r.Row === "Form");
+          if (!llrf || llrf.Method !== "User") return {fail: "User Parameters was not kept: " + JSON.stringify(st.live_load_reduction || [])};
+          await hmRun("set_live_load_reduction", {method: "Code", code: "ASCE7-10", default_min: true}, true);
+          said.push("live load reduction kept");
+          await etcDisplacementTargets(); await wait(300); d = last();
+          d.querySelector("#dtA").click(); await wait(100);
+          const target = d.querySelectorAll("#dtG tbody tr").length;
+          if (target !== 1) return {fail: "Add made " + target + " displacement targets"};
+          formOk("OK"); await wait(1500); st = await read();
+          if ((st.displacement_targets || []).length !== 1) return {fail: "the displacement target was not kept: " + JSON.stringify(st.displacement_targets || [])};
+          for (const c of new Set(st.displacement_targets.map(r => r.StaticCase))) await hmRun("define_table_rows", {table: "Design Optimization - Lateral Displacement Targets", name: c, rows: []}, true);
+          said.push("a displacement target kept");
+          hm.defs = null; if (!((await hmDefs()).load_cases || []).some(c => /^Modal/i.test(c.type || ""))) { said.push("no modal case for a time period target"); return {ok: said.join("; ")}; }
+          await etcPeriodTargets(); await wait(300); d = last();
+          d.querySelector("#ptA").click(); await wait(100);
+          if (d.querySelectorAll("#ptG tbody tr").length !== 1) return {fail: "Add made no time period target"};
+          formOk("OK"); await wait(1500); st = await read();
+          if ((st.period_targets || []).length !== 1) return {fail: "the time period target was not kept: " + JSON.stringify(st.period_targets || [])};
+          for (const c of new Set(st.period_targets.map(r => r.ModalCase))) await hmRun("define_table_rows", {table: "Design Optimization - Time Period Targets", name: c, rows: []}, true);
+          said.push("a time period target kept");
+          return {ok: said.join("; ")};
+        });
         // The Select menu in the program's order and words (pictures in field/reference-forms/<program>/Select): its
         // Select > Object Type... form selects every beam, and Deselect takes them off again.
         await step("Select menu, as the program has it (23.2 pictures), and Select by Object Type selects the beams", async () => {
@@ -690,7 +825,7 @@ public static class ModelerCheck
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL", "m:etf:p3dTxt", "m:etf:p3dStr"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();
