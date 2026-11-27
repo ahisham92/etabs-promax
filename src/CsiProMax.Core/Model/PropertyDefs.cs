@@ -700,6 +700,41 @@ public static class PropertyDefs
         m.Passthrough.RemoveAll(r => r.Heading == HingeHeading && r.Lines.Count == 0);
     }
 
+    /// <summary>The hinge lines of one frame as ETABS's own .e2k has them after the label and story (HINGEDISTRTYPE ...,
+    /// AUTOHINGETYPE ... TABLEITEM ... DOF ... RDISTANCE ..., HYSTYPE ...), each kept word for word.</summary>
+    public static List<string> HingeLinesOf(StructuralModel m, string label, string story) =>
+        m.Passthrough.Where(r => r.Heading == HingeHeading).SelectMany(r => r.Lines)
+            .Select(l => (l, t: Tokenize(l))).Where(x => x.t.Count >= 4 && x.t[0] == "HINGEASSIGN" && Unquote(x.t[1]) == label && Unquote(x.t[2]) == story)
+            .Select(x => string.Join("  ", x.t.Skip(3))).ToList();
+
+    /// <summary>Replaces the hinge lines of one frame with lines in ETABS's own form (Assign > Frame > Hinges as ETABS 23.2
+    /// has it); none takes the frame's hinges off.</summary>
+    public static void CheckHingeLines(IReadOnlyList<string> tails)
+    {
+        foreach (var t in tails)
+        {
+            var w = Tokenize(t);
+            if (w.Count < 2 || w[0] is not ("HINGEDISTRTYPE" or "AUTOHINGETYPE" or "HINGEPROP" or "HYSTYPE" or "HINGELENGTH" or "INTEGRATIONTYPE" or "SPACINGTYPE")) throw new ArgumentException($"'{t}' is not a hinge line of ETABS's .e2k.");
+        }
+    }
+
+    public static void SetHingeLines(StructuralModel m, string label, string story, IReadOnlyList<string> tails)
+    {
+        CheckHingeLines(tails);
+        bool Mine(string l) => Tokenize(l) is { Count: >= 3 } t && t[0] == "HINGEASSIGN" && Unquote(t[1]) == label && Unquote(t[2]) == story;
+        var raw = m.Passthrough.Find(r => r.Heading == HingeHeading);
+        if (raw is null)
+        {
+            if (tails.Count == 0) return;
+            m.Passthrough.Add(raw = new RawSection { Heading = HingeHeading, After = "LINE ASSIGNS" });
+        }
+        var at = raw.Lines.FindIndex(Mine);
+        raw.Lines.RemoveAll(Mine);
+        var lines = tails.Select(t => $"  HINGEASSIGN {Quote(label)}  {Quote(story)}  {t.Trim()}").ToList();
+        raw.Lines.InsertRange(at < 0 ? raw.Lines.Count : Math.Min(at, raw.Lines.Count), lines);
+        m.Passthrough.RemoveAll(r => r.Heading == HingeHeading && r.Lines.Count == 0);
+    }
+
     private static void Name(string name, string what)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException($"Give the {what} a name.");

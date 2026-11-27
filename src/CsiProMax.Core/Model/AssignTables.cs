@@ -27,6 +27,7 @@ public static class AssignTables
         ["Frame Assignments - Moment Frame Beam Connection Type"] = ("frame", [("Type", "Type"), ("ConnLoc", "Connection Location"), ("SidePlOpt", "Sideplate Option"), ("RBSOption", "RBS Option"), ("x1", "x1"), ("x2", "x2"), ("x3", "x3"), ("a", "a"), ("b", "b"), ("c", "c")]),
         ["Frame Assignments - Output Stations"] = ("frame", [("StationOpt", "Station Option"), ("MaxSpacing", "Max Spacing"), ("MinStations", "Min Stations")]),
         ["Frame Assignments - Rebar Ratio For Creep Analysis"] = ("frame", [("RebarOpt", "Rebar Option"), ("UserRatio", "User Ratio")]),
+        ["Frame Assignments - Hinge - Overwrites"] = ("frame", [("AutoDivide", "Auto Subdivide"), ("RelLength", "Relative Length"), ("UseHngLenOW", "Use Hinge Length Overwrite"), ("NoDropLoad", "Does Not Drop Load"), ("StiffRatio", "Limiting Neg Stiffness Ratio")]),
         ["Frame Assignments - Tension and Compression Limits"] = ("frame", [("IncludeTens", "Include Tension Limit"), ("TensLimit", "Tension Limit"), ("IncludeComp", "Include Compression Limit"), ("CompLimit", "Compression Limit")]),
         ["Area Assignments - Additional Mass"] = ("area", [("AddedMass", "Added Mass")]),
         ["Area Assignments - Auto Edge Constraints"] = ("area", [("Constraint", "Constraint")]),

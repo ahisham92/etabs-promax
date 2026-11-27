@@ -6860,7 +6860,7 @@ function hmEtabsAssignMenu() {
   return [
     ["Joint", [it("Restraints...", "jRestraints"), it("Springs...", "jSprings"), it("Diaphragms...", "jDiaphragms"), it("Panel Zone...", "jPanelZone"), 0, it("Additional Mass...", "jMass"), it("Joint Floor Meshing Options...", "jFloorMesh")]],
     ["Frame", [it("Section Property...", "fSection"), it("Property Modifiers...", "fModifiers"), 0, it("Releases/Partial Fixity...", "fReleases"), it("End Length Offsets...", "fOffsets"), it("Insertion Point...", "fInsertion"), 0,
-      it("Local Axes...", "fAxes"), 0, it("Output Stations...", "fStations"), 0, it("Tension/Compression Limits...", "fTCLimits"), it("Hinges...", "fHinges"), 0, it("Line Springs...", "fSprings"), it("Additional Mass...", "fMass"), 0,
+      it("Local Axes...", "fAxes"), 0, it("Output Stations...", "fStations"), 0, it("Tension/Compression Limits...", "fTCLimits"), it("Hinges...", "fHinges"), ...(Object.values(assign.f || {}).some(x => x.hin && x.hin.length) ? [it("Hinge Overwrites...", "fHingeOw", !hmSelected("f").length)] : []), 0, it("Line Springs...", "fSprings"), it("Additional Mass...", "fMass"), 0,
       it("Pier Label...", "fPier"), it("Spandrel Label...", "fSpandrel"), 0, it("Frame Auto Mesh Options...", "fAutoMesh"), it("Frame Floor Meshing Options...", "fFloorMesh"), 0,
       it("Moment Frame Beam Connection Type...", "fBeamConn"), it("Column Splice Overwrite...", "fSplice"), it("Nonprismatic Property Parameters...", "fNonprismatic"), 0,
       it("Material Overwrite...", "fMaterial"), it("Column/Brace Rebar Ratio for Creep Analysis...", "fCreep"), it("Floor Cracking...", "fCracking")]],
@@ -8266,6 +8266,290 @@ async function etaWallMeshSize() {
   return d;
 }
 Object.assign(etaAssignForms, {aFloorMesh: etaShellFloorMesh, aWallMesh: etaShellWallMesh});
+
+// ---- ETABS 23.2's Assign > Frame > Hinges (pictures Assign/Frame/Hinges 1-40): the five Frame Hinge Definition Types,
+// the User Defined hinge list with its advanced parameters, and the Auto Hinge Assignment Data form of each auto hinge
+// type and hinge table, with its Hysteresis Type form. Hinges go into the .e2k as ETABS writes them (HINGEASSIGN ...
+// HINGEDISTRTYPE, AUTOHINGETYPE ... TABLEITEM ... DOF ... RDISTANCE ..., HYSTYPE). ----
+const etaHingeCodes = {
+  "Buckling Restrained Brace": {code: "BRB", tables: [["", "BRB", "brb"]]},
+  "From Tables In ASCE 41-13": {code: "ASCE41-13", tables: [["Table 10-7 (Concrete Beams - Flexure) Item i", "Concrete Beams", "cb"], ["Table 10-8 (Concrete Columns)", "Concrete Columns", "cc"], ["Table 9-6 (Steel Beams - Flexure)", "Steel Beams", "sb"], ["Table 9-6 (Steel Columns - Flexure)", "Steel Columns", "sc"], ["Table 9-7 (Steel Braces - Axial)", "Steel Braces", "br"]]},
+  "From Tables In ASCE 41-13 with EC8 2005, Part 3 Acceptance Criteria": {code: "EC8 2005", tables: [["Table 10-7 (Concrete Beams - Flexure) Item i", "Concrete Beams", "cb"], ["Table 10-8 (Concrete Columns)", "Concrete Columns", "cc"], ["Table 9-6 (Steel Beams - Flexure)", "Steel Beams", "sb"], ["Table 9-6 (Steel Columns - Flexure)", "Steel Columns", "sc"], ["Table 9-7 (Steel Braces - Axial)", "Steel Braces", "br"]]},
+  "From Tables In ASCE 41-17": {code: "ASCE41-17", tables: [["Table 10-7 (Concrete Beams - Flexure) Item i", "Concrete Beams", "cb", 1], ["Table 10-8 and 10-9 (Concrete Columns)", "Concrete Columns", "cc", 1], ["Table 9-7.1 (Steel Beams - Flexure)", "Steel Beams", "sb"], ["Table 9-7.1 (Steel Columns - Flexure)", "Steel Columns", "sc"], ["Table 9-8 (Steel Braces - Axial)", "Steel Braces", "br"],
+    ["Table 10-19 (Concrete Columns [Shear Wall] - Flexure Controlled) Item i", "Shear Walls - Flexure", "wf"], ["Table 10-20 (Concrete Columns [Shear Wall] - Shear Controlled) Item i", "Shear Walls - Shear", "ws"], ["Table 10-19 (Concrete Coupling Beams [Spandrel] - Flexure Controlled) Item ii", "Coupling Beams - Flexure", "kf", 1], ["Table 10-20 (Concrete Coupling Beams [Spandrel] - Shear Controlled) Item ii", "Coupling Beams - Shear", "ks"]]},
+  "From ASCE 41-23 (reference standard AISC 342-22, ACI 369.1-22)": {code: "ASCE41-23", tables: [["ACI 369.1-22 Table 4.2.2.2.2a (Reinforced Concrete Beams Controlled by Flexure)", "Concrete Beams", "cb", 1], ["ACI 369.1-22 Table 4.2.2.2.2b/c (Reinforced Concrete Columns Controlled by Flexure)", "Concrete Columns", "cc", 1], ["AISC 342-22 Table C2.2 (Steel Beams Subjected to Flexure)", "Steel Beams", "sb23"],
+    ["AISC 342-22 Table C3.6 (Steel Columns Subjected to Flexure with Axial Compression or Tension)", "Steel Columns", "sc"], ["AISC 342-22 Table C3.4 (Buckling Braces Subjected to Axial Force)", "Steel Braces", "br"], ["ACI 369.1-22 Table 7.4.1.1.1a/b modified by ASCE 41-23 10.3 (Concrete Shear Walls Controlled by Flexure)", "Shear Walls - Flexure", "wf"],
+    ["ACI 369.1-22 Table 7.4.1.1.2 modified by ASCE 41-23 10.3 (Concrete Shear Walls Controlled by Shear)", "Shear Walls - Shear", "ws"], ["ACI 369.1-22 Table 7.6.2a modified by ASCE 41-23 10.3 (Concrete Coupling Beams Controlled by Flexure)", "Coupling Beams - Flexure", "kf", 1], ["ACI 369.1-22 Table 7.6.2a modified by ASCE 41-23 10.3 (Concrete Coupling Beams Controlled by Shear)", "Coupling Beams - Shear", "ks"]]},
+};
+// The panels of each kind of hinge table, as the pictures show them.
+const etaHingePanels = {cb: ["dof2", "v", "trans", "rho", "drop", "lim"], cc: ["dofC", "pgl", "colBeh", "vye", "shearRho", "sd", "drop", "lim"], sb: ["dof2", "drop"], sb23: ["dof2", "p", "drop", "momFr"], sc: ["dofC", "drop", "fdrop", "p"], br: ["hys", "drop"],
+  wf: ["wallPM3", "pv", "pRatio", "drop", "vRatio"], ws: ["pRatio", "p", "drop"], kf: ["dofM3", "vRatio", "transDiag", "v", "drop", "lim"], ks: ["transOnly", "vRatio", "drop", "v"], brb: ["hys"]};
+const etaHys = {Isotropic: [], Kinematic: [], Takeda: [], Pivot: [["PivotAlpha1", "α<sub>1</sub>", 10], ["PivotAlpha2", "α<sub>2</sub>", 10], ["PivotBeta1", "β<sub>1</sub>", 0.7], ["PivotBeta2", "β<sub>2</sub>", 0.7], ["PivotEta", "η", 0]], Concrete: [["ConcreteFact", "Energy Degradation Factor", 0]], "BRB Hardening": "brb", Degrading: "deg"};
+const etaHingeDefaultAuto = () => ({type: "From ASCE 41-23 (reference standard AISC 342-22, ACI 369.1-22)", table: "AISC 342-22 Table C2.2 (Steel Beams Subjected to Flexure)", dof: "M3", hys: "Isotropic", par: {}, from: "case", pcase: "Dead", pcase2: "Dead", user: {}, drops: false, fdrop: false, trans: true, diag: false, rho: "", colBeh: "Not Controlled", vye: "program", shearRho: "", sd: "", lim: "1.1", momFr: true, pRatio: "", vRatio: ""});
+function etaHysteresis(a, done) {
+  const d = dialog("Hysteresis Type", `${etaCss}<div class="etaF"><fieldset><legend>Hysteresis Type and Parameters</legend><div style="display:grid;grid-template-columns:120px 150px;gap:6px;align-items:center"><span>Hysteresis Type</span><select id="hyT">${opts(Object.keys(etaHys), a.hys)}</select></div><div id="hyP" style="margin:8px 0 0 30px"></div></fieldset></div>`,
+    [["OK", d => { a.hys = q(d, "#hyT").value; d.querySelectorAll("[data-hp]").forEach(x => a.par[x.dataset.hp] = x.value); done(); }], ["Cancel"]], {width: 330});
+  const paint = () => { const p = etaHys[q(d, "#hyT").value];
+    q(d, "#hyP").innerHTML = Array.isArray(p) ? (p.length ? `<div style="display:grid;grid-template-columns:110px 100px;gap:4px">${p.map(([k, l, v]) => `<span>${l}</span><input data-hp="${k}" value="${esc(String(a.par[k] ?? v))}">`).join("")}</div>` : "No Parameters Are Required For This Hysteresis Type")
+      : `<button id="hyM">Modify/Show Parameters...</button>`;
+    const m = q(d, "#hyM"); if (m) m.onclick = () => etaHysParams(q(d, "#hyT").value, a); };
+  q(d, "#hyT").onchange = paint; paint();
+  return d;
+}
+// Hysteresis Parameters for Degrading Stiffness and for BRB Hardening: tension, compression (as tension when symmetric), other.
+function etaHysParams(kind, a) {
+  const deg = kind === "Degrading", rows = deg ? [["f0", "Energy Factor at Yield, f0", 1], ["f1", "Energy Factor at Moderate Deformation, f1", 1], ["f2", "Energy Factor at Maximum Deformation, f2", 1], ["x1", "Moderate Deformation Level (Deformation/SF, %S.), x1", 5], ["x2", "Maximum Deformation Level (Deformation/SF, %S.), x2", 10], ["ADWF", "Accumulation Deformation Weighting Factor", 0]]
+    : [["HF", "Hardening Factor", 1], ["MPD", "Maximum Plastic Deformation at Full Hardening (Deformation/SF, %S.)", 25], ["APD", "Accumulated Plastic Deformation at Full Hardening (Deformation/SF, %S.)", 50], ["Pro", "Proportion of Accumulated Plastic Deformation", 0]];
+  const key = (side, k) => deg ? `Deg${side}${k}` : `BRB${side}${k}`, sym = a.par[deg ? "DegSym" : "BRBSym"] !== "No";
+  const block = (side, label) => `<fieldset><legend>${label} Parameters</legend><div style="display:grid;grid-template-columns:1fr 90px;gap:4px">${rows.map(([k, l, v]) => `<span>${l.replace("%S", side === "Tens" ? "Pos" : "Neg")}</span><input data-side="${side}" data-k="${key(side, k)}" value="${esc(String(a.par[key(side, k)] ?? v))}">`).join("")}</div></fieldset>`;
+  const d = dialog(`Hysteresis Parameters for ${deg ? "Degrading Stiffness" : "BRB Hardening"}`, `${etaCss}<div class="etaF"><fieldset><div style="display:grid;grid-template-columns:140px 190px"><span>Hinge Property</span><input value="Auto Assignment" readonly></div></fieldset>${block("Tens", "Tension")}${block("Comp", "Compression")}
+    ${deg ? `<fieldset><legend>Other Parameters</legend><div style="display:grid;grid-template-columns:1fr 90px;gap:4px"><span>Stiffness Weighting Factor</span><input data-k="DegStiff" value="${esc(String(a.par.DegStiff ?? 0))}"><span>Larger-Smaller Weighting Factor</span><input data-k="DegLargeSml" value="${esc(String(a.par.DegLargeSml ?? 0))}"></div></fieldset>` : ""}
+    <label><input type="checkbox" id="hpS" ${sym ? "checked" : ""}> Parameters are Symmetric (Compression Same as Tension)</label></div>`,
+    [["OK", d => { d.querySelectorAll("[data-k]").forEach(x => a.par[x.dataset.k] = x.value); a.par[deg ? "DegSym" : "BRBSym"] = q(d, "#hpS").checked ? "Yes" : "No"; }], ["Cancel"]], {width: 560});
+  const sync = () => { const s = q(d, "#hpS").checked; d.querySelectorAll('[data-side="Comp"]').forEach(x => { x.disabled = s; if (s) x.value = q(d, `[data-k="${x.dataset.k.replace("Comp", "Tens")}"]`).value; }); };
+  q(d, "#hpS").onchange = sync; d.querySelectorAll('[data-side="Tens"]').forEach(x => x.oninput = sync); sync();
+}
+async function etaAutoHinge(a, done) {
+  const defs = await hmDefs(), cases = [...defs.load_cases.map(c => c.name || c), ...defs.combinations.map(c => c.name || c)], u = hmU();
+  const d = dialog("Auto Hinge Assignment Data", `${etaCss}<div class="etaF"><fieldset><legend>Auto Hinge Type</legend><select id="ahT" style="width:100%">${opts(Object.keys(etaHingeCodes), a.type)}</select></fieldset>
+    <fieldset id="ahTf"><legend>Select a Hinge Table</legend><select id="ahL" style="width:100%"></select></fieldset><div id="ahP" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div></div>`,
+    [["OK", d => { read(d); done(); }], ["Cancel"]], {width: 800});
+  const caseSel = (id, v) => `<select id="${id}" style="width:200px">${opts(cases, v)}</select>`;
+  const radio = (n, list, v) => list.map(([val, l]) => `<label><input type="radio" name="${n}" value="${val}" ${val === v ? "checked" : ""}> ${l}</label>`).join("");
+  const userBox = (id, l, unit, v) => `<span style="display:inline-flex;gap:6px;align-items:center;margin-left:20px">${l}<input id="${id}" style="width:90px" value="${esc(v || "")}">${unit}</span>`;
+  const fromCase = (title, lab, vals) => `<fieldset><legend>${title}</legend><div style="display:grid;grid-template-columns:120px 1fr;gap:6px;align-items:center"><label><input type="radio" name="ahF" value="case" ${a.from === "case" ? "checked" : ""}> Case/Combo</label>${caseSel("ahC", a.pcase)}<label><input type="radio" name="ahF" value="user" ${a.from === "user" ? "checked" : ""}> User Value</label><span>${vals.map(([k, l, un]) => userBox("ahU" + k, l, un, a.user[k])).join("<br>")}</span></div></fieldset>`;
+  const design = (key, title, user) => `<fieldset><legend>${title}</legend>${radio("ah" + key, [["", "From Current Design"], ["user", user || "User Value"]], a[key] ? "user" : "")}<input id="ahV${key}" style="width:90px;margin-left:200px" value="${esc(a[key] || "")}"></fieldset>`;
+  const dof = list => `<fieldset><legend>Degree of Freedom</legend><div style="display:grid;grid-template-columns:repeat(${list.length > 3 ? 3 : 1},auto);gap:2px 20px">${radio("ahD", list.map(x => [x, x]), list.includes(a.dof) ? a.dof : list[list.includes("M3") ? list.indexOf("M3") : 0])}</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px"><span>Hysteresis Type</span><input id="ahH" value="${esc(a.hys)}" readonly style="width:110px"><button id="ahHB">Modify/Show</button></div></fieldset>`;
+  const panel = {
+    dof2: () => dof(["M2", "M3"]), dofM3: () => dof(["M3"]), dofC: () => dof(["M2", "P-M2", "Parametric P-M2-M3", "M3", "P-M3", "M2-M3", "P-M2-M3"]),
+    hys: () => `<fieldset><legend>Hysteresis Type</legend><div style="display:flex;gap:8px;align-items:center"><span>Hysteresis Type</span><input id="ahH" value="${esc(a.hys)}" readonly style="width:110px"><button id="ahHB">Modify/Show</button></div></fieldset>`,
+    v: () => fromCase("V Value From", "V2", [["V2", "V2", u.f]]), p: () => fromCase("P Value From", "P", [["P", "P", u.f]]), pv: () => fromCase("P and V Value From", "", [["P", "P", u.f], ["V2", "V2", u.f]]),
+    pgl: () => `<fieldset><legend>P Values From</legend>${radio("ahF", [["case", "Case/Combo"], ["user", "User Value"]], a.from)}<div style="display:grid;grid-template-columns:140px 1fr;gap:6px;align-items:center"><span>Gravity</span>${caseSel("ahC", a.pcase)}<span>Gravity + Lateral</span>${caseSel("ahC2", a.pcase2)}</div></fieldset>`,
+    drop: () => `<fieldset><legend>Deformation Controlled Hinge Load Carrying Capacity</legend>${radio("ahDr", [["1", "Drops Load After Point E"], ["", "Is Extrapolated After Point E"]], a.drops ? "1" : "")}</fieldset>`,
+    fdrop: () => `<fieldset><legend>Force Controlled Hinge Load Carrying Capacity</legend><label><input type="checkbox" id="ahFd" ${a.fdrop ? "checked" : ""}> Hinge Drops Load When Max Force Is Reached</label></fieldset>`,
+    trans: () => `<fieldset><legend>Transverse Reinforcing</legend><label><input type="checkbox" id="ahTr" ${a.trans ? "checked" : ""}> Transverse Reinforcing is Conforming</label></fieldset>`,
+    transOnly: () => panel.trans(),
+    transDiag: () => `<fieldset><legend>Transverse and Diagonal Reinforcing</legend><label><input type="checkbox" id="ahTr" ${a.trans ? "checked" : ""}> Transverse Reinforcing is Conforming</label><label><input type="checkbox" id="ahDg" ${a.diag ? "checked" : ""}> Diagonal Reinforcement</label></fieldset>`,
+    rho: () => design("rho", "Reinforcing Ratio&nbsp; (p - p') / pbalanced", "User Value (for positive bending)"),
+    colBeh: () => `<fieldset><legend>Concrete Column Behavior</legend>${radio("ahCb", [["Not Controlled", "Not Controlled by Inadequate Development or Splicing"], ["Controlled", "Controlled by Inadequate Development or Splicing"]], a.colBeh)}</fieldset>`,
+    vye: () => `<fieldset><legend>Shear Demand at Flexural Yielding / Shear Capacity (VyE / Vcol0E)</legend>${radio("ahVy", [["program", "Program Calculated"], ["demand", "User-specified Shear Demand, VyE"]], a.vye)}<div style="margin-left:30px">V2 <input id="ahVy2" style="width:90px"> V3 <input id="ahVy3" style="width:90px"></div>${radio("ahVy", [["ratio", "User-specified Ratio, VyE / Vcol0E"]], a.vye)}<div style="margin-left:30px">V2 <input id="ahVr2" style="width:90px"> V3 <input id="ahVr3" style="width:90px"></div></fieldset>`,
+    shearRho: () => design("shearRho", "Shear Reinforcing Ratio p = Av / (bw * s)"), sd: () => design("sd", "Shear Reinforcement Spacing Ratio (s/d)"),
+    lim: () => `<fieldset><legend>Ultimate Strength Limit</legend><div style="display:grid;grid-template-columns:1fr 90px;align-items:center"><span>Ultimate Strength Limit<br>(as a Ratio to Yield Strength)</span><input id="ahLim" value="${esc(a.lim)}"></div></fieldset>`,
+    momFr: () => `<fieldset><legend>Section Compactness Check (AISC 341-22 Table D1.1b)</legend><label><input type="checkbox" id="ahMf" ${a.momFr ? "checked" : ""}> Used in Moment Frame</label></fieldset>`,
+    wallPM3: () => `<fieldset><legend>Wall P-M3 Hinge Option</legend><label><input type="radio" checked> From Interaction Surface</label></fieldset>`,
+    pRatio: () => design("pRatio", "P Ratio&nbsp; {(As - A's) fy + P} / (tw lw f'c)"), vRatio: () => design("vRatio", "Shear Ratio&nbsp; V / {tw lw sqrt(f'c)}"),
+  };
+  const kindOf = () => { const c = etaHingeCodes[q(d, "#ahT").value]; return (c.tables.find(t => t[0] === q(d, "#ahL").value) || c.tables[0]); };
+  const paint = (first) => {
+    const c = etaHingeCodes[q(d, "#ahT").value], brb = c.code === "BRB";
+    q(d, "#ahTf").style.display = brb ? "none" : "";
+    if (!first || !c.tables.some(t => t[0] === a.table)) q(d, "#ahL").innerHTML = opts(c.tables.map(t => t[0]), c.tables.some(t => t[0] === a.table) ? a.table : c.tables[0][0]);
+    const t = kindOf(); q(d, "#ahP").innerHTML = etaHingePanels[t[2]].map(k => panel[k]()).join("");
+    const hb = q(d, "#ahHB"); if (hb) hb.onclick = () => etaHysteresis(a, () => { const h = q(d, "#ahH"); if (h) h.value = a.hys; });
+    const sync = () => { const user = (q(d, "[name=ahF]:checked") || {}).value === "user"; d.querySelectorAll("[id^=ahU]").forEach(x => x.disabled = !user); ["#ahC", "#ahC2"].forEach(s => { const x = q(d, s); if (x) x.disabled = user; });
+      ["rho", "shearRho", "sd", "pRatio", "vRatio"].forEach(k => { const x = q(d, "#ahV" + k); if (x) x.disabled = (q(d, `[name=ah${k}]:checked`) || {}).value !== "user"; });
+      const vy = (q(d, "[name=ahVy]:checked") || {}).value; ["#ahVy2", "#ahVy3"].forEach(s => { const x = q(d, s); if (x) x.disabled = vy !== "demand"; }); ["#ahVr2", "#ahVr3"].forEach(s => { const x = q(d, s); if (x) x.disabled = vy !== "ratio"; }); };
+    d.querySelectorAll("#ahP input[type=radio]").forEach(x => x.addEventListener("change", sync)); sync();
+  };
+  const read = d => {
+    const v = s => q(d, s) ? q(d, s).value : undefined, ch = s => q(d, s) ? q(d, s).checked : undefined, r = n => (q(d, `[name=${n}]:checked`) || {}).value;
+    a.type = v("#ahT"); a.table = etaHingeCodes[a.type].code === "BRB" ? "" : v("#ahL"); if (r("ahD")) a.dof = r("ahD");
+    if (r("ahF")) a.from = r("ahF"); if (v("#ahC")) a.pcase = v("#ahC"); if (v("#ahC2")) a.pcase2 = v("#ahC2");
+    d.querySelectorAll("[id^=ahU]").forEach(x => a.user[x.id.slice(3)] = x.value);
+    if (r("ahDr") !== undefined) a.drops = r("ahDr") === "1"; if (ch("#ahFd") !== undefined) a.fdrop = ch("#ahFd"); if (ch("#ahTr") !== undefined) a.trans = ch("#ahTr"); if (ch("#ahDg") !== undefined) a.diag = ch("#ahDg");
+    ["rho", "shearRho", "sd", "pRatio", "vRatio"].forEach(k => { if (r("ah" + k) !== undefined) a[k] = r("ah" + k) === "user" ? v("#ahV" + k) : ""; });
+    if (r("ahCb")) a.colBeh = r("ahCb"); if (r("ahVy")) a.vye = r("ahVy"); if (v("#ahLim")) a.lim = v("#ahLim"); if (ch("#ahMf") !== undefined) a.momFr = ch("#ahMf");
+  };
+  q(d, "#ahT").onchange = () => paint(false); q(d, "#ahL").onchange = () => { a.table = q(d, "#ahL").value; paint(true); };
+  paint(true);
+  return d;
+}
+// A hinge's .e2k words (after HINGEASSIGN label story), as ETABS 23.2 writes them (field/reference-forms/etabs/Assign/Frame/hinges-sample.e2k):
+// AUTOHINGETYPE "ASCE41-23" TABLEITEM "Steel Beams" DOF "M3" PVALUE 10000 | CASECOMBO "Dead", then for a User Defined hinge
+// LOCATIONTYPE "RelDist" RDISTANCE 0.05 | "IEndOffset" DISTANCE 24, LENGTHOWTYPE "None" | "RelLen" LENGTHOWREL 0.1; HYSTYPE on its own line.
+const etaHingeQ = s => `"${String(s).replace(/"/g, "")}"`;
+function etaAutoWords(a) {
+  const c = etaHingeCodes[a.type] || etaHingeCodes["From Tables In ASCE 41-17"], t = c.tables.find(x => x[0] === a.table) || c.tables[0], Q = etaHingeQ, kind = t[2], pan = etaHingePanels[kind];
+  const dofs = pan.some(p => p.startsWith("dof")), dof = a.dof.replace(/-/g, "").replace(/^Parametric /, "");
+  let w = `AUTOHINGETYPE ${Q(c.code)}` + (c.code === "BRB" ? "" : `  TABLEITEM ${Q(t[1])}`) + (dofs ? `  DOF ${Q(dof)}` : "") + (a.extra ? "  " + a.extra : "");
+  if (pan.some(p => ["p", "pv", "pgl", "v"].includes(p))) w += a.from === "user" ? Object.entries(a.user).filter(([, v]) => v !== "" && v != null).map(([k, v]) => `  ${k === "P" ? "PVALUE" : k + "VALUE"} ${+v}`).join("") : `  CASECOMBO ${Q(a.pcase || "Dead")}`;
+  if (kind === "cc" && c.code !== "EC8 2005" && a.colBeh && a.colBeh !== "Not Controlled") w += `  COLUMNBEHAVIOR ${Q(a.colBeh)}`;
+  if (pan.includes("lim") && a.lim && +a.lim !== 1.1) w += `  STRLIMRATIO ${+a.lim}`;
+  // ETABS writes no HYSTYPE line for a BRB hinge or an interacting P-M2-M3 hinge.
+  return {w, hys: c.code !== "BRB" && dof !== "PM2M3" ? [`HYSTYPE ${Q(a.hys || "Isotropic")}`] : []};
+}
+function etaHingeWords(h) {
+  const {w, hys} = etaAutoWords(h.auto || etaHingeDefaultAuto()), Q = etaHingeQ;
+  const loc = h.loc === "Relative to clear length" ? `  LOCATIONTYPE "RelDist"  RDISTANCE ${+Math.min(1, Math.max(0, +h.rel || 0)).toFixed(6)}` : `  LOCATIONTYPE ${Q(h.loc === "Distance from I-end offset" ? "IEndOffset" : "JEndOffset")}  DISTANCE ${+h.abs || 0}`;
+  const ow = h.lenOW === "Relative" ? `  LENGTHOWTYPE "RelLen"  LENGTHOWREL ${+h.lenRel || 0}` : h.lenOW === "Absolute" ? `  LENGTHOWTYPE "AbsLen"  LENGTHOWABS ${+h.lenAbs || 0}` : `  LENGTHOWTYPE "None"`;
+  return [w + loc + ow + (h.fiber === "No" ? `  SAVEINDIVFIBER "No"` : ""), ...hys];
+}
+// The words after an AUTOHINGETYPE that the form has no box for (FAILCONDITION ...), kept as they are.
+const etaHingeKnown = /^(AUTOHINGETYPE|TABLEITEM|DOF|PVALUE|V2VALUE|CASECOMBO|COLUMNBEHAVIOR|STRLIMRATIO|LOCATIONTYPE|RDISTANCE|DISTANCE|LENGTHOWTYPE|LENGTHOWREL|LENGTHOWABS|SAVEINDIVFIBER)$/;
+function etaHingeRead(l) {
+  const tok = l.match(/"[^"]*"|\S+/g) || [], g = {}, extra = [];
+  for (let i = 0; i < tok.length; i += 2) { const k = tok[i], v = (tok[i + 1] || "").replace(/^"|"$/g, ""); if (etaHingeKnown.test(k)) g[k] = v; else extra.push(tok[i], tok[i + 1] ?? ""); }
+  const type = Object.keys(etaHingeCodes).find(t2 => etaHingeCodes[t2].code === g.AUTOHINGETYPE) || "From Tables In ASCE 41-17", tb = etaHingeCodes[type].tables.find(t2 => t2[1] === g.TABLEITEM) || etaHingeCodes[type].tables[0];
+  const dof = g.DOF || "M3", a = {...etaHingeDefaultAuto(), type, table: tb[0], dof: ["M2", "M3", "P", "M2-M3", "P-M2", "P-M3", "P-M2-M3"].find(x => x.replace(/-/g, "") === dof) || dof, lim: g.STRLIMRATIO || "1.1", extra: extra.join("  ")};
+  if (g.COLUMNBEHAVIOR) a.colBeh = g.COLUMNBEHAVIOR;
+  if (g.PVALUE || g.V2VALUE) { a.from = "user"; if (g.PVALUE) a.user.P = g.PVALUE; if (g.V2VALUE) a.user.V2 = g.V2VALUE; } else if (g.CASECOMBO) { a.from = "case"; a.pcase = g.CASECOMBO; }
+  const L = g.LOCATIONTYPE;
+  return {prop: "Auto", loc: L === "IEndOffset" ? "Distance from I-end offset" : L === "JEndOffset" ? "Distance from J-end offset" : "Relative to clear length", rel: L && L !== "RelDist" ? "" : +(g.RDISTANCE || 0), abs: L && L !== "RelDist" ? +(g.DISTANCE || 0) : "",
+    lenOW: g.LENGTHOWTYPE === "RelLen" ? "Relative" : g.LENGTHOWTYPE === "AbsLen" ? "Absolute" : "None", lenRel: g.LENGTHOWREL || "", lenAbs: g.LENGTHOWABS || "", fiber: g.SAVEINDIVFIBER || "Yes", auto: a};
+}
+const etaGauss = {"5 point Gauss-Lobatto": [0, 0.172673, 0.5, 0.827327, 1], "5 point Gauss-Legendre": [0.046910, 0.230765, 0.5, 0.769235, 0.953090], "7 point Gauss-Lobatto": [0, 0.084888, 0.265575, 0.5, 0.734425, 0.915112, 1], "7 point Gauss-Legendre": [0.025446, 0.129234, 0.297077, 0.5, 0.702923, 0.870766, 0.974554]};
+async function etaFrameHinges() {
+  const names = etaFrames(), u = hmU(), p0 = names.length ? await sapObjRows(names) : null;
+  const total = p0 ? (p0.pd.objects || []).reduce((s, o) => s + (o.hinge_lines || []).filter(l => /^AUTOHINGETYPE|^HINGEPROP/.test(l)).length, 0) : 0;
+  const lenOf = n => { const f = frames.find(x => x.name === n); return f ? Math.hypot(f.b[0] - f.a[0], f.b[1] - f.a[1], f.b[2] - f.a[2]) : 0; };
+  let list = [], cur = -1, auto = etaHingeDefaultAuto(), autoOf = {};
+  const types = ["Nonlinear Beam/Column", "Distributed Plasticity", "Equal Spacing", "Continuous Spring Support (Piles or Grade Beams)", "User Defined"];
+  const info = '<span title="See the ETABS help for this hinge definition type." style="display:inline-block;width:16px;height:16px;border-radius:8px;background:#2a6ebb;color:#fff;text-align:center;font:bold 12px serif;margin-left:14px">i</span>';
+  const avail = (id) => `<div style="display:grid;grid-template-columns:110px 230px 1fr;gap:6px 10px;align-items:center"><span>Selected Hinge</span><input id="${id}S" readonly value="No Hinge is Selected"><button id="${id}M" disabled>Modify/Show Auto Properties...</button><span>Available Hinges</span><select id="${id}A">${opts(["None", "Auto"], "None")}</select></div>`;
+  const fib = id => `<label><input type="checkbox" id="${id}" checked> Save Individual Fiber Response for Fiber Hinges</label>`;
+  const d = dialog("Frame Assignment - Hinges", `${etaCss}<div class="etaF"><fieldset><legend>Frame Hinge Definition Type</legend><div style="display:grid;grid-template-columns:330px 1fr;gap:8px">
+    <div>${types.map((t, i) => `<label><input type="radio" name="fhT" value="${i}" ${i === 4 ? "checked" : ""}> ${t}${[0, 1, 3].includes(i) ? info : ""}</label>`).join("")}</div>
+    <div><svg id="fhPic" viewBox="0 0 600 100" style="width:100%;height:100px;background:#fff"></svg><button id="fhConv" style="float:right;margin-top:6px">Convert to User Defined</button></div></div></fieldset>
+    <fieldset><legend id="fhDL">Frame Hinge Assignment Data - User Defined</legend>
+      <div data-t="0">${`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div style="display:grid;grid-template-columns:140px 110px 30px;gap:6px;align-items:center"><span>Expected Hinge Length</span><input id="nbL" value="${u.l === "ft" ? 1 : u.l === "in" ? 12 : u.l === "mm" ? 300 : 0.3}"><span id="nbU">${u.l}</span></div><label><input type="checkbox" id="nbR"> Relative Length</label>${fib("nbF")}</div><div>${avail("nb")}</div></div>`}</div>
+      <div data-t="1"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div style="display:grid;grid-template-columns:110px 1fr">${Object.keys(etaGauss).map((g, i) => `${i ? "<span></span>" : "<span>Integration Type:</span>"}<label><input type="radio" name="dpI" value="${g}" ${i ? "" : "checked"}> ${g}</label>`).join("")}</div>${fib("dpF")}</div><div>${avail("dp")}</div></div></div>
+      <div data-t="2"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span>Spacing Type</span><div style="display:grid;grid-template-columns:170px 110px;gap:4px;margin-left:16px"><label><input type="radio" name="esS" value="max" checked> Maximum Spacing</label><input id="esM" value="${u.l === "ft" ? 4 : u.l === "in" ? 48 : u.l === "mm" ? 1200 : 1.2}"><label><input type="radio" name="esS" value="num"> Number of Hinges</label><input id="esN"></div><label><input type="checkbox" id="esE"> Place Hinges at the Two Ends</label>${fib("esF")}</div><div>${avail("es")}</div></div></div>
+      <div data-t="3">${avail("cs")}${fib("csF")}</div>
+      <div data-t="4"><div style="display:grid;grid-template-columns:1fr 160px;gap:10px"><div><table class="list" id="udT" style="width:100%"><tr><th>Hinge Property</th><th>Location Type</th><th>Relative Distance</th><th>Absolute Distance ${u.l}</th><th class="adv">Length Overwrite Type</th><th class="adv">Relative Length</th><th class="adv">Absolute Length ${u.l}</th><th class="adv">Save Individual Fiber Response?</th></tr>
+        <tr><td><select id="udP">${opts(["Auto"], "Auto")}</select></td><td><select id="udL">${opts(["Relative to clear length", "Distance from I-end offset", "Distance from J-end offset"], "Relative to clear length")}</select></td><td><input id="udR" value="0"></td><td><input id="udA" value="0"></td>
+        <td class="adv"><select id="udO">${opts(["None", "Relative", "Absolute"], "None")}</select></td><td class="adv"><input id="udOR" disabled></td><td class="adv"><input id="udOA" disabled></td><td class="adv"><select id="udFi">${opts(["Yes", "No"], "Yes")}</select></td></tr></table>
+        <select id="udList" size="6" style="width:100%;height:110px;font-family:monospace"></select>
+        <div style="display:flex;justify-content:space-between;margin-top:6px"><div><u>Current Hinge Information</u><div id="udInfo">No hinge is currently selected</div></div><label><input type="checkbox" id="udAdv"> Show Advanced Parameters</label></div>
+        <button id="udAuto" class="mid" style="width:280px" disabled>Modify/Show Auto Hinge Assignment Data...</button></div>
+        <div style="display:flex;flex-direction:column;gap:8px;padding-top:24px"><button id="udAdd">Add Hinge</button><button id="udMod" disabled>Modify Hinge</button><button id="udDel" disabled>Delete Hinge</button></div></div></div></fieldset>
+    <fieldset><legend>Options</legend><label id="fhAddL"><input type="radio" name="fhO" value="add"> Add Specified Hinge Assigns to Existing Hinge Assigns (All hinges will be converted to User Defined)</label><label><input type="radio" name="fhO" value="rep" checked> Replace Existing Hinge Assigns with Specified Hinge Assigns</label>
+      <u>Existing Hinge Assignments on Currently Selected Frame Objects</u><div>Number of Selected Frame Objects: ${names.length}</div><div>Total Number of Hinges on All Selected Frame Objects: ${total}</div>
+      <button id="fhFill" class="mid" style="width:380px" ${names.length === 1 ? "" : "disabled"}>Fill Form with Hinges on Selected Frame Object</button></fieldset></div>`,
+    [["OK", d => { go(d).then(ok => ok && d.close()); return false; }, true], ["Cancel"]], {width: 1000});
+  const t = () => +q(d, "[name=fhT]:checked").value;
+  const row = h => `${h.prop.padEnd(8)} ${h.loc.padEnd(28)} ${String(h.rel).padEnd(8)} ${String(h.abs).padEnd(8)}${q(d, "#udAdv").checked ? ` ${h.lenOW.padEnd(9)} ${String(h.lenRel || "").padEnd(6)} ${String(h.lenAbs || "").padEnd(6)} ${h.fiber}` : ""}`;
+  const paintList = () => { q(d, "#udList").innerHTML = list.map((h, i) => `<option value="${i}" ${i === cur ? "selected" : ""}>${esc(row(h))}</option>`).join("");
+    q(d, "#udMod").disabled = q(d, "#udDel").disabled = cur < 0; q(d, "#udAuto").disabled = cur < 0 || list[cur].prop !== "Auto";
+    q(d, "#udInfo").textContent = cur < 0 ? "No hinge is currently selected" : `Hinge ${cur + 1}: ${list[cur].auto ? list[cur].auto.type.replace(/^From (Tables In )?/, "") + (list[cur].auto.table ? ", " + list[cur].auto.table : "") + ", " + list[cur].auto.dof : "Auto"}`; };
+  const readRow = () => { const L = q(d, "#udL").value, r = q(d, "#udR").value.trim(), ab = q(d, "#udA").value.trim();
+    if (L === "Relative to clear length" ? !(+r >= 0 && +r <= 1) : !(+ab >= 0)) { formError(d, L === "Relative to clear length" ? "The relative distance is from 0 to 1." : "The absolute distance is 0 or more."); return null; }
+    return {prop: q(d, "#udP").value, loc: L, rel: L === "Relative to clear length" ? +r : "", abs: L === "Relative to clear length" ? "" : +ab, lenOW: q(d, "#udO").value, lenRel: q(d, "#udOR").value, lenAbs: q(d, "#udOA").value, fiber: q(d, "#udFi").value, auto: JSON.parse(JSON.stringify(auto))}; };
+  const sync = () => {
+    const k = t(); d.querySelectorAll("[data-t]").forEach(x => x.style.display = +x.dataset.t === k ? "" : "none");
+    q(d, "#fhDL").textContent = "Frame Hinge Assignment Data - " + types[k].replace(/ \(.*$/, "");
+    q(d, "#fhConv").disabled = k >= 3; q(d, "[name=fhO][value=add]").disabled = k !== 4; q(d, "#fhAddL").style.color = k === 4 ? "" : "#999"; if (k !== 4) q(d, "[name=fhO][value=rep]").checked = true;
+    d.querySelectorAll(".adv").forEach(x => x.style.display = q(d, "#udAdv").checked ? "" : "none");
+    const L = q(d, "#udL").value; q(d, "#udR").disabled = L !== "Relative to clear length"; q(d, "#udA").disabled = L === "Relative to clear length";
+    const o = q(d, "#udO").value; q(d, "#udOR").disabled = o !== "Relative"; q(d, "#udOA").disabled = o !== "Absolute";
+    q(d, "#nbU").textContent = q(d, "#nbR").checked ? "" : u.l; q(d, "#esM").disabled = q(d, "[name=esS]:checked").value !== "max"; q(d, "#esN").disabled = !q(d, "#esM").disabled;
+    for (const id of ["nb", "dp", "es", "cs"]) { const au = q(d, `#${id}A`).value === "Auto"; q(d, `#${id}M`).disabled = !au; q(d, `#${id}S`).value = au ? "Auto" : "No Hinge is Selected"; }
+    const pic = q(d, "#fhPic"), dot = x => `<circle cx="${x}" cy="35" r="10" fill="#999" stroke="#000" stroke-width="4"/>`, bar = `<line x1="50" y1="35" x2="550" y2="35" stroke="#000" stroke-width="7"/>`;
+    pic.innerHTML = k === 0 ? bar + dot(120) + dot(480) + `<text x="70" y="80" font-size="16">Hinge Length</text><text x="430" y="80" font-size="16">Hinge Length</text>` : k === 1 ? bar + [60, 150, 300, 450, 540].map(dot).join("") + `<text x="270" y="80" font-size="16">Weights</text>` : k === 2 ? bar + [110, 210, 300, 390, 490].map(dot).join("") + `<text x="270" y="80" font-size="16">Spacing</text>` : k === 3 ? bar + [110, 210, 300, 390, 490].map(dot).join("") + [60, 160, 255, 345, 440, 540].map(x => `<path d="M${x} 35 v12 l-6 4 l12 6 l-12 6 l6 4 v8 M${x - 14} 75 h28" stroke="#000" fill="none"/>`).join("") : "";
+  };
+  d.querySelectorAll("input,select").forEach(x => x.addEventListener("change", sync));
+  q(d, "#udList").onchange = () => { cur = +q(d, "#udList").value; const h = list[cur]; q(d, "#udP").value = h.prop; q(d, "#udL").value = h.loc; q(d, "#udR").value = h.rel === "" ? 0 : h.rel; q(d, "#udA").value = h.abs === "" ? 0 : h.abs; q(d, "#udO").value = h.lenOW; q(d, "#udOR").value = h.lenRel || ""; q(d, "#udOA").value = h.lenAbs || ""; q(d, "#udFi").value = h.fiber; if (h.auto) auto = JSON.parse(JSON.stringify(h.auto)); sync(); paintList(); };
+  q(d, "#udAdd").onclick = () => { const h = readRow(); if (!h) return; list.push(h); cur = list.length - 1; paintList(); if (h.prop === "Auto") etaAutoHinge(list[cur].auto, () => paintList()); };
+  q(d, "#udMod").onclick = () => { const h = readRow(); if (!h || cur < 0) return; h.auto = list[cur].auto; list[cur] = h; paintList(); };
+  q(d, "#udDel").onclick = () => { if (cur < 0) return; list.splice(cur, 1); cur = Math.min(cur, list.length - 1); paintList(); };
+  q(d, "#udAuto").onclick = () => { if (cur >= 0) etaAutoHinge(list[cur].auto ||= etaHingeDefaultAuto(), () => paintList()); };
+  q(d, "#udAdv").addEventListener("change", paintList);
+  for (const id of ["nb", "dp", "es", "cs"]) q(d, `#${id}M`).onclick = () => etaAutoHinge(autoOf[id] ||= etaHingeDefaultAuto(), () => {});
+  // Convert to User Defined: the hinges the chosen type puts on the first selected frame, as a User Defined list.
+  const convert = () => {
+    const k = t(), L = lenOf(names[0]) || 1, id = ["nb", "dp", "es"][k], au = q(d, `#${id}A`).value === "Auto"; if (!au) { list = []; cur = -1; return; }
+    let at = [];
+    if (k === 0) { const hl = +q(d, "#nbL").value || 0, rl = q(d, "#nbR").checked ? hl : hl / L; at = [rl / 2, 1 - rl / 2]; }
+    if (k === 1) at = etaGauss[q(d, "[name=dpI]:checked").value];
+    if (k === 2) { const n = q(d, "[name=esS]:checked").value === "max" ? Math.max(1, Math.ceil(L / (+q(d, "#esM").value || L))) : Math.max(1, Math.round(+q(d, "#esN").value || 1)); at = [...Array(n)].map((_, i) => (i + 0.5) / n); if (q(d, "#esE").checked) at = [0, ...at, 1]; }
+    const fiber = q(d, `#${id}F`).checked ? "Yes" : "No";
+    list = at.map(x => ({prop: "Auto", loc: "Relative to clear length", rel: +x.toFixed(6), abs: "", lenOW: "None", lenRel: "", lenAbs: "", fiber, auto: JSON.parse(JSON.stringify(autoOf[id] || etaHingeDefaultAuto()))}));
+    cur = list.length ? 0 : -1; q(d, "[name=fhT][value='4']").checked = true; sync(); paintList();
+  };
+  q(d, "#fhConv").onclick = convert;
+  q(d, "#fhFill").onclick = () => {
+    const o = ((p0 || {}).pd || {}).objects ? p0.pd.objects[0] : null, lines = (o && o.hinge_lines) || [], L = lenOf(names[0]);
+    list = []; let k = 4;
+    for (const l of lines) {
+      const tok = l.match(/"[^"]*"|\S+/g) || [], g = {}; for (let i = 0; i < tok.length; i += 2) g[tok[i]] = (tok[i + 1] || "").replace(/^"|"$/g, "");
+      if (g.HINGEDISTRTYPE !== undefined) {
+        k = ["Nonlinear Beam Column", "Distributed Plasticity", "Equal Spacing", "Continuous Spring Support", "User Defined"].indexOf(g.HINGEDISTRTYPE); if (k < 0) k = 4;
+        if (k === 0) { const rel = g.HINGELENTYPE === "Rel"; q(d, "#nbR").checked = rel; q(d, "#nbL").value = rel ? g.HINGELENREL || "" : g.HINGELENABS || ""; }
+        if (k === 1 && g.INTEGRTYPE) { const r = q(d, `[name=dpI][value="${g.INTEGRTYPE}"]`); if (r) r.checked = true; }
+        if (k === 2) { const num = g.SPACETYPE === "Number of Hinges"; q(d, `[name=esS][value=${num ? "num" : "max"}]`).checked = true; if (num) q(d, "#esN").value = g.NUMHINGESPACE || ""; else if (g.MAXHINGESPACE) q(d, "#esM").value = g.MAXHINGESPACE; q(d, "#esE").checked = g.HINGEATENDS === "Yes"; }
+      } else if (/^AUTOHINGETYPE/.test(l)) {
+        const h = etaHingeRead(l);
+        if (k < 4) { const id = ["nb", "dp", "es", "cs"][k]; autoOf[id] = h.auto; q(d, `#${id}A`).value = "Auto"; } else list.push(h);
+      } else if (/^HYSTYPE/.test(l)) { const a = k < 4 ? autoOf[["nb", "dp", "es", "cs"][k]] : (list[list.length - 1] || {}).auto; if (a) a.hys = g.HYSTYPE || "Isotropic"; }
+    }
+    q(d, `[name=fhT][value='${k}']`).checked = true; cur = list.length ? 0 : -1; sync(); paintList();
+  };
+  // ETABS keeps the four other definition types as they are (HINGEDISTRTYPE "Nonlinear Beam Column" HINGELENTYPE "Abs" HINGELENABS 12, ...).
+  const ownLines = k => {
+    const id = ["nb", "dp", "es", "cs"][k], Q = etaHingeQ, f = q(d, `#${id}F`);
+    let head = 'HINGEDISTRTYPE ' + Q(["Nonlinear Beam Column", "Distributed Plasticity", "Equal Spacing", "Continuous Spring Support"][k]);
+    if (k === 0) head += q(d, "#nbR").checked ? `  HINGELENTYPE "Rel"  HINGELENREL ${+q(d, "#nbL").value || 0}` : `  HINGELENTYPE "Abs"  HINGELENABS ${+q(d, "#nbL").value || 0}`;
+    if (k === 1) head += `  INTEGRTYPE ${Q(q(d, "[name=dpI]:checked").value)}`;
+    if (k === 2) head += (q(d, "[name=esS]:checked").value === "num" ? `  SPACETYPE "Number of Hinges"  NUMHINGESPACE ${Math.max(1, Math.round(+q(d, "#esN").value || 1))}` : `  SPACETYPE "Maximum Spacing"  MAXHINGESPACE ${+q(d, "#esM").value || 0}`) + `  HINGEATENDS ${q(d, "#esE").checked ? '"Yes"' : '"No"'}`;
+    if (f && !f.checked) head += `  SAVEINDIVFIBER "No"`;
+    if (q(d, `#${id}A`).value !== "Auto") return [head];
+    const {w, hys} = etaAutoWords(autoOf[id] || etaHingeDefaultAuto());
+    return [head, w, ...hys];
+  };
+
+  const go = async d => {
+    if (!etaNeed(names, "frames")) return false;
+    if (t() === 2 && q(d, "[name=esS]:checked").value === "num" && !(+q(d, "#esN").value >= 1)) { formError(d, "Give the number of hinges."); return false; }
+    const add = q(d, "[name=fhO]:checked").value === "add", got = add ? await sapObjRows(names) : null;
+    for (const n of names) {
+      const had = add ? ((got.pd.objects || []).find(o => o.name === n) || {}).hinge_lines || [] : [];
+      // Add keeps the frame's User Defined hinges; hinges of another definition type ETABS turns into User Defined ones, and those have no place on the frame here, so they go.
+      const keep = had.length && /^HINGEDISTRTYPE\s+"User Defined"/.test(had[0]) ? had.slice(1) : [];
+      const lines = t() < 4 ? ownLines(t()) : list.length || keep.length ? ['HINGEDISTRTYPE "User Defined"', ...keep, ...list.flatMap(h => etaHingeWords(h))] : [];
+      const j = await hmRun("assign_frame_data", {objects: [n], hinge_lines: lines}, true); if (!j.ok) { formError(d, j.error); return false; }
+    }
+    hmSay(`Hinges set on ${names.length} frame${names.length === 1 ? "" : "s"}. Edit > Undo steps back.`);
+    return true;
+  };
+  sync(); paintList();
+  return d;
+}
+Object.assign(etaAssignForms, {fHinges: etaFrameHinges});
+// Assign > Frame > Hinge Overwrites (picture Assign/Frame/Hinge Overwrites, shown once a hinge exists): a row of
+// "Frame Assignments - Hinge - Overwrites" (AutoDivide, RelLength, UseHngLenOW, NoDropLoad, StiffRatio; ETABS's defaults Yes, 0.02, Yes, No, 0.1).
+async function etaHingeOverwrites() {
+  const T = "Frame Assignments - Hinge - Overwrites", f = await etaFirst("f"); if (!etaNeed(f.names, "frames")) return;
+  const r = (f.t[T] || [])[0] || {}, yes = (k, dft) => (r[k] || dft) === "Yes";
+  const d = dialog("Frame Assignment - Hinge Overwrites", `${etaCss}<div class="etaF"><fieldset><legend>Allow Changes to These Items</legend><label><input type="checkbox" id="hoA" checked> Auto Subdivide Parameters</label><label><input type="checkbox" id="hoB" checked> Hinge Behavior Parameters</label></fieldset>
+    <fieldset id="hoAF"><legend>Auto Subdivide</legend><label><input type="checkbox" id="hoD" ${yes("AutoDivide", "Yes") ? "checked" : ""}> Auto Subdivide Frame Objects At Hinges</label><div style="display:grid;grid-template-columns:1fr 160px;align-items:center;margin-left:24px"><span>Relative Length of Frame Element At Hinge</span><input id="hoL" value="${esc(r.RelLength || "0.02")}"></div>
+      <label style="margin-left:24px"><input type="checkbox" id="hoU" ${yes("UseHngLenOW", "Yes") ? "checked" : ""}> Use Hinge Length Overwrite Instead, if Available</label></fieldset>
+    <fieldset id="hoBF"><legend>Hinge Behavior&nbsp; (Does Not Apply to Fiber Hinges)</legend><label><input type="checkbox" id="hoN" ${yes("NoDropLoad", "No") ? "checked" : ""}> Do Not Allow Hinges To Drop Load</label><div style="display:grid;grid-template-columns:1fr 160px;align-items:center;margin-left:24px"><span>Limiting Negative Stiffness Ratio</span><input id="hoS" value="${esc(r.StiffRatio || "0.1")}"></div></fieldset></div>`,
+    [["OK", d => { go(d).then(ok => ok && d.close()); return false; }, true], ["Cancel"]], {width: 460});
+  const keep = {};
+  const go = async d => {
+    const a = q(d, "#hoA").checked, b = q(d, "#hoB").checked, div = q(d, "#hoD").checked;
+    if (a && div && !(+q(d, "#hoL").value > 0 && +q(d, "#hoL").value < 1)) { formError(d, "The relative length is more than 0 and less than 1."); return false; }
+    if (b && !(+q(d, "#hoS").value >= 0)) { formError(d, "The limiting negative stiffness ratio is 0 or more."); return false; }
+    const got = await sapObjRows(f.names); if (!got) return false;
+    return sapSetEach("assign_frame_data", f.names, n => {
+      const row = {AutoDivide: "Yes", RelLength: "0.02", UseHngLenOW: "Yes", NoDropLoad: "No", StiffRatio: "0.1", ...((((got.by[n] || {})[T]) || [])[0] || {})};
+      if (a) Object.assign(row, {AutoDivide: div ? "Yes" : "No", RelLength: div ? q(d, "#hoL").value.trim() : row.RelLength, UseHngLenOW: div && q(d, "#hoU").checked ? "Yes" : "No"});
+      if (b) Object.assign(row, {NoDropLoad: q(d, "#hoN").checked ? "Yes" : "No", StiffRatio: q(d, "#hoS").value.trim()});
+      return {[T]: [row]};
+    });
+  };
+  // Off greys and empties a box; on brings its value back.
+  const box = (id, off) => { const x = q(d, id); if (off && !x.disabled) { keep[id] = x.type === "checkbox" ? x.checked : x.value; if (x.type === "checkbox") x.checked = false; else x.value = ""; } else if (!off && x.disabled && id in keep) { if (x.type === "checkbox") x.checked = keep[id]; else x.value = keep[id]; } x.disabled = off; };
+  const sync = () => {
+    const a = q(d, "#hoA").checked, b = q(d, "#hoB").checked;
+    box("#hoD", !a); const div = q(d, "#hoD").checked; box("#hoL", !a || !div); box("#hoU", !a || !div);
+    box("#hoN", !b); box("#hoS", !b);
+    q(d, "#hoAF").style.color = a ? "" : "#999"; q(d, "#hoBF").style.color = b ? "" : "#999";
+  };
+  ["#hoA", "#hoB", "#hoD"].forEach(i => q(d, i).onchange = sync); sync();
+  return d;
+}
+Object.assign(etaAssignForms, {fHingeOw: etaHingeOverwrites});
 
 // ---- Define: the items kept as rows of the program's own definition tables, rebar sizes and a section's rebar ----
 // label, table(s), the programs that have it (ETABS when left out), SAP2000's own name.

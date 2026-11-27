@@ -28,6 +28,26 @@ static class EtabsAssignFormTests
 
     public static IEnumerable<(string, Action)> All()
     {
+        yield return ("ETABS forms: Frame Assignment - Hinges keeps the frame's hinge lines through the .e2k and refuses a stray line", () =>
+        {
+            var link = Frame(); var m = link.Model; var b = Beams(m)[0]; var (lab, st) = (b.Split('@')[0], b.Split('@')[1]);
+            var lines = new[] { "HINGEDISTRTYPE \"User Defined\"", "AUTOHINGETYPE \"ASCE41-17\"  TABLEITEM \"Concrete Beams\"  DOF \"M3\"  LOCATIONTYPE \"RelDist\"  RDISTANCE 0.05", "HYSTYPE \"Isotropic\"" };
+            Run(link, "assign_frame_data", new { objects = new[] { b }, hinge_lines = lines });
+            var back = PropertyDefs.HingeLinesOf(ViaE2k(m), lab, st);
+            Check(back.Count == 3 && back[1].Contains("RDISTANCE  0.05") && back[1].Contains("\"Concrete Beams\""), "hinge lines read back: " + string.Join(" | ", back));
+            Run(link, "assign_frame_data", new { objects = new[] { b }, hinge_lines = new[] { lines[0] } });
+            Check(PropertyDefs.HingeLinesOf(m, lab, st).Count == 1, "a second assign replaces the frame's lines");
+            bool refused = false; try { PropertyDefs.CheckHingeLines(new[] { "LOADPATTERN \"Dead\"" }); } catch { refused = true; }
+            Check(refused, "a line that is not a hinge line is refused");
+            // ETABS 23.2's own words for the other definition types (its export, field/reference-forms/etabs/Assign/Frame/hinges-sample.e2k).
+            var own = new[] { "HINGEDISTRTYPE \"Equal Spacing\"  SPACETYPE \"Number of Hinges\"  NUMHINGESPACE 3 HINGEATENDS \"Yes\"", "AUTOHINGETYPE \"ASCE41-23\"  TABLEITEM \"Steel Beams\"  DOF \"M3\"  CASECOMBO \"Dead\"", "HYSTYPE \"Isotropic\"" };
+            Run(link, "assign_frame_data", new { objects = new[] { b }, hinge_lines = own });
+            var e2k = E2kWriter.Write(m);
+            Check(e2k.Contains("NUMHINGESPACE") && e2k.Contains("CASECOMBO") && PropertyDefs.HingeLinesOf(ViaE2k(m), lab, st).Count == 3, "an Equal Spacing hinge goes out in ETABS's words");
+            Run(link, "assign_frame_data", new { objects = new[] { b }, hinge_lines = Array.Empty<string>() });
+            Check(PropertyDefs.HingeLinesOf(m, lab, st).Count == 0, "[] takes them off");
+        });
+
         yield return ("ETABS forms: Joint Load Assignment - Force adds, replaces and deletes, and keeps the punching shear size", () =>
         {
             var link = Frame(); var m = link.Model; var j = Joint(m);
