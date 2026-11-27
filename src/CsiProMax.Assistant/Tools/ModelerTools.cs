@@ -24,7 +24,11 @@ public static class ModelerTools
             {"type":"object","required":["title"],"properties":{
               "title":{"type":"string"},
               "program":{"type":"string","enum":["etabs","sap2000","safe"],"description":"The CSI program the model is for (default etabs): the Modeler then offers what that program has, and saving writes its file (.e2k, .s2k or .f2k) beside the .cpm."},
-              "template":{"type":"string","enum":["empty","concrete_frame"]},
+              "template":{"type":"string","enum":["empty","concrete_frame","blank","grid_only","beam","steel_deck","staggered_truss","flat_slab","flat_slab_perimeter_beams","waffle_slab","two_way_or_ribbed_slab"],"description":"empty or concrete_frame; or one of the program's New Model Quick Templates (blank ... two_way_or_ribbed_slab), built from x_grids, y_grids, story_data and 'quick'."},
+              "x_grids":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"},"at":{"type":"number"},"visible":{"type":"boolean"},"bubble":{"type":"string"}}},"description":"Quick templates: the grid lines spaced along X (a line at x = at), in m."},
+              "y_grids":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"},"at":{"type":"number"},"visible":{"type":"boolean"},"bubble":{"type":"string"}}}},
+              "story_data":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"height":{"type":"number"}}},"description":"Quick templates: the stories from the lowest up, heights in m."},
+              "quick":{"type":"object","description":"Quick templates: the template form's values in m and kN/m2: left_edge right_edge top_edge bottom_edge, slab_thickness column_size stiff_at_columns, drop_panels drop_size drop_thickness, beam_x_depth beam_x_width beam_y_depth beam_y_width, ribbed rib_depth rib_width_top rib_width_bottom rib_spacing rib_direction (X/Y), secondary_beams secondary_direction secondary_max_spacing secondary_number moment_frame (none/perimeter/intersecting), vierendeel_width panels_before panels_after first_bay_truss_at_top, dead_pattern dead_load live_pattern live_load, restraints (none/pinned/fixed), diaphragm (rigid/semi-rigid/none)."},
               "x_spans":{"type":"array","items":{"type":"number"},"description":"Bay sizes along X, in m."},
               "y_spans":{"type":"array","items":{"type":"number"}},
               "stories":{"type":"integer"},"story_height":{"type":"number"},
@@ -104,7 +108,9 @@ public static class ModelerTools
         StructuralModel model;
         try
         {
-            if (a.Text("template", "empty") == "concrete_frame")
+            var template = a.Text("template", "empty");
+            if (QuickTemplates.Kinds.Contains(template)) model = QuickTemplates.Build(Quick(a, title, template));
+            else if (template == "concrete_frame")
             {
                 var xs = a.Items("x_spans").Select(v => v.GetDouble()).ToArray();
                 var ys = a.Items("y_spans").Select(v => v.GetDouble()).ToArray();
@@ -112,10 +118,43 @@ public static class ModelerTools
             }
             else model = ModelEdit.New(title);
         }
-        catch (ArgumentException ex) { throw new ToolInputException(ex.Message); }
+        catch (Exception ex) when (ex is ArgumentException or KeyNotFoundException or InvalidOperationException or FormatException) { throw new ToolInputException(ex.Message); }
         model.Target = Target(a.Text("program", "etabs"));
         o.Replace(model, "");
         return Summary(o);
+    }
+
+    private static QuickTemplate Quick(JsonElement a, string title, string kind)
+    {
+        static List<QuickGrid> Grids(JsonElement a, string key) => a.Items(key).Select(g => new QuickGrid(
+            g.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "", g.GetProperty("at").GetDouble(),
+            !g.TryGetProperty("visible", out var v) || v.ValueKind != JsonValueKind.False,
+            g.TryGetProperty("bubble", out var b) ? b.GetString() : null)).ToList();
+        var t = new QuickTemplate
+        {
+            Kind = kind, Title = title, XGrids = Grids(a, "x_grids"), YGrids = Grids(a, "y_grids"),
+            Stories = a.Items("story_data").Select(s => (s.GetProperty("name").GetString() ?? "", s.GetProperty("height").GetDouble())).ToList(),
+        };
+        if (!a.TryGetProperty("quick", out var q) || q.ValueKind != JsonValueKind.Object) return t;
+        double N(string k, double d) => q.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : d;
+        bool B(string k, bool d) => q.TryGetProperty(k, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False ? v.GetBoolean() : d;
+        string S(string k, string d) => q.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : d;
+        t.LeftEdge = N("left_edge", 0); t.RightEdge = N("right_edge", 0); t.TopEdge = N("top_edge", 0); t.BottomEdge = N("bottom_edge", 0);
+        t.SlabThickness = N("slab_thickness", t.SlabThickness); t.ColumnSize = N("column_size", t.ColumnSize); t.StiffAtColumns = B("stiff_at_columns", false);
+        t.DropPanels = B("drop_panels", false); t.DropSize = N("drop_size", t.DropSize); t.DropThickness = N("drop_thickness", t.DropThickness);
+        t.BeamXDepth = N("beam_x_depth", t.BeamXDepth); t.BeamXWidth = N("beam_x_width", t.BeamXWidth); t.BeamYDepth = N("beam_y_depth", t.BeamYDepth); t.BeamYWidth = N("beam_y_width", t.BeamYWidth);
+        t.Ribbed = B("ribbed", true); t.RibDepth = N("rib_depth", t.RibDepth); t.RibWidthTop = N("rib_width_top", t.RibWidthTop); t.RibWidthBottom = N("rib_width_bottom", t.RibWidthBottom);
+        t.RibSpacing = N("rib_spacing", t.RibSpacing); t.RibDirection = S("rib_direction", "X");
+        t.SecondaryBeams = B("secondary_beams", true); t.SecondaryDirection = S("secondary_direction", "X");
+        t.SecondaryMaxSpacing = q.TryGetProperty("secondary_max_spacing", out var ms) && ms.ValueKind == JsonValueKind.Number ? ms.GetDouble() : null;
+        t.SecondaryNumber = q.TryGetProperty("secondary_number", out var sn) && sn.ValueKind == JsonValueKind.Number ? sn.GetInt32() : null;
+        if (t.SecondaryMaxSpacing is null && t.SecondaryNumber is null) t.SecondaryMaxSpacing = 3;
+        t.MomentFrame = S("moment_frame", "intersecting");
+        t.VierendeelWidth = N("vierendeel_width", t.VierendeelWidth); t.PanelsBefore = (int)N("panels_before", 3); t.PanelsAfter = (int)N("panels_after", 3);
+        t.FirstBayTrussAtTop = B("first_bay_truss_at_top", true);
+        t.DeadPattern = S("dead_pattern", "Dead"); t.DeadLoad = N("dead_load", 0); t.LivePattern = S("live_pattern", "Live"); t.LiveLoad = N("live_load", 0);
+        t.Restraints = S("restraints", "pinned"); t.Diaphragm = S("diaphragm", "rigid");
+        return t;
     }
 
     private static string Target(string program) => StructuralModel.Targets.Contains(program.ToLowerInvariant())

@@ -235,6 +235,26 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg .itabs button{white-space:nowrap;border:1px solid transparent;border-bottom:0;border-radius:2px 2px 0 0;background:none;padding:3px 12px;margin-bottom:-1px}
 .dlg .itabs button.on{background:var(--field);border-color:var(--line);font-weight:600}
 .dlg .ipage{display:none}.dlg .ipage.on{display:block}
+.dlg .nmr{display:flex;justify-content:space-between;align-items:center;margin:3px 0}
+.dlg .nmi{display:inline-flex;width:15px;height:15px;border-radius:50%;background:#2b5fb4;color:#fff;font:italic bold 11px serif;align-items:center;justify-content:center;cursor:help}
+.dlg .nmgrid{display:grid;grid-template-columns:1fr 170px 18px;gap:5px 8px;align-items:center;margin:4px 0 0 34px}
+.dlg .dis,.dlg span.dis{color:var(--mute)}
+.dlg .nmtop{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dlg .nmhead{display:block;margin:4px 0}
+.dlg .nmf{display:grid;grid-template-columns:1fr 110px 34px;gap:4px 8px;align-items:center;margin:2px 0 6px 18px}
+.dlg .nmf.nmin{margin-left:22px}.dlg .nmsub{margin:4px 0 2px 8px}
+.dlg .nmu{color:var(--mute)}
+.dlg .nmobj{display:flex;flex-wrap:wrap;gap:6px}
+.dlg .nmobj button{display:flex;flex-direction:column;align-items:center;width:84px;padding:4px 2px;background:var(--field);border:1px solid var(--line);border-radius:3px;font-size:11px;line-height:1.2}
+.dlg .nmobj button.on{border:2px solid #2b5fb4;background:#dce8fa}
+.dlg .nmobj button span{margin-top:3px;text-align:center}
+.dlg .nmt{border-collapse:collapse;width:100%;font-size:12px}.dlg .nmt th,.dlg .nmt td{border:1px solid var(--line);padding:1px 3px}.dlg .nmt input,.dlg .nmt select{width:100%;box-sizing:border-box}.dlg .nmt tr.sel td{background:#dce8fa}.dlg .nmt td.ro{background:var(--form);color:var(--mute)}
+.dlg .nmbtn{display:flex;gap:6px;margin-top:4px}
+.dlg .nmcols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dlg .nmouter>legend{font-weight:700;color:#1f3c88}
+.dlg .nmrow{display:flex;gap:18px;align-items:center;margin:4px 0}
+.dlg .nmdots{padding:0 6px}
+.dlg .nmcol{display:inline-block;width:40px;height:16px;background:#7f7f7f;border:1px solid var(--line)}
 .dlg.objinfo fieldset{margin:0 0 6px}.dlg.objinfo .oid .g2{grid-template-columns:90px 1fr}.dlg.objinfo .oid input{width:100%}.dlg.objinfo input.pgg,.dlg.objinfo input[readonly]{background:var(--form);color:var(--mute)}
 .dlg .pgwrap{height:300px;overflow:auto;border:1px solid var(--line);background:var(--field)}
 .rmon .rmHead{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.rmon .rmBar{height:14px;border:1px solid var(--line);background:var(--field);overflow:hidden}
@@ -6980,36 +7000,341 @@ async function hmObjectLoad(kind) {
 }
 
 // ---- File ----
+// File > New Model, read form by form from ETABS 23.2 on Ahmed's PC (2026-11-27): Model Initialization, then New Model
+// Quick Templates (Grid Labels..., Edit Grid Data..., Edit Story Data...), then the template's own "Structural Geometry
+// and Properties for ..." form, with ETABS's own defaults in U.S. and SI units. SAP2000 26.3 has its own New Model form.
+// Pictures: project files field/reference-forms.
+const nmLists = {
+  units: [["us", "U.S. Customary"], ["si", "Metric SI"], ["mks", "Metric MKS"]],
+  region: ["Australia", "Canada", "China", "Europe", "India", "Italy", "Korea", "New Zealand", "Russia", "Spain", "United States", "User", "Vietnam"],
+  db: ["AISC15", "AISC15M", "AISC16-A1085", "AISC16", "AISC16M", "APL_Steel", "ArcelorMittal_American", "ArcelorMittal_British", "ArcelorMittal_BritishHD", "ArcelorMittal_Europe", "ArcelorMittal_EuropeHD", "ArcelorMittal_Japan", "ArcelorMittal_Russia", "Australia-NewZealand", "BSShapes2006", "ChineseGB08", "CISC10", "CISC9", "CoreBraceBRB_2016", "Euro", "Indian", "Jindal_Steel", "JIS-G-3192-2014", "Korean", "KoreanKS21", "Nordic", "Russian"],
+  steel: ["AISC 360-22", "AISC 360-16", "AISC 360-10", "AISC 360-05", "AISC LRFD 93", "AISC ASD 89", "AS 4100-2020", "AS 4100-1998", "BS 5950-2000", "CSA S16-24", "CSA S16-19", "CSA S16-14", "EN 1993-1-1:2022", "EN 1993-1-1:2005/A1:2014", "IS 800:2007", "Italian NTC 2018", "Italian NTC 2008", "KDS 14 31 00 : 2022", "KBC 2016", "KBC 2009", "NZS 3404:1997", "SP 16.13330.2017"],
+  conc: ["ACI 318-25", "ACI 318-19", "ACI 318-14", "ACI 318-11", "ACI 318-08", "AS 3600-2018", "AS 3600-09", "BS 8110-97", "CSA A23.3-24", "CSA A23.3-19", "CSA A23.3-14", "EN 1992-1-1:2023", "Eurocode 2-2004", "Hong Kong CP 2013", "IS 456:2000", "Italian NTC 2018", "KBC 2016", "KBC 2009", "KDS 14 20 00:2022", "Mexican RCDF 2017", "Mexican RCDF 2004", "NZS 3101:2006", "Singapore CP 65:99", "SP 63.13330.2012", "TS 500-2000(R2018)", "TS 500-2000", "TCVN 5574:2012", "TCVN 5574:2018"],
+};
+// Lengths in plan (L), sizes (S) and area loads (Q) per unit system, and their factor to m or kN/m².
+const nmU = {
+  us: {L: "ft", S: "in", Q: "lb/ft²", l: 0.3048, s: 0.0254, q: 0.04788026, force: "kip", length: "ft", temp: "F"},
+  si: {L: "m", S: "mm", Q: "kN/m²", l: 1, s: 0.001, q: 1, force: "kN", length: "m", temp: "C"},
+  mks: {L: "m", S: "mm", Q: "kgf/m²", l: 1, s: 0.001, q: 0.00980665, force: "kgf", length: "m", temp: "C"},
+};
+const nmTemplates = [["blank", "Blank"], ["grid_only", "Grid Only"], ["steel_deck", "Steel Deck"], ["staggered_truss", "Staggered Truss"], ["flat_slab", "Flat Slab"],
+  ["flat_slab_perimeter_beams", "Flat Slab with Perimeter Beams"], ["waffle_slab", "Waffle Slab"], ["two_way_or_ribbed_slab", "Two Way or Ribbed Slab"]];
+// ETABS's defaults, as its forms open (U.S. Customary and Metric SI read on the PC; MKS takes the SI values).
+function nmDefaults(u) {
+  const us = u === "us", kq = v => u === "mks" ? +(v / nmU.mks.q).toFixed(2) : v;
+  const load = us ? {dead_load: 20, live_load: 80} : {dead_load: kq(1), live_load: kq(4)}, zero = {dead_load: 0, live_load: 0};
+  const edges = v => ({left_edge: v, right_edge: v, top_edge: v, bottom_edge: v});
+  const base = {dead_pattern: "Dead", live_pattern: "Live", restraints: "pinned", diaphragm: "rigid"};
+  return {
+    grid: us ? {nx: 4, ny: 4, sx: 24, sy: 24, ns: 4, h: 12, hb: 12} : {nx: 4, ny: 4, sx: 8, sy: 8, ns: 4, h: 3, hb: 3},
+    flat_slab: {...base, ...load, ...edges(us ? 1 : 0.3), slab_thickness: us ? 8 : 200, column_size: us ? 12 : 300, stiff_at_columns: true, drop_panels: true, drop_size: us ? 8 : 3, drop_thickness: us ? 15 : 350},
+    flat_slab_perimeter_beams: {...base, ...load, ...edges(us ? 0.5 : 0.15), slab_thickness: us ? 8 : 200, column_size: us ? 12 : 300, stiff_at_columns: false, drop_panels: true, drop_size: us ? 8 : 3, drop_thickness: us ? 15 : 350,
+      beam_x_depth: us ? 24 : 600, beam_x_width: us ? 12 : 300, beam_y_depth: us ? 24 : 600, beam_y_width: us ? 12 : 300},
+    waffle_slab: {...base, ...load, ...edges(us ? 1 : 0.3), slab_thickness: us ? 4 : 100, column_size: us ? 12 : 300, stiff_at_columns: false, drop_panels: true, drop_size: us ? 6 : 3, drop_thickness: us ? 15 : 350,
+      rib_depth: us ? 15 : 350, rib_width_top: us ? 6 : 125, rib_width_bottom: us ? 5 : 120, rib_spacing: us ? 2.9167 : 0.8},
+    two_way_or_ribbed_slab: {...base, ...load, ...edges(us ? 0.5 : 0.15), slab_thickness: us ? 4 : 100, column_size: us ? 12 : 300, stiff_at_columns: false, ribbed: true,
+      rib_depth: us ? 15 : 350, rib_width_top: us ? 6 : 125, rib_width_bottom: us ? 5 : 120, rib_spacing: us ? 2.9167 : 0.8, rib_direction: "X", beam_x_depth: us ? 24 : 600, beam_x_width: us ? 12 : 300},
+    steel_deck: {...base, ...zero, ...edges(us ? 0.5 : 0.15), secondary_beams: true, secondary_direction: "X", secondary_max_spacing: us ? 8 : 3, moment_frame: "intersecting", special_moment_beams: false},
+    staggered_truss: {...base, ...zero, ...edges(0), vierendeel_width: us ? +(2 / 0.3048).toFixed(4) : 2, panels_before: 3, panels_after: 3, first_bay_truss_at_top: true},
+  };
+}
+const nmIcon = k => {
+  const g = "#3b4b63", f = "#b9c6d6", s = `stroke="${g}" fill="none"`;
+  const grid = `<path ${s} stroke-width="1" d="M10 8v40M18 8v40M26 8v40M34 8v40M42 8v40M50 8v40M6 12h48M6 20h48M6 28h48M6 36h48M6 44h48"/>`;
+  const cols = [14, 30, 46].map(x => [14, 30, 46].map(y => `<rect x="${x - 2}" y="${y - 2}" width="4" height="4" fill="${g}"/>`).join("")).join("");
+  return `<svg viewBox="0 0 60 56" width="52" height="48">${{
+    blank: `<rect x="6" y="6" width="48" height="44" fill="#dfe6ee" stroke="${g}"/>`,
+    grid_only: grid,
+    steel_deck: `<rect x="8" y="8" width="44" height="40" fill="${f}" ${s} stroke-width="2"/><path ${s} d="M8 18h44M8 28h44M8 38h44"/>`,
+    staggered_truss: `<rect x="8" y="8" width="44" height="40" fill="${f}" ${s}/><path ${s} d="M8 8l12 14 12-14 12 14 8-6M8 48l12-14 12 14 12-14 8 6"/>`,
+    flat_slab: `<rect x="6" y="6" width="48" height="44" fill="${f}" ${s}/>${[14, 30, 46].map(x => [14, 30, 46].map(y => `<rect x="${x - 4}" y="${y - 4}" width="8" height="8" fill="#e8eef5" ${s}/>`).join("")).join("")}${cols}`,
+    flat_slab_perimeter_beams: `<rect x="6" y="6" width="48" height="44" fill="${f}" stroke="${g}" stroke-width="3"/>${[30].map(x => `<rect x="${x - 4}" y="${26}" width="8" height="8" fill="#e8eef5" ${s}/>`).join("")}${cols}`,
+    waffle_slab: `<rect x="6" y="6" width="48" height="44" fill="${f}" ${s}/>${grid}${cols}`,
+    two_way_or_ribbed_slab: `<rect x="6" y="6" width="48" height="44" fill="${f}" ${s}/><path stroke="${g}" stroke-width="2" d="M30 6v44M6 28h48"/>${cols}`,
+  }[k]}</svg>`;
+};
+let nmSaved = null;
+function nmSavedDefaults() {
+  if (nmSaved) return nmSaved;
+  try { nmSaved = JSON.parse(localStorage.getItem("cpm.newModel") || "null"); } catch (e) { nmSaved = null; }
+  return nmSaved = nmSaved || {units: "us", region: "United States", db: "AISC15", steel: "AISC 360-16", conc: "ACI 318-19"};
+}
 function hmNew() {
-  const d = dialog("New Model Quick Templates", `<fieldset style="margin:0 0 8px"><legend>Program the model is for</legend>${["etabs", "sap2000", "safe"].map(k => `<label style="margin-right:14px"><input type="radio" name="nP" value="${k}"${k === program ? " checked" : ""}>${progLabel(k)}</label>`).join("")}<div class="kv">The Modeler then offers what that program has, and Save writes its file (.e2k, .s2k or .f2k) beside the .cpm.</div></fieldset>
-    <div class="g2" style="margin-bottom:8px"><span>Model title</span><input id="nT" value="Model"></div>
-    <div style="display:flex;gap:10px"><fieldset style="flex:1"><legend>Grid Dimensions (Plan)</legend><div class="g2">
-      <span>Number of Grid Lines in X Direction</span><input id="nXn" type="number" value="4" min="1"><span>Number of Grid Lines in Y Direction</span><input id="nYn" type="number" value="4" min="1">
-      <span>Spacing of Grids in X Direction</span><input id="nXs" type="number" step="any" value="6"><span>Spacing of Grids in Y Direction</span><input id="nYs" type="number" step="any" value="6"></div></fieldset>
-    <fieldset style="flex:1"><legend>Story Dimensions</legend><div class="g2"><span>Number of Stories</span><input id="nS" type="number" value="4" min="1"><span>Typical Story Height</span><input id="nH" type="number" step="any" value="3"><span>Bottom Story Height</span><input id="nB" type="number" step="any" value="3"></div></fieldset></div>
-    <fieldset><legend>Add Structural Objects</legend><label style="display:block"><input type="radio" name="nK" value="grid" checked>Grid Only: grids and stories, nothing drawn (draw it with the Draw menu)</label><label style="display:block"><input type="radio" name="nK" value="frame">Concrete Frame: columns, beams, slabs, supports and loads on every grid</label><label style="display:block"><input type="radio" name="nK" value="blank">Blank: one story, no grids</label></fieldset>
-    <p class="kv">Units kN, m. The model in the Modeler is replaced: save it first if you want it (Edit > Undo also brings it back).</p>`,
-    [["OK", d => { hmNewGo(d); return false; }, true], ["Cancel"]], {width: 640});
+  if (program === "sap2000") return hmNewSap();
+  const sv = nmSavedDefaults(), i = (t) => `<span class="nmi" title="${esc(t)}">i</span>`;
+  const row = (id, label, list, v, tip) => `<span class="nmind">${label}</span><select id="${id}" disabled>${opts(list, v)}</select>${tip ? i(tip) : "<span></span>"}`;
+  const d = dialog("Model Initialization", `<fieldset><legend>Initialization Options</legend>
+    <div class="nmr"><label><input type="radio" name="mi" value="saved" checked>Use Saved User Default Settings</label>${i("Starts from the settings last saved as the defaults.")}</div>
+    <div class="nmr"><label><input type="radio" name="mi" value="file">Use Settings from a Model File...</label>${i("Starts from the units and codes of a model file you choose.")}</div>
+    <div class="nmr"><label><input type="radio" name="mi" value="builtin">Use Built-in Settings With:</label><span></span></div>
+    <div class="nmgrid">${row("miU", "Display Units", nmLists.units, sv.units, "The units the model is shown in.")}${row("miR", "Region for Default Materials", nmLists.region, sv.region, "The region whose materials the model starts with.")}${row("miD", "Steel Section Database", nmLists.db, sv.db)}${row("miS", "Steel Design Code", nmLists.steel, sv.steel, "The steel frame design code.")}${row("miC", "Concrete Design Code", nmLists.conc, sv.conc, "The concrete frame design code.")}</div></fieldset>`,
+    [["OK", d => { nmInitOk(d); return false; }, true], ["Cancel"]], {width: 470});
+  d.querySelectorAll("[name=mi]").forEach(r => r.onchange = () => { const b = q(d, "[name=mi]:checked").value === "builtin"; d.querySelectorAll(".nmgrid select").forEach(x => x.disabled = !b); d.querySelectorAll(".nmgrid .nmind").forEach(x => x.classList.toggle("dis", !b)); });
+  d.querySelectorAll(".nmgrid .nmind").forEach(x => x.classList.add("dis"));
   return d;
 }
-async function hmNewGo(d) {
-  {
-      const prog = q(d, "[name=nP]:checked").value, t = q(d, "#nT").value.trim() || "Model", k = q(d, "[name=nK]:checked").value, nx = Math.max(1, parseInt(q(d, "#nXn").value) || 1), ny = Math.max(1, parseInt(q(d, "#nYn").value) || 1), sx = fnum(d, "#nXs"), sy = fnum(d, "#nYs"), ns = Math.max(1, parseInt(q(d, "#nS").value) || 1), h = fnum(d, "#nH"), hb = fnum(d, "#nB");
-      formError(d, "");
-      if (k === "frame") {
-        if (Math.abs(hb - h) > 1e-9) return formError(d, "The concrete frame template has one story height: make the bottom story the same height, or start from Grid Only.");
-        return submit(d, "new_model", {title: t, program: prog, template: "concrete_frame", x_spans: Array(Math.max(1, nx - 1)).fill(sx), y_spans: Array(Math.max(1, ny - 1)).fill(sy), stories: ns, story_height: h});
-      }
-      let j = await hmRun("new_model", {title: t, program: prog, template: "empty"}, true); if (!j.ok) return formError(d, j.error);
-      const stories_ = k === "blank" ? [{name: "Story1", height: h}] : Array.from({length: ns}, (_, i) => ({name: "Story" + (i + 1), height: i === 0 ? hb : h}));
-      j = await hmRun("define_stories", {stories: stories_}, true); if (!j.ok) return formError(d, j.error);
-      if (k === "grid") {
-        const letters = i => { let s = ""; i++; while (i > 0) { s = String.fromCharCode(65 + (i - 1) % 26) + s; i = Math.floor((i - 1) / 26); } return s; };
-        j = await hmRun("define_grids", {grids: Array.from({length: nx}, (_, i) => ({label: letters(i), direction: "X", coordinate: +(i * sx).toFixed(6)})).concat(Array.from({length: ny}, (_, i) => ({label: String(i + 1), direction: "Y", coordinate: +(i * sy).toFixed(6)})))}, true);
-        if (!j.ok) return formError(d, j.error);
-      }
-      d.close(); hmSay(`New ${progLabel(prog)} model ready. Draw > Draw Columns, then beams and floors; or ask the chat.`);
+async function nmInitOk(d) {
+  const how = q(d, "[name=mi]:checked").value;
+  let init = {...nmSavedDefaults()};
+  if (how === "builtin") init = {units: q(d, "#miU").value, region: q(d, "#miR").value, db: q(d, "#miD").value, steel: q(d, "#miS").value, conc: q(d, "#miC").value};
+  if (how === "file") {
+    const p = await hostPick({kind: "open", title: "Open Model File", filter: modelFilter, folder: modelFolder()});
+    if (p && p.cancelled) return;
+    init.from = p ? p.path : "";
   }
+  d.close();
+  nmQuick(init);
+}
+function nmQuick(init) {
+  const u = nmU[init.units] || nmU.si, df = nmDefaults(init.units).grid;
+  const st = {kind: "grid_only", labels: {x: "A", xDir: "lr", y: "1", yDir: "bt"}, grids: null, stories: null};
+  const num = (id, v, unit) => `<input id="${id}" type="number" step="any" value="${v}"><span class="nmu">${unit || ""}</span>`;
+  const d = dialog("New Model Quick Templates", `<div class="nmtop"><fieldset><legend>Grid Dimensions (Plan)</legend>
+      <label class="nmhead"><input type="radio" name="gU" value="uniform" checked>Uniform Grid Spacing</label>
+      <div class="nmf"><span>Number of Grid Lines in X Direction</span>${num("qXn", df.nx)}<span>Number of Grid Lines in Y Direction</span>${num("qYn", df.ny)}
+      <span>Spacing of Grids in X Direction</span>${num("qXs", df.sx, u.L)}<span>Spacing of Grids in Y Direction</span>${num("qYs", df.sy, u.L)}
+      <span>Specify Grid Labeling Options</span><button id="qLab" type="button">Grid Labels...</button><span></span></div>
+      <label class="nmhead"><input type="radio" name="gU" value="custom">Custom Grid Spacing</label>
+      <div class="nmf"><span class="dis">Specify Data for Grid Lines</span><button id="qGrid" type="button" disabled>Edit Grid Data...</button><span></span></div></fieldset>
+    <fieldset><legend>Story Dimensions</legend>
+      <label class="nmhead"><input type="radio" name="sU" value="simple" checked>Simple Story Data</label>
+      <div class="nmf"><span>Number of Stories</span>${num("qSn", df.ns)}<span>Typical Story Height</span>${num("qH", df.h, u.L)}<span>Bottom Story Height</span>${num("qHb", df.hb, u.L)}</div>
+      <label class="nmhead"><input type="radio" name="sU" value="custom">Custom Story Data</label>
+      <div class="nmf"><span class="dis">Specify Custom Story Data</span><button id="qStory" type="button" disabled>Edit Story Data...</button><span></span></div></fieldset></div>
+    <fieldset><legend>Add Structural Objects</legend><div class="nmobj">${nmTemplates.map(([k, l]) => `<button type="button" data-t="${k}" class="${k === st.kind ? "on" : ""}">${nmIcon(k)}<span>${esc(l)}</span></button>`).join("")}</div></fieldset>`,
+    [["OK", d => { nmQuickOk(d, init, st); return false; }, true], ["Cancel"]], {width: 860});
+  const grey = () => {
+    const gu = q(d, "[name=gU]:checked").value === "uniform", su = q(d, "[name=sU]:checked").value === "simple";
+    ["#qXn", "#qYn", "#qXs", "#qYs", "#qLab"].forEach(s => q(d, s).disabled = !gu); q(d, "#qGrid").disabled = gu;
+    ["#qSn", "#qH", "#qHb"].forEach(s => q(d, s).disabled = !su); q(d, "#qStory").disabled = su;
+    d.querySelectorAll(".nmtop fieldset").forEach((f, n) => f.querySelectorAll(".nmf").forEach((x, j) => x.querySelectorAll("span").forEach(s => s.classList.toggle("dis", (j === 0) !== (n === 0 ? gu : su)))));
+  };
+  d.querySelectorAll("[name=gU],[name=sU]").forEach(r => r.onchange = grey); grey();
+  d.querySelectorAll("[data-t]").forEach(b => b.onclick = () => { st.kind = b.dataset.t; d.querySelectorAll("[data-t]").forEach(x => x.classList.toggle("on", x === b)); });
+  d.querySelectorAll("[data-t]").forEach(b => b.ondblclick = () => { st.kind = b.dataset.t; nmQuickOk(d, init, st); });
+  q(d, "#qLab").onclick = () => nmLabels(st);
+  q(d, "#qGrid").onclick = () => { if (!st.grids) st.grids = nmUniformGrids(d, st, u); nmGridData(st, u); };
+  q(d, "#qStory").onclick = () => { if (!st.stories) st.stories = nmUniformStories(d, u); nmStoryData(st, u); };
+  return d;
+}
+// Grid labels as ETABS counts them: A, B ... Z, AA; or 1, 2, 3; going up from the beginning ID, the other way when asked.
+function nmLabel(start, i) {
+  if (/^\d+$/.test(start)) return String(parseInt(start) + i);
+  let n = 0; for (const c of start.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64);
+  n += i; let s = ""; while (n > 0) { s = String.fromCharCode(65 + (n - 1) % 26) + s; n = Math.floor((n - 1) / 26); } return s;
+}
+function nmUniformGrids(d, st, u) {
+  const nx = Math.max(1, parseInt(q(d, "#qXn").value) || 1), ny = Math.max(1, parseInt(q(d, "#qYn").value) || 1), sx = fnum(d, "#qXs"), sy = fnum(d, "#qYs");
+  const lab = st.labels;
+  const xs = Array.from({length: nx}, (_, i) => ({id: nmLabel(lab.x || "A", lab.xDir === "rl" ? nx - 1 - i : i), at: +(i * sx).toFixed(6), visible: true, bubble: "End"}));
+  const ys = Array.from({length: ny}, (_, i) => ({id: nmLabel(lab.y || "1", lab.yDir === "tb" ? ny - 1 - i : i), at: +(i * sy).toFixed(6), visible: true, bubble: "Start"}));
+  return {name: "G1", x: xs, y: ys, bubbleSize: u === nmU.us ? 60 : 1524};
+}
+function nmUniformStories(d, u) {
+  const ns = Math.max(1, parseInt(q(d, "#qSn").value) || 1), h = fnum(d, "#qH"), hb = fnum(d, "#qHb");
+  return Array.from({length: ns}, (_, i) => ({name: "Story" + (i + 1), height: i === 0 ? hb : h, master: i === ns - 1, similar: i === ns - 1 ? "None" : "Story" + ns, splice: false, spliceHeight: 0, color: ""}));
+}
+function nmLabels(st) {
+  const l = st.labels;
+  dialog("Grid Labeling Options", `<div style="display:flex;gap:10px"><fieldset style="flex:1"><legend>X Grid</legend><div class="g2"><span>Beginning X ID</span><input id="lX" value="${esc(l.x)}"></div>
+      <label style="display:block;margin-top:6px"><input type="radio" name="lXd" value="lr" ${l.xDir === "lr" ? "checked" : ""}>Label Left to Right</label><label style="display:block"><input type="radio" name="lXd" value="rl" ${l.xDir === "rl" ? "checked" : ""}>Label Right to Left</label></fieldset>
+    <fieldset style="flex:1"><legend>Y Grid</legend><div class="g2"><span>Beginning Y ID</span><input id="lY" value="${esc(l.y)}"></div>
+      <label style="display:block;margin-top:6px"><input type="radio" name="lYd" value="bt" ${l.yDir === "bt" ? "checked" : ""}>Label Bottom to Top</label><label style="display:block"><input type="radio" name="lYd" value="tb" ${l.yDir === "tb" ? "checked" : ""}>Label Top to Bottom</label></fieldset></div>`,
+    [["OK", d => { st.labels = {x: q(d, "#lX").value.trim() || "A", xDir: q(d, "[name=lXd]:checked").value, y: q(d, "#lY").value.trim() || "1", yDir: q(d, "[name=lYd]:checked").value}; }], ["Cancel"]], {width: 470});
+}
+function nmGridData(st, u) {
+  const g = st.grids;
+  const table = (k, axis, bub) => `<fieldset><legend>${axis} Grid Data</legend><table class="nmt" data-ax="${k}"><thead><tr><th></th><th>Grid ID</th><th>${axis} <span class="nmord">Ordinate</span></th><th>Visible</th><th>Bubble Loc</th></tr></thead><tbody>${g[k].map((r, i) => nmGridRow(r, i, bub)).join("")}</tbody></table>
+    <div class="nmbtn"><button type="button" data-add="${k}">Add</button><button type="button" data-del="${k}">Delete</button><button type="button" data-sort="${k}">Sort</button></div></fieldset>`;
+  const d = dialog("Grid System Data", `<div class="nmtop"><div><div class="g2"><span>Grid System Name</span><input id="gN" value="${esc(g.name)}"></div>
+      <fieldset><legend>System Origin</legend><div class="g2"><span class="dis">Global X</span><input disabled value="0"><span class="dis">Global Y</span><input disabled value="0"><span class="dis">Rotation, deg</span><input disabled value="0"></div></fieldset>
+      <fieldset><legend>Story Range Option</legend><label class="dis" style="display:block"><input type="radio" disabled checked>Default - All Stories</label><label class="dis" style="display:block"><input type="radio" disabled>User Specified</label>
+        <div class="g2"><span class="dis">Top Story</span><select disabled></select><span class="dis">Bottom Story</span><select disabled></select></div></fieldset></div>
+    <div><fieldset><legend>Click to Modify/Show:</legend><button type="button" disabled>Reference Points...</button> <button type="button" disabled>Reference Planes...</button></fieldset>
+      <fieldset><legend>Options</legend><div class="g2"><span>Bubble Size</span><span><input id="gB" type="number" step="any" value="${g.bubbleSize}" style="width:80px"> ${u.S}</span><span>Grid Color</span><span class="nmcol"></span></div></fieldset>
+      <fieldset><legend>Rectangular Grids</legend><label style="display:block"><input type="radio" name="gD" value="ord" checked>Display Grid Data as Ordinates</label><label style="display:block"><input type="radio" name="gD" value="sp">Display Grid Data as Spacing</label>
+        <button type="button" disabled>Quick Start New Rectangular Grids...</button></fieldset></div></div>
+    ${table("x", "X", "End")}${table("y", "Y", "Start")}`,
+    [["OK", d => { const r = nmReadGrids(d, g); if (r) return formError(d, r), false; g.name = q(d, "#gN").value.trim() || "G1"; g.bubbleSize = fnum(d, "#gB") || g.bubbleSize; }], ["Cancel"]], {width: 640});
+  const asSpacing = () => q(d, "[name=gD]:checked").value === "sp";
+  const refill = () => d.querySelectorAll(".nmt").forEach(t => { const k = t.dataset.ax; t.tBodies[0].innerHTML = g[k].map((r, i) => nmGridRow(r, i, k === "x" ? "End" : "Start", asSpacing() ? (i + 1 < g[k].length ? +(g[k][i + 1].at - r.at).toFixed(6) : 0) : r.at)).join(""); d.querySelectorAll(".nmord").forEach(o => o.textContent = asSpacing() ? "Spacing" : "Ordinate"); });
+  d.querySelectorAll("[name=gD]").forEach(r => r.onchange = () => { const wasSp = !asSpacing(); if (nmReadGrids(d, g, wasSp)) return; refill(); });
+  d.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { nmReadGrids(d, g, asSpacing()); const k = b.dataset.add, a = g[k], last = a[a.length - 1];
+    a.push({id: last ? nmLabel(last.id, 1) : (k === "x" ? "A" : "1"), at: last ? +(last.at + (a.length > 1 ? last.at - a[a.length - 2].at : 1)).toFixed(6) : 0, visible: true, bubble: k === "x" ? "End" : "Start"}); refill(); });
+  d.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { nmReadGrids(d, g, asSpacing()); const k = b.dataset.del, t = d.querySelector(`.nmt[data-ax="${k}"]`), pick = [...t.querySelectorAll("tbody tr")].findIndex(tr => tr.classList.contains("sel")); g[k].splice(pick >= 0 ? pick : g[k].length - 1, 1); refill(); });
+  d.querySelectorAll("[data-sort]").forEach(b => b.onclick = () => { nmReadGrids(d, g, asSpacing()); g[b.dataset.sort].sort((a, c) => a.at - c.at); refill(); });
+  d.addEventListener("click", e => { const tr = e.target.closest(".nmt tbody tr"); if (tr) { tr.parentNode.querySelectorAll("tr").forEach(x => x.classList.toggle("sel", x === tr)); } });
+}
+const nmGridRow = (r, i, bub, shown) => `<tr><td>${i + 1}</td><td><input data-c="id" value="${esc(r.id)}"></td><td><input data-c="at" type="number" step="any" value="${shown === undefined ? r.at : shown}"></td><td><input data-c="vis" type="checkbox" ${r.visible ? "checked" : ""}></td><td><select data-c="bub">${opts(bub === "End" ? ["End", "Start"] : ["Start", "End"], r.bubble || bub)}</select></td></tr>`;
+function nmReadGrids(d, g, spacing) {
+  if (spacing === undefined) spacing = q(d, "[name=gD]:checked").value === "sp";
+  for (const t of d.querySelectorAll(".nmt")) {
+    const rows = [...t.querySelectorAll("tbody tr")].map(tr => ({id: q(tr, "[data-c=id]").value.trim(), v: parseFloat(q(tr, "[data-c=at]").value), visible: q(tr, "[data-c=vis]").checked, bubble: q(tr, "[data-c=bub]").value}));
+    if (rows.some(r => !r.id || !isFinite(r.v))) return "Every grid line needs an ID and a number.";
+    let at = 0; g[t.dataset.ax] = rows.map(r => { const o = {id: r.id, at: spacing ? at : r.v, visible: r.visible, bubble: r.bubble}; at += spacing ? r.v : 0; return o; });
+  }
+  return "";
+}
+function nmStoryData(st, u) {
+  const s = st.stories, names = () => s.map(r => r.name);
+  const body = () => { let el = s.reduce((a, r) => a + r.height, 0); const rows = [];
+    for (let i = s.length - 1; i >= 0; i--) { const r = s[i]; rows.push(`<tr data-i="${i}"><td><input data-c="name" value="${esc(r.name)}"></td><td><input data-c="height" type="number" step="any" value="${r.height}"></td><td class="ro">${+el.toFixed(4)}</td><td><select data-c="master">${opts([["Yes", "Yes"], ["No", "No"]], r.master ? "Yes" : "No")}</select></td><td><select data-c="similar">${opts(["None"].concat(names().filter(n => n !== r.name)), r.similar || "None")}</select></td><td><select data-c="splice">${opts([["No", "No"], ["Yes", "Yes"]], r.splice ? "Yes" : "No")}</select></td><td><input data-c="sh" type="number" step="any" value="${r.spliceHeight || 0}"></td><td><input data-c="color" type="color" value="${r.color || "#a0c4ff"}"></td></tr>`); el -= r.height; }
+    rows.push(`<tr><td class="ro">Base</td><td class="ro"></td><td class="ro">0</td><td></td><td></td><td></td><td></td><td></td></tr>`); return rows.join(""); };
+  const d = dialog("Story Data", `<table class="nmt nmst"><thead><tr><th>Story</th><th>Height<br>${u.L}</th><th>Elevation<br>${u.L}</th><th>Master Story</th><th>Similar To</th><th>Splice Story</th><th>Splice Height<br>${u.L}</th><th>Story Color</th></tr></thead><tbody>${body()}</tbody></table>
+    <p class="kv">Right Click on Grid for Options</p>`,
+    [["OK", d => { const r = read(d); if (r) return formError(d, r), false; }], ["Cancel"]], {width: 720});
+  const read = d => {
+    const rows = [...d.querySelectorAll("tbody tr[data-i]")];
+    for (const tr of rows) { const h = parseFloat(q(tr, "[data-c=height]").value), n = q(tr, "[data-c=name]").value.trim(); if (!n || !(h > 0)) return "Every story needs a name and a height above 0.";
+      Object.assign(s[+tr.dataset.i], {name: n, height: h, master: q(tr, "[data-c=master]").value === "Yes", similar: q(tr, "[data-c=similar]").value, splice: q(tr, "[data-c=splice]").value === "Yes", spliceHeight: parseFloat(q(tr, "[data-c=sh]").value) || 0, color: q(tr, "[data-c=color]").value}); }
+    if (new Set(s.map(r => r.name)).size !== s.length) return "Two stories have the same name.";
+    return "";
+  };
+  // Right click on the grid: add a story above or below, or delete it, as ETABS's grid offers.
+  d.addEventListener("contextmenu", e => { const tr = e.target.closest("tr[data-i]"); if (!tr) return; e.preventDefault(); read(d); const i = +tr.dataset.i;
+    const m = dialog("Story Data", `<button type="button" data-o="above">Add Story Above</button> <button type="button" data-o="below">Add Story Below</button> <button type="button" data-o="del">Delete Story</button>`, [["Close"]], {width: 380});
+    m.querySelectorAll("[data-o]").forEach(b => b.onclick = () => { const o = b.dataset.o, n = "Story" + (Math.max(0, ...s.map(r => parseInt(r.name.replace(/\D/g, "")) || 0)) + 1);
+      if (o === "del") { if (s.length > 1) s.splice(i, 1); } else s.splice(o === "above" ? i + 1 : i, 0, {name: n, height: s[i].height, master: false, similar: "None", splice: false, spliceHeight: 0, color: ""});
+      q(d, "tbody").innerHTML = body(); m.close(); }); });
+}
+function nmQuickOk(d, init, st) {
+  formError(d, "");
+  const u = nmU[init.units] || nmU.si;
+  const gu = q(d, "[name=gU]:checked").value === "uniform", su = q(d, "[name=sU]:checked").value === "simple";
+  const grids = gu ? nmUniformGrids(d, st, u) : (st.grids || nmUniformGrids(d, st, u));
+  const stories = su ? nmUniformStories(d, u) : (st.stories || nmUniformStories(d, u));
+  if (stories.some(s => !(s.height > 0))) return formError(d, "Every story needs a height above 0.");
+  if (gu && [fnum(d, "#qXs"), fnum(d, "#qYs")].some(v => !(v > 0))) return formError(d, "The grid spacing must be above 0.");
+  const plan = {init, kind: st.kind, grids, stories, u};
+  if (st.kind === "blank" || st.kind === "grid_only") return nmBuild(d, plan, {});
+  nmTemplateForm(d, plan);
+}
+function nmTemplateForm(parent, plan) {
+  const {kind, u, init} = plan, v = nmDefaults(init.units)[kind], label = nmTemplates.find(t => t[0] === kind)[1];
+  const num = (k, unit, dis) => `<input data-k="${k}" type="number" step="any" value="${v[k] === undefined ? "" : v[k]}"${dis ? " disabled" : ""}><span class="nmu">${unit || ""}</span>`;
+  const radios = (k, list) => list.map(([val, l]) => `<label><input type="radio" name="${k}" value="${val}" ${v[k] === val ? "checked" : ""}>${l}</label>`).join("");
+  const chk = (k, l) => `<label><input type="checkbox" data-k="${k}" ${v[k] ? "checked" : ""}>${l}</label>`;
+  const overhangs = (t) => `<fieldset><legend>${t || "Overhangs"}</legend><div class="nmsub">Along X Direction</div><div class="nmf nmin"><span>Left Edge Distance</span>${num("left_edge", u.L)}<span>Right Edge Distance</span>${num("right_edge", u.L)}</div>
+    <div class="nmsub">Along Y Direction</div><div class="nmf nmin"><span>Top Edge Distance</span>${num("top_edge", u.L)}<span>Bottom Edge Distance</span>${num("bottom_edge", u.L)}</div></fieldset>`;
+  const system = (extra) => `<fieldset><legend>Structural System Properties</legend><div class="nmf nmin"><span>Slab Thickness</span>${num("slab_thickness", u.S)}<span>Column Size (square)</span>${num("column_size", u.S)}</div>
+    <div class="nmrow">${chk("stiff_at_columns", "Model Column Intersection as Stiff Slab")}${extra || ""}</div></fieldset>`;
+  const drops = `<fieldset><legend>Drop Panel Dimensions</legend>${chk("drop_panels", "Include Drop Panels")}<div class="nmf"><span>Drop Panel Size (square)</span>${num("drop_size", u.L)}<span>Drop Panel Thickness</span>${num("drop_thickness", u.S)}</div></fieldset>`;
+  const load = `<fieldset><legend>Load</legend><div class="nmf"><span>Dead Load Pattern</span><select data-k="dead_pattern">${opts(["Dead", "Live"], v.dead_pattern)}</select><span></span>
+    <span>Dead Load (Additional)</span>${num("dead_load", u.Q)}<span>Live Load Pattern</span><select data-k="live_pattern">${opts(["Dead", "Live"], v.live_pattern)}</select><span></span><span>Live Load</span>${num("live_load", u.Q)}</div></fieldset>`;
+  const restr = `<fieldset><legend>Restraints at Bottom</legend><div class="nmrow">${radios("restraints", [["none", "None"], ["pinned", "Pinned"], ["fixed", "Fixed"]])}</div></fieldset>`;
+  const dia = `<fieldset><legend>Floor Diaphragm Rigidity</legend><div class="nmrow">${radios("diaphragm", [["rigid", "Rigid"], ["semi-rigid", "Semi-Rigid"], ["none", "No Diaphragm"]])}</div></fieldset>`;
+  const ribs = (dir) => `<fieldset><legend>Rib Dimensions</legend><div class="nmf"><span>Depth (Includes Slab)</span>${num("rib_depth", u.S)}<span>Width Top</span>${num("rib_width_top", u.S)}<span>Width Bottom</span>${num("rib_width_bottom", u.S)}<span>Spacing</span>${num("rib_spacing", u.L)}</div>${dir ? `<div class="nmrow">${radios("rib_direction", [["X", "X Direction"], ["Y", "Y Direction"]])}</div>` : ""}</fieldset>`;
+  const sec = (k, l, list, val) => `<span>${l}</span><select data-k="${k}">${opts(list, val)}</select><button type="button" class="nmdots" title="Define > Section Properties, once the model is made">...</button>`;
+  const deckSecs = ["A-LatCol", "A-LatBm", "A-GravCol", "A-GravBm", "A-CompBm", "Deck1"], trussSecs = ["A-TrChdW10", "A-TrWebW10", "A-LatCol", "A-LatBm", "Plank1"];
+  let left = "", right = "";
+  if (kind === "flat_slab") {
+    left = overhangs() + system() + dia;
+    right = drops + `<fieldset class="dis"><legend>Post Tensioning</legend><div class="nmrow"><label class="dis"><input type="checkbox" disabled>Add P/T</label><button type="button" disabled>P/T Data ...</button></div></fieldset>` + load + restr;
+  } else if (kind === "flat_slab_perimeter_beams" || kind === "waffle_slab") {
+    left = overhangs() + system() + drops;
+    right = (kind === "waffle_slab" ? ribs(false) : `<fieldset><legend>Beam Dimensions</legend><div class="nmsub">X-Direction Beams</div><div class="nmf nmin"><span>Depth</span>${num("beam_x_depth", u.S)}<span>Web Width</span>${num("beam_x_width", u.S)}</div>
+      <div class="nmsub">Y-Direction Beams</div><div class="nmf nmin"><span>Depth</span>${num("beam_y_depth", u.S)}<span>Web Width</span>${num("beam_y_width", u.S)}</div></fieldset>`) + load + restr + dia;
+  } else if (kind === "two_way_or_ribbed_slab") {
+    left = overhangs() + system(chk("ribbed", "Ribbed Slab")) + restr + dia;
+    right = ribs(true) + `<fieldset><legend>Transverse Beam</legend><div class="nmf"><span>Depth</span>${num("beam_x_depth", u.S)}<span>Web Width</span>${num("beam_x_width", u.S)}</div></fieldset>` + load;
+  } else if (kind === "steel_deck") {
+    left = overhangs() + `<fieldset><legend>Secondary Beams</legend>${chk("secondary_beams", "Secondary Beams")}<div class="nmf nmin"><span>Direction</span><select data-k="secondary_direction">${opts(["X", "Y"], v.secondary_direction)}</select><span></span>
+      <span><label><input type="radio" name="secN" value="max" checked>Max Spacing</label></span>${num("secondary_max_spacing", u.L)}<span><label><input type="radio" name="secN" value="num">Number</label></span><input data-k="secondary_number" type="number" step="1" disabled><span></span></div></fieldset>
+      <fieldset><legend>Moment Frame Type</legend><div class="nmrow">${radios("moment_frame", [["none", "None"], ["perimeter", "Perimeter"], ["intersecting", "Intersecting"]])}</div>
+      <div class="nmrow">${chk("special_moment_beams", "Special Moment Beams")}<button type="button" id="tSpec" disabled>Specify Type...</button></div></fieldset>`;
+    right = `<fieldset><legend>Structural System Properties</legend><div class="nmf">${sec("s_latcol", "Lateral Column", deckSecs, "A-LatCol")}${sec("s_latbm", "Lateral Beam", deckSecs, "A-LatBm")}${sec("s_gravcol", "Gravity Column", deckSecs, "A-GravCol")}${sec("s_gravbm", "Gravity Beam", deckSecs, "A-GravBm")}${sec("s_secbm", "Secondary Beam", deckSecs, "A-CompBm")}${sec("s_deck", "Deck/Floor", deckSecs, "Deck1")}</div></fieldset>` + load + restr + dia;
+  } else if (kind === "staggered_truss") {
+    left = `<fieldset><legend>Truss Location</legend><div class="nmf"><span>Vierendeel Panel Width</span>${num("vierendeel_width", u.L)}<span>No. of Panels Before Vierendeel</span>${num("panels_before")}<span>No. of Panels After Vierendeel</span>${num("panels_after")}</div>
+      ${chk("first_bay_truss_at_top", "First Bay has Truss at Top Level")}</fieldset>` + overhangs("Deck Overhangs") + restr + dia;
+    right = `<fieldset><legend>Structural System Properties</legend><div class="nmf">${sec("t1", "Top Truss Chord Typical", trussSecs, "A-TrChdW10")}${sec("t2", "Top Chord at Vierendeel", trussSecs, "A-TrChdW10")}${sec("t3", "Bot Truss Chord Typical", trussSecs, "A-TrChdW10")}${sec("t4", "Bot Chord at Vierendeel", trussSecs, "A-TrChdW10")}
+      ${sec("t5", "Truss Diagonals", trussSecs, "A-TrWebW10")}${sec("t6", "Truss Verticals", trussSecs, "A-TrWebW10")}${sec("t7", "Truss  Hangers", trussSecs, "A-TrWebW10")}${sec("t8", "Truss  Posts", trussSecs, "A-TrWebW10")}${sec("t9", "Truss Knee Braces at Bot", trussSecs, "A-TrWebW10")}
+      ${sec("t10", "Columns", trussSecs, "A-LatCol")}${sec("t11", "Spandrels", trussSecs, "A-LatBm")}${sec("t12", "Decks/Planks", trussSecs, "Plank1")}</div></fieldset>` + load;
+  }
+  const f = dialog("Structural Geometry and Properties for " + label, `<fieldset class="nmouter"><legend>${kind === "two_way_or_ribbed_slab" ? "Ribbed Slab" : esc(label)}</legend><div class="nmcols"><div>${left}</div><div>${right}</div></div></fieldset>`,
+    [["OK", f => { nmTemplateOk(f, parent, plan); return false; }, true], ["Cancel"]], {width: 760});
+  const sync = () => {
+    const on = (k) => { const x = q(f, `[data-k="${k}"]`); return x && x.checked; };
+    if (q(f, '[data-k="drop_panels"]')) ["drop_size", "drop_thickness"].forEach(k => q(f, `[data-k="${k}"]`).disabled = !on("drop_panels"));
+    if (q(f, '[data-k="ribbed"]')) { f.querySelectorAll('[data-k^="rib_"], [name=rib_direction]').forEach(x => x.disabled = !on("ribbed")); }
+    if (q(f, '[data-k="secondary_beams"]')) { const s = on("secondary_beams"), n = (q(f, "[name=secN]:checked") || {}).value === "num";
+      q(f, '[data-k="secondary_direction"]').disabled = !s; f.querySelectorAll("[name=secN]").forEach(x => x.disabled = !s); q(f, '[data-k="secondary_max_spacing"]').disabled = !s || n; q(f, '[data-k="secondary_number"]').disabled = !s || !n; }
+    if (q(f, "#tSpec")) q(f, "#tSpec").disabled = !on("special_moment_beams");
+    f.querySelectorAll("input:disabled, select:disabled").forEach(x => { const l = x.closest("label"); if (l) l.classList.add("dis"); });
+    f.querySelectorAll("input:not(:disabled), select:not(:disabled)").forEach(x => { const l = x.closest("label"); if (l) l.classList.remove("dis"); });
+  };
+  f.addEventListener("change", sync); sync();
+}
+function nmTemplateOk(f, parent, plan) {
+  formError(f, "");
+  const {u} = plan, quick = {};
+  const lengthL = ["left_edge", "right_edge", "top_edge", "bottom_edge", "drop_size", "rib_spacing", "secondary_max_spacing", "vierendeel_width"];
+  const lengthS = ["slab_thickness", "column_size", "drop_thickness", "beam_x_depth", "beam_x_width", "beam_y_depth", "beam_y_width", "rib_depth", "rib_width_top", "rib_width_bottom"];
+  for (const x of f.querySelectorAll("[data-k]")) {
+    const k = x.dataset.k; if (/^(s_|t\d)/.test(k)) continue;
+    if (x.type === "checkbox") { quick[k] = x.checked; continue; }
+    if (x.tagName === "SELECT") { quick[k] = x.value; continue; }
+    if (x.disabled) continue;
+    const n = parseFloat(x.value); if (!isFinite(n)) return formError(f, "Give a number in every box.");
+    quick[k] = lengthL.includes(k) ? n * u.l : lengthS.includes(k) ? n * u.s : /_load$/.test(k) ? n * u.q : n;
+  }
+  for (const k of ["restraints", "diaphragm", "rib_direction", "moment_frame"]) { const r = q(f, `[name=${k}]:checked`); if (r) quick[k] = r.value; }
+  if (q(f, "[name=secN]:checked") && q(f, "[name=secN]:checked").value === "num") delete quick.secondary_max_spacing; else delete quick.secondary_number;
+  nmBuild(parent, plan, quick, f);
+}
+async function nmBuild(d, plan, quick, form) {
+  const {init, kind, grids, stories, u} = plan, err = t => formError(form || d, t);
+  const title = (P && P.manifest && P.manifest.model) || "Model";
+  const args = {title, program, template: kind,
+    x_grids: grids.x.map(g => ({label: g.id, at: +(g.at * u.l).toFixed(9), visible: g.visible, bubble: g.bubble})),
+    y_grids: grids.y.map(g => ({label: g.id, at: +(g.at * u.l).toFixed(9), visible: g.visible, bubble: g.bubble})),
+    story_data: stories.map(s => ({name: s.name, height: +(s.height * u.l).toFixed(9)})), quick};
+  let j = await hmRun("new_model", args, true); if (!j.ok) return err(j.error);
+  j = await hmRun("set_display_units", {force: u.force, length: u.length, temperature: u.temp}, true); if (!j.ok) return err(j.error);
+  const notIn = [];
+  for (const [design, code] of [["steel", init.steel], ["concrete", init.conc]]) { if (!code) continue; const r = await hmRun("set_program_form", {design, code}, true); if (!r.ok) notIn.push(code); }
+  try { localStorage.setItem("cpm.newModel", JSON.stringify({units: init.units, region: init.region, db: init.db, steel: init.steel, conc: init.conc})); nmSaved = null; } catch (e) {}
+  if (form) form.close(); d.close();
+  hmSay(`New ${progLabel(program)} model: ${(nmTemplates.find(t => t[0] === kind) || [kind, kind === "beam" ? "Beam" : kind])[1]}.` + (notIn.length ? ` The Engine has no design code ${notIn.join(" or ")}; the model keeps its own.` : ""), notIn.length > 0);
+}
+// SAP2000 26.3's File > New Model, read on Ahmed's PC: New Model Initialization, Project Information and Select Template.
+const sapTemplates = ["Blank", "Grid Only", "Beam", "2D Trusses", "3D Trusses", "2D Frames", "3D Frames", "Wall", "Flat Slab", "Shells", "Staircases", "Storage Structures", "Underground Concrete", "Solid Models", "Pipes and Plates"];
+function hmNewSap() {
+  const d = dialog("New Model", `<fieldset><legend>New Model Initialization</legend>
+      <label class="dis" style="display:block"><input type="radio" name="si" value="saved" disabled>Initialize Model from Saved Settings</label>
+      <label style="display:block"><input type="radio" name="si" value="file">Initialize Model from an Existing File</label>
+      <label style="display:block"><input type="radio" name="si" value="default" checked>Initialize Model from Default Settings</label>
+      <div class="nmf nmin"><span>Default Units</span><select id="siU">${opts([["KN, m, C", "KN, m, C"], ["Kip, ft, F", "Kip, ft, F"], ["Kip, in, F", "Kip, in, F"], ["lb, ft, F", "lb, ft, F"], ["lb, in, F", "lb, in, F"], ["N, mm, C", "N, mm, C"], ["N, m, C", "N, m, C"], ["KN, mm, C", "KN, mm, C"], ["Kgf, mm, C", "Kgf, mm, C"], ["Kgf, m, C", "Kgf, m, C"], ["Tonf, mm, C", "Tonf, mm, C"], ["Tonf, m, C", "Tonf, m, C"]], "KN, m, C")}</select><span></span>
+      <span>Default Materials</span><select id="siM">${opts(nmLists.region, "United States")}</select><span></span></div>
+      <button type="button" disabled>Save Options as Default</button></fieldset>
+    <fieldset><legend>Project Information</legend><button type="button" id="siP">Modify/Show Information...</button></fieldset>
+    <fieldset><legend>Select Template</legend><div class="nmobj">${sapTemplates.map(t => `<button type="button" data-s="${esc(t)}">${nmIcon(t === "Blank" ? "blank" : t === "Grid Only" ? "grid_only" : t === "Flat Slab" ? "flat_slab" : "steel_deck")}<span>${esc(t)}</span></button>`).join("")}</div></fieldset>`,
+    [["Cancel"]], {width: 760});
+  q(d, "#siP").onclick = () => { const t = (P && P.manifest && P.manifest.model) || "Model";
+    dialog("Project Information", `<div class="g2"><span>Model Name</span><input id="piN" value="${esc(t)}"></div>`, [["OK", p => { if (P && P.manifest) P.manifest.model = q(p, "#piN").value.trim() || t; }], ["Cancel"]], {width: 380}); };
+  const units = () => { const [f, l, t] = q(d, "#siU").value.split(", "); return {force: f === "KN" ? "kN" : f === "Kgf" ? "kgf" : f, length: l, temp: t, l: {m: 1, mm: 0.001, ft: 0.3048, in: 0.0254}[l], L: l}; };
+  d.querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
+    const t = b.dataset.s, u = units();
+    if (t === "Blank" || t === "Grid Only") return sapGrid(d, t, u);
+    if (t === "Beam") return sapBeam(d, u);
+    formError(d, `The ${t} template's form is not in the Engine yet: start from Grid Only and draw it.`);
+  });
+}
+function sapGrid(d, t, u) {
+  if (t === "Blank") return nmBuild(d, {init: {}, kind: "blank", grids: {x: [], y: []}, stories: [{name: "Story1", height: 3 / u.l}], u: {...u, force: u.force}}, {});
+  const g = dialog("Quick Grid Lines", `<fieldset><legend>Cartesian</legend><div class="nmf"><span>Number of Grid Lines X direction</span><input id="gx" type="number" value="4"><span></span><span>Y direction</span><input id="gy" type="number" value="4"><span></span><span>Z direction</span><input id="gz" type="number" value="4"><span></span>
+    <span>Grid Spacing X direction</span><input id="sx" type="number" step="any" value="6"><span>${u.L}</span><span>Y direction</span><input id="sy" type="number" step="any" value="6"><span>${u.L}</span><span>Z direction</span><input id="sz" type="number" step="any" value="3"><span>${u.L}</span></div></fieldset>`,
+    [["OK", g => { const nx = parseInt(q(g, "#gx").value) || 1, ny = parseInt(q(g, "#gy").value) || 1, nz = Math.max(2, parseInt(q(g, "#gz").value) || 2), sx = fnum(g, "#sx"), sy = fnum(g, "#sy"), sz = fnum(g, "#sz");
+      nmBuild(d, {init: {}, kind: "grid_only", grids: {x: Array.from({length: nx}, (_, i) => ({id: String(i + 1), at: i * sx, visible: true})), y: Array.from({length: ny}, (_, i) => ({id: String(i + 1), at: i * sy, visible: true}))},
+        stories: Array.from({length: nz - 1}, (_, i) => ({name: "Z" + (i + 2), height: sz})), u}, {}, g); return false; }, true], ["Cancel"]], {width: 420});
+}
+function sapBeam(d, u) {
+  const b = dialog("Beam", `<div class="nmcols"><fieldset><legend>Beam Dimensions</legend><div class="nmf"><span>Number of Spans</span><input id="bN" type="number" value="2"><span></span><span>Span Length</span><input id="bL" type="number" step="any" value="${u.L === "m" ? 6 : +(6 / u.l).toFixed(3)}"><span>${u.L}</span></div>
+      <label style="display:block"><input type="checkbox" id="bC">Use Custom Grid Spacing and Locate Origin</label><button type="button" disabled>Edit Grid...</button></fieldset>
+    <fieldset><legend>Section Properties</legend><div class="nmf"><span>Beams</span><select><option>Default</option></select><button type="button" disabled>+</button></div></fieldset></div>
+    <fieldset><legend>Restraints</legend><label><input type="checkbox" id="bR" checked>Restraints</label></fieldset>`,
+    [["OK", b => { const n = Math.max(1, parseInt(q(b, "#bN").value) || 1), L = fnum(b, "#bL"); if (!(L > 0)) return formError(b, "The span length must be above 0."), false;
+      nmBuild(d, {init: {}, kind: "beam", grids: {x: Array.from({length: n + 1}, (_, i) => ({id: String(i + 1), at: i * L, visible: true})), y: [{id: "1", at: 0, visible: true}]}, stories: [{name: "Story1", height: 3 / u.l}], u},
+        {restraints: q(b, "#bR").checked ? "pinned" : "none"}, b); return false; }, true], ["Cancel"]], {width: 520});
 }
 // File > Model for...: the program the model is made for, changed later (nothing in the model is removed).
 function hmProgram() {

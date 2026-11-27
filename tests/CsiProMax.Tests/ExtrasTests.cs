@@ -507,6 +507,53 @@ static class ExtrasTests
             Check(CsiProMax.Assistant.ReferenceForms.PathFor("safe", "Units > Show Units Form...")[0] == CsiProMax.Assistant.Etabs.MenuCommand.StatusBar, "SAFE's Units form is not opened from its status bar");
             Check(CsiProMax.Assistant.ModelerCheck.Script.Contains("the units at the bottom right, as ${target} has them", StringComparison.Ordinal), "the window check does not try the units control");
         });
+        yield return ("Ahmed 2026-11-27: File > New Model is ETABS 23.2's own forms (Model Initialization, New Model Quick Templates, Grid Labels, Grid System Data, Story Data, each template's form) and every template builds", () =>
+        {
+            object Grids(string first, int n, double step) => Enumerable.Range(0, n).Select(i => new { label = first == "A" ? ((char)('A' + i)).ToString() : (i + 1).ToString(), at = i * step }).ToArray();
+            var stories = new[] { new { name = "Story1", height = 3.5 }, new { name = "Story2", height = 3.0 }, new { name = "Story3", height = 3.0 }, new { name = "Story4", height = 3.0 } };
+            var counts = new Dictionary<string, StructuralModel>();
+            foreach (var kind in QuickTemplates.Kinds)
+            {
+                var link = new OfflineEtabs();
+                Run(link, "new_model", new
+                {
+                    title = "Q", template = kind, x_grids = Grids("A", 4, 8), y_grids = Grids("1", 4, 8), story_data = stories,
+                    quick = new { left_edge = 0.3, right_edge = 0.3, top_edge = 0.3, bottom_edge = 0.3, slab_thickness = 0.2, column_size = 0.3, stiff_at_columns = true, drop_panels = true, drop_size = 3.0, drop_thickness = 0.35, dead_load = 1.0, live_load = 4.0, restraints = "fixed", diaphragm = "semi-rigid" },
+                });
+                var m = link.Model; counts[kind] = m;
+                Check(m.Stories.Count == 5 && Math.Abs(m.Stories[1].Height - 3.5) < 1e-9, kind + ": the stories as Story Data has them");
+                var text = E2kWriter.Write(m);
+                Check(E2kReader.Read(text).Stories.Count == 5, kind + ": the .e2k reads back");
+            }
+            Check(counts["blank"].Grids.Count == 0 && counts["blank"].LineAssigns.Count == 0, "Blank: stories only");
+            Check(counts["grid_only"].Grids.Count == 8 && counts["grid_only"].LineAssigns.Count == 0, "Grid Only: grid lines, nothing drawn");
+            var flat = counts["flat_slab"];
+            Check(flat.ShellSections.Exists(s => s.Lines[0].Contains("\"Drop\"")) && flat.ShellSections.Exists(s => s.Lines[0].Contains("\"Stiff\"")), "Flat Slab: drop panels and stiff slab at the columns");
+            Check(flat.LineAssigns.Count == 16 * 4 && flat.PointAssigns.Count(p => p.Restraint == "UX UY UZ RX RY RZ") == 16, "Flat Slab: a column on every grid crossing, fixed at the bottom");
+            Check(flat.AreaLoads.Count > 0 && flat.Diaphragms.Exists(d => d.Type == "SEMIRIGID"), "Flat Slab: its loads and a semi-rigid diaphragm");
+            Check(flat.AreaAssigns.Any(a => flat.Area(a.Label) is { } o && o.PointNames.Select(n => flat.Points.Find(p => p.Name == n)!.X).Min() < -0.29), "Flat Slab: the overhang");
+            Check(counts["flat_slab_perimeter_beams"].LineAssigns.Count(a => counts["flat_slab_perimeter_beams"].Line(a.Label)!.Kind == LineKind.Beam) == 12 * 4, "Perimeter beams on the outer grid lines only");
+            Check(counts["waffle_slab"].ShellSections.Exists(s => s.Lines[0].Contains("\"Waffle\"")), "Waffle Slab: a waffle section");
+            Check(counts["two_way_or_ribbed_slab"].ShellSections.Exists(s => s.Lines[0].Contains("\"Ribbed\"")), "Two Way or Ribbed Slab: ribbed by default");
+            var deck = counts["steel_deck"];
+            foreach (var name in QuickTemplates.SteelDeckSections) Check(deck.FrameSections.Exists(s => s.Name == name) || deck.ShellSections.Exists(s => s.Name == name), "Steel Deck: the form's section " + name);
+            Check(deck.LineAssigns.Exists(a => a.Section == "A-CompBm"), "Steel Deck: secondary beams");
+            var truss = counts["staggered_truss"];
+            Check(truss.LineAssigns.Exists(a => a.Section == "A-TrWebW10" && truss.Line(a.Label)!.Kind == LineKind.Brace), "Staggered Truss: diagonals");
+            Check(truss.LineAssigns.Count(a => a.Section == "A-LatCol") == 8 * 4, "Staggered Truss: columns at the two ends of every truss line");
+            Check(counts["beam"].LineAssigns.Count == 3 && counts["beam"].PointAssigns.Count == 4, "SAP2000's Beam: one beam over the grid lines, restrained at each");
+            Refused(new OfflineEtabs(), "new_model", new { title = "Q", template = "flat_slab", x_grids = Grids("A", 2, 8), y_grids = Grids("1", 2, 8), story_data = stories, quick = new { slab_thickness = 0.0 } }, "above 0");
+            Refused(new OfflineEtabs(), "new_model", new { title = "Q", template = "staggered_truss", x_grids = Grids("A", 2, 8), y_grids = Grids("1", 2, 8), story_data = stories, quick = new { vierendeel_width = 20.0 } }, "wider");
+
+            var html = Pack.ViewerHtml();
+            foreach (var marker in new[] { "\"Model Initialization\"", "Use Saved User Default Settings", "Use Settings from a Model File...", "Use Built-in Settings With:", "Region for Default Materials", "Steel Section Database",
+                         "\"New Model Quick Templates\"", "Uniform Grid Spacing", "Custom Grid Spacing", "Grid Labels...", "Edit Grid Data...", "Edit Story Data...", "\"Grid Labeling Options\"", "Beginning X ID", "Label Right to Left",
+                         "\"Grid System Data\"", "Display Grid Data as Spacing", "\"Story Data\"", "Splice Height", "Structural Geometry and Properties for ", "Model Column Intersection as Stiff Slab", "Include Drop Panels",
+                         "Post Tensioning", "Restraints at Bottom", "Floor Diaphragm Rigidity", "Vierendeel Panel Width", "First Bay has Truss at Top Level", "Special Moment Beams", "Transverse Beam", "Two Way or Ribbed Slab",
+                         "New Model Initialization", "Initialize Model from Default Settings", "Storage Structures" })
+                Check(html.Contains(marker, StringComparison.Ordinal), "New Model lacks: " + marker);
+            Check(!html.Contains("Program the model is for", StringComparison.Ordinal), "New Model has no item the program's form lacks");
+        });
         yield return ("Ahmed 2026-11-27: Set Display Options is the form read from ETABS 23.2 (Set View Options: General, Object Assignments, Other Assignments) and SAP2000 26.3 (Display Options: Object Options, General Options) on his PC, and every item has what it draws", () =>
         {
             var m = Seed.Etabs23();
