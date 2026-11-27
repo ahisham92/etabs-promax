@@ -205,6 +205,10 @@ static class ExtrasTests
                 "Contour Averaging at Nodes", "\"None\", \"By Objects\", \"By Selected Groups\"", "dialog(\"Select Groups\"", "User Scale Factor", "\"0.0\", \"0.1\", \"0.2\"",
                 "dialog(\"Energy/Virtual Work Diagram\"", "value=\"Not Applicable\"", "energyvirtualwork",
                 "dialog(\"Story Response\"", "\"Max story displ\"", "\"Max story drifts\"", "\"Story shears\"", "\"Overturning moments\"", "\"Story stiffness\"", "\"Diaph CM displ\"", "\"Diaph drifts\"", "Indicates the type of story response to be displayed.",
+                "dialog(\"Choose Tables for Display\"", "Load Patterns (Model Def.)", "Select Load Patterns...", "Show if Used in Model", "Show Unformatted", "Show Named Set...", "Table Format File...", "Current Table Format File:", "\"Set Table Formats File...\"",
+                "\"Export Current Table\"", "\"Print All Tables as Text File\"", "\"Save All Table Formats to Table Formats File\"", "\"Apply Default Format to All Tables\"", "\"Remove Current Table\"", "\"Auto Width for All Columns\"", "\"Maximize Form Size (Toggle)\"", "\"Format Table...\"", "\"Filter Table...\"", "\"Sort Table...\"", "\"Print Hyperlinked Contents\"", "Add Tables...", "Record:",
+                "Modify/Show Database Table Format - ", "Use up and down arrows to set field display order", "Reset Display Order to Default", "<legend>Filter Type</legend>", "<legend>Quick Filter</legend>", "<legend>Database Table Filters</legend>", "Clear All Filters", "Advanced Filter - SQL String", "Table Sorting - Sort by These Fields", "Save Table Format to File",
+                "case \"tables\": if (etrOn() && P) return etrChooseTables();",
                 "shells() { if (etrOn()) return etrShells(); openShells(); }", "if (etrOn()) return etrForces();", "if (etrOn()) return etrReactions();", "if (etrOn()) return etrDeformed(" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(ViewerCheck.Script.Contains("Display result forms as the program draws them: Deformed Shape, Reactions, Member Force Diagram"), "the field test lost the ETABS Display result forms step");
