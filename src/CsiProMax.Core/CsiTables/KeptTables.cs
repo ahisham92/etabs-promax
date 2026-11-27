@@ -20,13 +20,19 @@ public static class KeptTables
     public static IEnumerable<(string Table, List<Dictionary<string, string>> Rows)> Of(StructuralModel m, string program) =>
         (m.Kept ?? []).Where(k => k.Key.StartsWith(program + "|", StringComparison.OrdinalIgnoreCase)).Select(k => (k.Key[(program.Length + 1)..], k.Value));
 
-    /// <summary>Adds the program's kept tables that <paramref name="tables"/> (table text) does not have yet.</summary>
-    public static void WriteInto(StructuralModel m, string program, List<string> tables)
+    /// <summary>Adds the program's kept tables that <paramref name="tables"/> (table text) does not have yet; answers
+    /// the tables added (their rows name objects as the file did, not as CSI ProMax's writer does).</summary>
+    public static List<string> WriteInto(StructuralModel m, string program, List<string> tables)
     {
         var have = tables.Select(t => t.StartsWith("TABLE:", StringComparison.Ordinal) && t.IndexOf('"') is var a && a > 0 && t.IndexOf('"', a + 1) is var b && b > a ? t[(a + 1)..b] : "")
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var added = new List<string>();
         foreach (var (table, rows) in Of(m, program))
             if (!have.Contains(table))
+            {
                 tables.Add(CsiTableText.Table(table, rows.Select(r => (IReadOnlyList<(string, string)>)r.Select(kv => (kv.Key, kv.Value)).ToList())));
+                added.Add(table);
+            }
+        return added;
     }
 }
