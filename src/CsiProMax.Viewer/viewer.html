@@ -584,8 +584,8 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeChang
 function theme() {
   // The model windows: black as analysis programs draw them, or white for printing.
   return bg === "black"
-    ? {canvas: [0, 0, 0], column: "#2f8ff7", beam: "#f0cf34", brace: "#ff8a3c", other: "#c79bff", floor: "#8d9aa4", wall: "#d4625c", grid: [0.42, 0.47, 0.52], gridText: "#c9d2d8", bubble: "#000000", ground: [0.1, 0.16, 0.25], groundGrid: [0.24, 0.4, 0.6], level: [0.25, 0.29, 0.33], text: "#d5dde1", pick: "#ff4df0", support: "#35e06f", lit: "#ffffff", pos: [1, 0.84, 0.24, 0.55], neg: [1, 0.33, 0.33, 0.55], posEdge: "#ffd83c", negEdge: "#ff6a6a", ghost: [0.42, 0.46, 0.5], edge: 0.45, joint: "#d5dde1", dark: true}
-    : {canvas: [1, 1, 1], column: "#4b57a6", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "#737373", wall: "#c4463c", grid: [0.78, 0.78, 0.78], gridText: "#9a9a9a", bubble: "#ffffff", ground: [0.85, 0.925, 1], groundGrid: [0.62, 0.8, 0.96], support: "#7a7a7a", level: [0.8, 0.83, 0.85], text: "#2f3a40", pick: "#e6007a", lit: "#e2620d", pos: [0.16, 0.43, 0.86, 0.38], neg: [0.84, 0.2, 0.2, 0.38], posEdge: "#1c5fd0", negEdge: "#c62828", ghost: [0.7, 0.74, 0.77], edge: 0.55, joint: "#2f3a40", dark: false};
+    ? {canvas: [0, 0, 0], column: "#2f8ff7", beam: "#f0cf34", brace: "#ff8a3c", other: "#c79bff", floor: "#8d9aa4", wall: "#d4625c", grid: [0.42, 0.47, 0.52], gridText: "#c9d2d8", bubble: "#000000", ground: [0.1, 0.16, 0.25], level: [0.25, 0.29, 0.33], text: "#d5dde1", pick: "#ff4df0", support: "#35e06f", lit: "#ffffff", pos: [1, 0.84, 0.24, 0.55], neg: [1, 0.33, 0.33, 0.55], posEdge: "#ffd83c", negEdge: "#ff6a6a", ghost: [0.42, 0.46, 0.5], edge: 0.45, joint: "#d5dde1", dark: true}
+    : {canvas: [1, 1, 1], column: "#4b57a6", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "#737373", wall: "#c4463c", grid: [0.78, 0.78, 0.78], gridText: "#9a9a9a", bubble: "#ffffff", ground: [0.85, 0.925, 1], support: "#7a7a7a", level: [0.8, 0.83, 0.85], text: "#2f3a40", pick: "#e6007a", lit: "#e2620d", pos: [0.16, 0.43, 0.86, 0.38], neg: [0.84, 0.2, 0.2, 0.38], posEdge: "#1c5fd0", negEdge: "#c62828", ghost: [0.7, 0.74, 0.77], edge: 0.55, joint: "#2f3a40", dark: false};
 }
 const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 const css = c => Array.isArray(c) ? `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${c[3] ?? 1})` : c;
@@ -2564,8 +2564,7 @@ function drawScene(p, M, R, dpr, mode) {
   if (sTr > 0) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); solids(bufs.solidA, 1 - sTr); gl.depthMask(true); gl.disable(gl.BLEND); }
   else if (!see || contourOn) solids(bufs.solidA, 1);
   // Grid lines after the solids, so members hide them; they do not hide anything themselves.
-  // Over the background grid the grid lines are blue too (and in the white 3-D view, as before).
-  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, opt.horizon || p.mode === "3d" && !T.dark ? T.groundGrid : T.grid, 1, 0); if (opt.levels) thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
+  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, p.mode === "3d" && T.ground ? [0.62, 0.8, 0.96] : T.grid, 1, 0); if (opt.levels) thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
   if (!extrude) thick(bufs.lines, p.mode === "3d" ? (T.dark ? 1.6 : 0.75) : 2, 1); else thick(bufs.bare, 2, 1);
   if (opt.edges) thin(bufs.edges, extrude ? T.edge : 0.75, !extrude && !T.dark ? [1, 1, 1] : undefined);
   if (see && !contourOn && !under) {
