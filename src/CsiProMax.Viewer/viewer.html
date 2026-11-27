@@ -5322,7 +5322,7 @@ async function hmMaterialNew(after, then) {
   const defs = await hmDefs(), pd = (await hmRun("property_definitions", {}, true)).result || {material_types: ["Concrete"]}, u = hmU();
   const types = pd.material_types || ["Concrete"], taken = (defs.materials || []).map(m => m.name);
   const sap = program === "sap2000"; // SAP2000's "Add Material Property": the four boxes in a plain frame.
-  const d = dialog(sap ? "Add Material Property" : "Add New Material Property", `<fieldset>${sap ? "" : "<legend>Material Property Template</legend>"}<div class="g2">
+  const d = dialog("Add New Material Property", `<fieldset>${sap ? "" : "<legend>Material Property Template</legend>"}<div class="g2">
       <span>Region</span><select id="anR">${opts([...Object.keys(matLib), "User"], sap ? "United States" : "User")}</select>
       <span>Material Type</span><select id="anT">${opts(types, types[0])}</select>
       <span>Standard</span><select id="anS"></select>
@@ -5337,6 +5337,7 @@ async function hmMaterialNew(after, then) {
     q(d, "#anG").innerHTML = opts(gr, gr[0]); q(d, "#anS").disabled = q(d, "#anG").disabled = r === "User";
   };
   q(d, "#anR").onchange = () => fill(0); q(d, "#anT").onchange = () => fill(1); q(d, "#anS").onchange = () => fill(2); fill(0);
+  if (sap) q(d, ".dt b").textContent = "Add Material Property";
   return d;
 }
 // The program's Color window: the basic colours to pick from.
@@ -5824,8 +5825,9 @@ async function hmSectionProps(name, shape, dims) {
 function hmModifiers(keys, now, done, title) {
   const label = {AMOD: "Cross-section (axial) Area", A2MOD: "Shear Area in 2 direction", A3MOD: "Shear Area in 3 direction", JMOD: "Torsional Constant", I2MOD: "Moment of Inertia about 2 axis", I3MOD: "Moment of Inertia about 3 axis", MMOD: "Mass", WMOD: "Weight",
     F11MOD: "Membrane f11 direction", F22MOD: "Membrane f22 direction", F12MOD: "Membrane f12 direction", M11MOD: "Bending m11 direction", M22MOD: "Bending m22 direction", M12MOD: "Bending m12 direction", V13MOD: "Shear v13 direction", V23MOD: "Shear v23 direction"};
-  const d = dialog(title || "Property/Stiffness Modification Factors", `<fieldset><legend>Property/Stiffness Modifiers for Analysis</legend><div class="g2" id="pmV">${keys.map(k => `<span>${esc(label[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${now && now[k] != null ? now[k] : 1}">`).join("")}</div></fieldset>`,
+  const d = dialog("Property/Stiffness Modification Factors", `<fieldset><legend>Property/Stiffness Modifiers for Analysis</legend><div class="g2" id="pmV">${keys.map(k => `<span>${esc(label[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${now && now[k] != null ? now[k] : 1}">`).join("")}</div></fieldset>`,
     [["OK", d => { const o = {}; d.querySelectorAll("#pmV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) o[x.dataset.k] = v; }); done(o); }], ["Cancel"]], {width: 380});
+  if (title) q(d, ".dt b").textContent = title;
   return d;
 }
 // Frame Section Property Data, as ETABS 23.2 lays it out: General Data (name, material, notional size, colour, notes),
@@ -6634,6 +6636,7 @@ async function hmStructure(kind) {
     return listForm("Define Groups", "Groups", sd.groups.map(x => x.name), [["Add New Group...", () => one(null)], ["Add Copy of Group...", n => n && one(find(n), true)], ["Modify/Show Group...", n => n && one(find(n))], ["Delete Group", n => n && del("define_group", {name: n})]], n => one(find(n)));
   }
   const one = c => {
+    if (sapX) return hmSapSectionCut(sd, c, again);
     const o = (c && c.options) || {}, user = /^user/i.test(o.ResultLoc || "");
     const d = dialog("Section Cut Data", `<div class="g2"><span>Section Cut Name</span><input id="zN" value="${esc(c ? c.name : "SCut" + (sd.section_cuts.length + 1))}" ${c ? "disabled" : ""}></div>
       <fieldset><legend>Define Section Cut By</legend><label style="display:inline-block;margin-right:14px"><input type="radio" name="zB" checked> Group</label><label style="display:inline-block"><input type="radio" name="zB" disabled> Quadrilaterals</label>
@@ -6648,6 +6651,97 @@ async function hmStructure(kind) {
     return d;
   };
   return listForm("Section Cuts", "Section Cuts", sd.section_cuts.map(x => x.name), [["Add Section Cut...", () => one(null)], ["Modify/Show Section Cut...", n => n && one(sd.section_cuts.find(x => x.name === n))], ["Delete Section Cut", n => n && del("define_section_cut", {name: n})]], n => one(sd.section_cuts.find(x => x.name === n)));
+}
+// SAP2000 26.3's Section Cut Data: Edit menu (Copy/Paste), Coordinate System and Units, Defined By Group or Quadrilateral
+// Cutting Planes, Result Type, location, and the local axes (Analysis: rotations and Advanced Axes; Design: Wall/Spandrel/Slab).
+let sapCutClip = null;
+function hmSapSectionCut(sd, c, again) {
+  const o = Object.assign({}, (c && c.options) || {}), mu = hmU();
+  let units = mu;
+  const quads = (o.Quads || "").split("|").filter(Boolean).map(qd => qd.split(";").map(pt => pt.split(",").map(Number)));
+  if (!quads.length) quads.push([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]);
+  let at = 0;
+  const rb = (n, v, t, on) => `<label style="display:block;margin:3px 0"><input type="radio" name="${n}" value="${v}" ${on ? "checked" : ""}> ${t}</label>`;
+  const fs = (legend, body, id) => `<fieldset ${id ? `id="${id}"` : ""} style="margin:0 0 8px"><legend>${legend}</legend>${body}</fieldset>`;
+  const num = (id, v, w) => `<input id="${id}" type="number" step="any" value="${v}" style="width:${w || 95}px">`;
+  const groups = sd.groups.map(g => g.name), user = /^user/i.test(o.ResultLoc || ""), design = o.ResultType === "Design", quad = /^quad/i.test(o.DefinedBy || "");
+  const axText = {Wall: "Wall:\nLocal 1 axis is parallel to global Z.\n2 and 3 axes lie in global XY plane.", Spandrel: "Spandrel:\nLocal 2 axis is parallel to global Z.\n1 and 3 axes lie in global XY plane.", Slab: "Slab:\nLocal 3 axis is parallel to global Z.\n1 and 2 axes lie in global XY plane."};
+  const d = dialog("Section Cut Data", `<div class="sapMenu" style="margin:-4px 0 6px;position:relative"><button id="zEdit" style="border:0;background:none;padding:2px 6px">Edit</button>
+      <div id="zEditM" style="display:none;position:absolute;z-index:5;background:#fff;border:1px solid #999;box-shadow:2px 2px 4px #0003;min-width:130px"><div data-e="copy" style="padding:4px 10px;display:flex;justify-content:space-between">Copy<span>Ctrl+C</span></div><div data-e="paste" style="padding:4px 10px;display:flex;justify-content:space-between">Paste<span>Ctrl+V</span></div></div></div>
+    <div style="display:flex;gap:12px"><div style="width:380px">
+      ${fs("", `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px"><b>Section Cut Name</b><input id="zN" style="width:150px" value="${esc(c ? c.name : "SCUT" + (sd.section_cuts.length + 1))}" ${c ? "disabled" : ""}></div>`)}
+      ${fs("Section Cut Defined By", rb("zB", "Group", "Group", !quad) + rb("zB", "Quadrilateral", "Quadrilateral Cutting Planes", quad))}
+      ${fs("Section Cut Group", `<div style="display:flex;justify-content:space-between;align-items:center;padding:0 6px"><span>Group</span><select id="zG" style="width:150px">${opts(groups, c ? c.group : groups.includes("ALL") ? "ALL" : groups[0])}</select></div>`)}
+      ${fs("Section Cut Result Type", rb("zT", "Analysis", "Analysis  (F1, F2, F3, M1, M2, M3)", !design) + rb("zT", "Design", "Design  (P, V2, V3, T, M2, M3)", design))}
+      ${fs("Results Reported at this Location", rb("zLc", "0", "Default", !user) + rb("zLc", "1", "User Defined", user) + `<div style="display:grid;grid-template-columns:1fr 100px;gap:4px 8px;margin:4px 0 0 50px;align-items:center"><span>X Coordinate</span>${num("zX", o.LocX || 0)}<span>Y Coordinate</span>${num("zY", o.LocY || 0)}<span>Z Coordinate</span>${num("zZ", o.LocZ || 0)}</div>`)}
+      ${fs(`<span id="zAxL">Section Cut Local Axes Orientation - Analysis</span>`, `<div id="zAxA"><div style="display:grid;grid-template-columns:1fr 100px;gap:4px 8px;align-items:center"><span>Rotation about  Z</span>${num("zRz", o.RotAboutZ || 0)}<span>Rotation about  Y</span>${num("zRy", o.RotAboutY || 0)}<span>Rotation about  X</span>${num("zRx", o.RotAboutX || 0)}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><label><input type="checkbox" id="zAdv" ${/^yes/i.test(o.AdvanceAxes || "") ? "checked" : ""}> Advanced Axes</label><button id="zAdvB">Advanced</button></div></div>
+        <div id="zAxD"><div style="display:flex;gap:8px"><div style="width:90px">${["Wall", "Spandrel", "Slab"].map(k => rb("zDT", k, k, (o.DesignType || "Wall") === k)).join("")}</div><pre id="zDTx" style="flex:1;margin:0;padding:4px;border:1px solid #aaa;background:#eee;font:inherit;white-space:pre-wrap;min-height:64px"></pre></div>
+          <div style="display:grid;grid-template-columns:1fr 100px;gap:4px 8px;align-items:center;margin-top:8px"><span>Angle from Global  X to Local 2</span>${num("zDA", o.DesignAngle || 0)}</div></div>`)}
+    </div><div style="flex:1;display:flex;flex-direction:column">
+      <div style="display:flex;gap:10px">${fs("Coordinate System", `<select id="zCs" style="width:170px">${opts(["GLOBAL"], "GLOBAL")}</select>`)}${fs("Units", `<select id="zU" style="width:100px">${opts(sapUnitNames, sapUnitName(mu))}</select>`)}</div>
+      ${fs("Results Reported Are On This Side of Elements", `<div id="zSq">${rb("zSd", "Positive", "Positive 3 Axis Side of Quadrilateral", !/^neg/i.test(o.ElemSide || ""))}${rb("zSd", "Negative", "Negative 3 Axis Side of Quadrilateral", /^neg/i.test(o.ElemSide || ""))}</div><div id="zSt">${rb("zSt", "Top", "Top", !/^bot/i.test(o.ElemSide || ""))}${rb("zSt", "Bottom", "Bottom", /^bot/i.test(o.ElemSide || ""))}</div>`, "zSide")}
+      ${fs("Quadrilateral Cutting Planes", `<div style="display:flex;justify-content:space-between;align-items:center"><span>Number of Quadrilaterals</span><input id="zQn" type="number" min="1" step="1" value="${quads.length}" style="width:95px"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0"><span>Currently Displayed Quadrilateral:  <b id="zQi">1</b></span><span><button data-q="first">|&lt;</button><button data-q="prev">&lt;</button><button data-q="next">&gt;</button><button data-q="last">&gt;|</button></span></div>
+          <table class="list hmgrid" id="zQt" style="width:100%"></table>
+          <div style="text-align:center;margin:8px 0"><button id="zQc">Check For Legal Quadrilateral</button></div>
+          <p class="kv" style="margin:0">Section cut results are reported for all elements that are fully cut by quadrilaterals and have their associated objects included in the section cut group.</p>`, "zQuad")}
+    </div></div>`,
+    [["OK", d => {
+      saveQuad(d);
+      const usr = val(d, "zLc") === "1", qd = val(d, "zB") === "Quadrilateral", des = val(d, "zT") === "Design";
+      const L = v => sapConv(+v || 0, units, mu, 0, 1, 0), args = {name: q(d, "#zN").value.trim(), group: q(d, "#zG").value, result_type: val(d, "zT"), user_location: usr, x: L(q(d, "#zX").value), y: L(q(d, "#zY").value), z: L(q(d, "#zZ").value),
+        rot_z: fnum(d, "#zRz"), rot_y: fnum(d, "#zRy"), rot_x: fnum(d, "#zRx"), defined_by: qd ? "Quadrilateral" : "Group", advanced_axes: q(d, "#zAdv").checked};
+      if (qd) { args.quads = quads.map(x => x.map(pt => pt.map(L))); args.elem_side = val(d, "zSd"); }
+      if (des) { args.design_type = val(d, "zDT"); args.design_angle = fnum(d, "#zDA"); if (!qd) args.elem_side = val(d, "zSt"); }
+      return submit(d, "define_section_cut", args, again);
+    }], ["Cancel"]], {width: 800});
+  function val(d, n) { const x = q(d, `[name=${n}]:checked`); return x ? x.value : ""; }
+  function saveQuad(d) { d.querySelectorAll("#zQt [data-p]").forEach(x => { quads[at][+x.dataset.p][+x.dataset.c] = +x.value || 0; }); }
+  const paintQuad = () => {
+    q(d, "#zQi").textContent = at + 1;
+    q(d, "#zQt").innerHTML = `<tr><th>Point</th><th>X</th><th>Y</th><th>Z</th></tr>` + quads[at].map((pt, i) => `<tr><th>${i + 1}</th>${pt.map((v, j) => `<td><input data-p="${i}" data-c="${j}" type="number" step="any" value="${v}" style="width:100%;text-align:center"></td>`).join("")}</tr>`).join("");
+  };
+  const sync = () => {
+    const qd = val(d, "zB") === "Quadrilateral", des = val(d, "zT") === "Design", usr = val(d, "zLc") === "1";
+    ["#zX", "#zY", "#zZ"].forEach(x => q(d, x).disabled = !usr);
+    q(d, "#zQuad").style.display = qd ? "" : "none";
+    q(d, "#zSide").style.display = qd || des ? "" : "none"; q(d, "#zSq").style.display = qd ? "" : "none"; q(d, "#zSt").style.display = qd ? "none" : "";
+    q(d, "#zAxL").textContent = "Section Cut Local Axes Orientation - " + (des ? "Design" : "Analysis");
+    q(d, "#zAxA").style.display = des ? "none" : ""; q(d, "#zAxD").style.display = des ? "" : "none";
+    q(d, "#zAdvB").disabled = !q(d, "#zAdv").checked;
+    q(d, "#zDTx").textContent = axText[val(d, "zDT") || "Wall"];
+  };
+  d.querySelectorAll("input[type=radio],#zAdv").forEach(r => r.addEventListener("change", sync));
+  q(d, "#zQn").onchange = () => { saveQuad(d); const n = Math.max(1, parseInt(q(d, "#zQn").value) || 1); while (quads.length < n) quads.push(quads[quads.length - 1].map(pt => pt.slice())); quads.length = n; at = Math.min(at, n - 1); paintQuad(); };
+  d.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { saveQuad(d); const k = b.dataset.q; at = k === "first" ? 0 : k === "last" ? quads.length - 1 : Math.max(0, Math.min(quads.length - 1, at + (k === "next" ? 1 : -1))); paintQuad(); });
+  // A legal quadrilateral: 4 points in one plane, not crossing, with an area.
+  q(d, "#zQc").onclick = () => {
+    saveQuad(d);
+    const P = quads[at], sub = (a, b) => a.map((v, i) => v - b[i]), cr = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const n = cr(sub(P[1], P[0]), sub(P[2], P[0])), len = Math.hypot(...n), size = Math.max(...P.flatMap(a => P.map(b => Math.hypot(...sub(a, b))))) || 1;
+    const planar = len > 1e-12 && Math.abs(dot(n, sub(P[3], P[0]))) / len < 1e-6 * size;
+    const turns = [0, 1, 2, 3].map(i => dot(cr(sub(P[(i + 1) % 4], P[i]), sub(P[(i + 2) % 4], P[(i + 1) % 4])), n));
+    const ok = planar && (turns.every(t => t > 0) || turns.every(t => t < 0));
+    hmSay(ok ? "The quadrilateral is legal." : "The quadrilateral is not legal: its 4 points must lie in one plane and must not cross.", !ok);
+  };
+  q(d, "#zU").onchange = () => {
+    saveQuad(d); const nu = sapUnitOf(q(d, "#zU").value);
+    ["#zX", "#zY", "#zZ"].forEach(x => q(d, x).value = sapConv(+q(d, x).value || 0, units, nu, 0, 1, 0));
+    quads.forEach(qd => qd.forEach(pt => pt.forEach((v, i) => pt[i] = sapConv(v, units, nu, 0, 1, 0)))); units = nu; paintQuad();
+  };
+  const fields = () => [...d.querySelectorAll("input,select")].filter(x => x.id !== "zN").map(x => [x.id || x.name + ":" + x.value, x.type === "radio" || x.type === "checkbox" ? x.checked : x.value]);
+  q(d, "#zEdit").onclick = e => { e.stopPropagation(); const m = q(d, "#zEditM"); m.style.display = m.style.display === "none" ? "" : "none"; m.querySelector('[data-e="paste"]').style.color = sapCutClip ? "" : "#999"; };
+  d.querySelectorAll("[data-e]").forEach(x => x.onclick = () => {
+    q(d, "#zEditM").style.display = "none";
+    if (x.dataset.e === "copy") { saveQuad(d); sapCutClip = {f: fields(), quads: JSON.parse(JSON.stringify(quads))}; return; }
+    if (!sapCutClip) return;
+    const byKey = new Map(sapCutClip.f);
+    d.querySelectorAll("input,select").forEach(el => { if (el.id === "zN") return; const k = el.id || el.name + ":" + el.value; if (!byKey.has(k)) return; if (el.type === "radio" || el.type === "checkbox") el.checked = byKey.get(k); else el.value = byKey.get(k); });
+    quads.length = 0; sapCutClip.quads.forEach(x => quads.push(x)); at = 0; q(d, "#zQn").value = quads.length; paintQuad(); sync();
+  });
+  paintQuad(); sync();
+  return d;
 }
 async function hmAssignStructure(what) {
   const sd = (await hmRun("structure_definitions", {}, true)).result; if (!sd) return;

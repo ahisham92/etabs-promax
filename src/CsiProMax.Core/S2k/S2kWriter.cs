@@ -424,17 +424,23 @@ public static class S2kWriter
         }
 
         // Section cuts by group, with the result type, location and axes their Section Cut Data form set.
-        var cuts = StructureExtras.Cuts(m).Where(c => groups.ContainsKey(c.Group)).ToList();
+        var cuts = StructureExtras.Cuts(m).Where(c => groups.ContainsKey(c.Group) || c.Group.Equals("ALL", StringComparison.OrdinalIgnoreCase)).ToList();
         if (cuts.Count > 0)
             Add(tables, "SECTION CUTS 1 - GENERAL", cuts.Select(c =>
             {
                 var x = StructureExtras.Get(m, StructureExtras.CutTable, c.Name);
                 string V(string k, string d) => x.TryGetValue(k, out var v) && v.Length > 0 ? v : d;
                 var user = V("ResultLoc", "Default").Equals("User", StringComparison.OrdinalIgnoreCase) || V("ResultLoc", "Default").StartsWith("User", StringComparison.OrdinalIgnoreCase);
-                return Row(("CutName", c.Name), ("DefinedBy", "Group"), ("Group", c.Group), ("ResultType", V("ResultType", "Analysis").StartsWith("Design", StringComparison.OrdinalIgnoreCase) ? "Design" : "Analysis"),
+                return Row(("CutName", c.Name), ("DefinedBy", V("DefinedBy", "Group").StartsWith("Quad", StringComparison.OrdinalIgnoreCase) ? "Quadrilateral" : "Group"), ("Group", c.Group), ("ResultType", V("ResultType", "Analysis").StartsWith("Design", StringComparison.OrdinalIgnoreCase) ? "Design" : "Analysis"),
                     ("DefaultLoc", user ? "No" : "Yes"), ("GlobalX", V("LocX", "0")), ("GlobalY", V("LocY", "0")), ("GlobalZ", V("LocZ", "0")),
-                    ("AngleA", V("RotAboutZ", "0")), ("AngleB", V("RotAboutY", "0")), ("AngleC", V("RotAboutX", "0")), ("AdvanceAxes", "No"), ("NumQuads", "0"));
+                    ("AngleA", V("RotAboutZ", "0")), ("AngleB", V("RotAboutY", "0")), ("AngleC", V("RotAboutX", "0")), ("AdvanceAxes", V("AdvanceAxes", "No")), ("NumQuads", Quads(x).Count.ToString(CultureInfo.InvariantCulture)))
+                    // SAP2000's design axes and reported side, when the form set them.
+                    .Concat(new[] { "DesignType", "DesignAngle", "ElemSide" }.Where(x.ContainsKey).Select(k => (k, x[k]))).ToList();
             }));
+        // Quadrilateral cutting planes: 4 points each, as Section Cut Data's Quadrilateral Cutting Planes grid has them.
+        var quadRows = cuts.SelectMany(c => Quads(StructureExtras.Get(m, StructureExtras.CutTable, c.Name)).SelectMany((qd, i) => qd.Select((pt, j) =>
+            Row(("SectionCut", c.Name), ("QuadNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("PointNum", (j + 1).ToString(CultureInfo.InvariantCulture)), ("X", pt[0]), ("Y", pt[1]), ("Z", pt[2]))))).ToList();
+        if (quadRows.Count > 0) Add(tables, "SECTION CUTS 3 - QUADRILATERAL DEFINITIONS", quadRows);
 
         // Loads.
         var patternTypes = m.LoadPatterns.ToDictionary(p => p.Name, p => DesignType(p.Type), StringComparer.OrdinalIgnoreCase);
@@ -1022,6 +1028,12 @@ public static class S2kWriter
     private static string N(double v) => CsiTableText.Number(v);
     private static string YesNo(bool v) => v ? "Yes" : "No";
     private static IReadOnlyList<(string, string)> Row(params (string, string)[] pairs) => pairs;
+
+    /// <summary>A section cut's quadrilaterals, kept as "x,y,z;x,y,z;x,y,z;x,y,z" with "|" between them.</summary>
+    private static List<string[][]> Quads(IReadOnlyDictionary<string, string> cut) =>
+        cut.TryGetValue("Quads", out var t) && t.Length > 0
+            ? t.Split('|').Select(qd => qd.Split(';').Select(pt => pt.Split(',')).Where(pt => pt.Length == 3).ToArray()).Where(qd => qd.Length > 0).ToList()
+            : [];
 
     private static void Add(List<string> tables, string name, IReadOnlyList<(string, string)> row) => tables.Add(CsiTableText.Table(name, [row]));
 
