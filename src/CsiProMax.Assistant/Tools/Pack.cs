@@ -68,6 +68,46 @@ public static class Pack
     /// </summary>
     public static string? TraceFile { get; set; }
 
+    private static readonly object CacheLock = new();
+    private static Dictionary<string, TableData>? _reads;
+
+    /// <summary>
+    /// Keeps every table a pack reads until the returned scope ends, for packs of one model that does not change in
+    /// between: the field test's pack, the Viewer's pack and the watcher's two packs of the analysed scratch model read the
+    /// same 161 tables four times, at about 2.4 s a table in ETABS 23.2 (0.4.61 full test: 4 passes of 9 minutes; Ahmed
+    /// 2026-11-27 asked why). A scope inside another one changes nothing. Never set where the model may change meanwhile.
+    /// </summary>
+    public static IDisposable SameModel()
+    {
+        lock (CacheLock)
+        {
+            if (_reads is not null) return new Scope(false);
+            _reads = new Dictionary<string, TableData>(StringComparer.Ordinal);
+            return new Scope(true);
+        }
+    }
+
+    private sealed class Scope(bool owns) : IDisposable
+    {
+        private bool _done;
+        public void Dispose()
+        {
+            if (_done || !owns) return;
+            _done = true;
+            lock (CacheLock) _reads = null;
+        }
+    }
+
+    /// <summary>A table for a pack: from <see cref="SameModel"/>'s reads when one is open, else from the program.</summary>
+    internal static TableData ReadTable(ICsiLink e, string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
+    {
+        var id = e.Program.Key + "\u0001" + key + "\u0001" + string.Join("\u0002", cases ?? []) + "\u0001" + string.Join("\u0002", combos ?? []);
+        lock (CacheLock) if (_reads is not null && _reads.TryGetValue(id, out var kept)) return kept;
+        var data = e.ReadTable(key, cases, combos);
+        lock (CacheLock) if (_reads is not null) _reads[id] = data;
+        return data;
+    }
+
     private static void Trace(ICsiLink e, string table)
     {
         if (TraceFile is not { Length: > 0 } file) return;
@@ -138,7 +178,7 @@ public static class Pack
         {
             TableData data;
             Trace(e, t.Key);
-            try { data = e.ReadTable(t.Key, cases, combos); }
+            try { data = ReadTable(e, t.Key, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;
             tables[t.Name] = TableJson(t.Name, data, DesignResults.IsDesignTable(t.Name) ? Math.Max(mostRows, DesignMostRows) : mostRows, notes, null);
@@ -190,7 +230,7 @@ public static class Pack
             if (budget[kind] <= 0) { left.Add((JsonNode)t.Name); continue; }
             TableData data;
             Trace(e, t.Key);
-            try { data = e.ReadTable(t.Key, cases, combos); }
+            try { data = ReadTable(e, t.Key, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;
             var most = Math.Min(mostRows, budget[kind]);

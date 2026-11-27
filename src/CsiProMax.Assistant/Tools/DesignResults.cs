@@ -90,7 +90,7 @@ public static class DesignResults
         foreach (var t in known.Where(t => !t.Empty && IsWallTable(t.Name) && ResultTools.Norm(t.Name).Contains("label", StringComparison.Ordinal)))
         {
             TableData data;
-            try { data = e.ReadTable(t.Key, null, null); }
+            try { data = Pack.ReadTable(e, t.Key, null, null); }
             catch (EtabsException) { continue; }
             var n = ResultTools.Norm(t.Name);
             var type = n.Contains("area", StringComparison.Ordinal) || n.Contains("wall", StringComparison.Ordinal) || n.Contains("shell", StringComparison.Ordinal) ? "a" : "f";

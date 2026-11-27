@@ -149,7 +149,13 @@ public static class PanelFieldSteps
         }
 
         // ---- The review pack, from the model the test works on. ----
+        // Both packs are of the same model, unchanged in between: its tables are read once.
+        var sameModel = CsiProMax.Assistant.Tools.Pack.SameModel();
         var pack = "";
+        try
+        {
+        if (ctx.NoPack) { handled.Add("export_pack"); ctx.Skip("tool export_pack", FieldContext.NoPackWhy); }
+        else
         Tool("export_pack", $$"""{"name":"cpm-field-test panel","folder":{{q}},"drift_limit":0.002}""", (a, _) =>
         {
             pack = FileIn(a);
@@ -157,7 +163,8 @@ public static class PanelFieldSteps
         });
         // With no folder named, the pack goes beside the model. Tried on the scratch model only, whose folder is the test's own.
         const string besideStep = "tool export_pack with no folder saves beside the model";
-        if (!scratch) ctx.Skip(besideStep, "that writes into the model's own folder, so it is only tried on a scratch model, never on your open model");
+        if (ctx.NoPack) ctx.Skip(besideStep, FieldContext.NoPackWhy);
+        else if (!scratch) ctx.Skip(besideStep, "that writes into the model's own folder, so it is only tried on a scratch model, never on your open model");
         else
             Tool("export_pack", """{"name":"cpm-field-test beside"}""", (a, _) =>
             {
@@ -167,6 +174,8 @@ public static class PanelFieldSteps
                 FieldContext.Expect(string.Equals(Path.GetFullPath(Path.GetDirectoryName(file) ?? ""), Path.GetFullPath(model), StringComparison.OrdinalIgnoreCase),
                     $"the model is in {model}; the pack went to {Path.GetDirectoryName(file)} ({a["not_beside_model"]?.ToJsonString() ?? "no reason given"})");
             }, besideStep);
+        }
+        finally { sameModel.Dispose(); }
         if (pack.Length == 0) NotTested("read_pack_comments", "the pack it would read was not written (see export_pack above)");
         else
             ctx.Step("tool read_pack_comments on a pack nobody has commented on", () =>

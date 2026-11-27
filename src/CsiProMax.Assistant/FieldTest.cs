@@ -76,6 +76,9 @@ public static class FieldTest
         /// it passed on this PC and its code is unchanged since (see <see cref="FieldRetest"/>). With <see cref="Full"/>.
         /// </summary>
         public bool Retest { get; init; }
+        /// <summary>A rerun of what failed that leaves out the steps writing the review pack (Ahmed 2026-11-27: no full
+        /// runs while the issues are known; the pack is tested again once it is fast). Command line: --no-pack.</summary>
+        public bool NoPack { get; init; }
         /// <summary>Where each part's last result is kept. Left out: this PC's own file, and nothing for a stand-in run.</summary>
         public string? ResultsFile { get; init; }
         /// <summary>For tests: the value that stands for a part's code. Left out: from the source hashes in this build.</summary>
@@ -307,7 +310,7 @@ public static class FieldTest
         var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{ReportName(link.Program, o.OnlyProgram)} {now:yyyy-MM-dd HHmmss}");
         if (o.Full) Directory.CreateDirectory(work);
         if (o.Full && o.SettingsRoot is null) Tools.Pack.TraceFile = Path.Combine(work, "pack trace.txt");
-        var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress, Outcome = o.Outcome };
+        var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress, Outcome = o.Outcome, NoPack = o.NoPack };
         try { o.OnWorkFolder?.Invoke(work); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         // Test copies an earlier run left open go first: they would count as the program being open below.
         var left = new List<string>();
@@ -455,6 +458,9 @@ public static class FieldTest
                 // the model has its results (the program's steps say when), or after them if they never did.
                 ctx.WhileAnalysed = () =>
                 {
+                    // The Viewer's pack and the watcher's are of the same analysed model: its tables are read once.
+                    if (o.NoPack) { ctx.Skip($"the Viewer and the review pack watcher on the scratch {program.Name} model", FieldContext.NoPackWhy); return; }
+                    using var sameModel = Tools.Pack.SameModel();
                     if (o.Viewer) { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, window.Link, program.Name); } finally { ctx.Watched = at; } }
                     // The pack beside the model written by itself after the run and the design (the watcher's rule).
                     AutoPackFieldSteps.FieldSteps(ctx, window.Link, program.Name);

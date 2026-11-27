@@ -293,6 +293,9 @@ public static class SapFieldSteps
         // ---- snapshots and the review pack ----
         ctx.Tool("list_snapshots", "{}", a => FieldContext.Expect(Int(a["count"]) >= 1, "the snapshot is not listed"));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""");
+        // Left out of a rerun of what failed, as in ETABS (Ahmed 2026-11-27: what he says of ETABS holds for all three).
+        if (ctx.NoPack) ctx.LeftOutOfRerun("the review pack of the scratch model is written");
+        else
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject();

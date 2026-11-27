@@ -175,7 +175,7 @@ public static class PackTables
             foreach (var t in wanted)
             {
                 TableData data;
-                try { data = e.ReadTable(t.Key, cases, combos); }
+                try { data = Pack.ReadTable(e, t.Key, cases, combos); }
                 catch (EtabsException) { continue; }
                 var st = Col(data.Fields, "StepType", "Step Type");
                 if (st < 0) continue;
