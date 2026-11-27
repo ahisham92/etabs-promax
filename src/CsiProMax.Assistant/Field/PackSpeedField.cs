@@ -125,11 +125,16 @@ public static class PackSpeedField
             var model = LargeModel(program, ctx.Folder);
             var frames = model.Frames().Count;
             var areas = model.Areas().Count;
-            var started = EngineRun.Start(model, analyse: true, kinds: [], keepOpen: false);
+            EngineRun.WhileOpen = NumericProbe;
+            JsonObject started;
+            try { started = EngineRun.Start(model, analyse: true, kinds: [], keepOpen: false); }
+            catch { EngineRun.WhileOpen = null; throw; }
             FieldContext.Expect(started["ok"]?.GetValue<bool>() == true, "the run did not start: " + started["error"]);
             var until = DateTime.UtcNow.AddMinutes(40);
             while (EngineRun.Status(false)["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
             var status = EngineRun.Status(true);
+            EngineRun.WhileOpen = null;
+            ctx.Note($"how fast {program.Name} gives the large model's shell results by its numeric results calls (measured, not checked)", status["probe"]?.ToJsonString() ?? "not measured");
             FieldContext.Expect(status["done"]?.GetValue<bool>() == true, "the run did not finish within 40 minutes: " + status["phase"]);
             FieldContext.Expect(string.IsNullOrEmpty(status["error"]?.GetValue<string>()), "the run stopped: " + status["error"]);
             var steps = (status["monitor"]?["steps"] as JsonArray ?? []).Where(x => x is not null).ToDictionary(x => x!["key"]!.GetValue<string>(), x => x!["seconds"]?.GetValue<double>() ?? 0);
@@ -160,9 +165,54 @@ public static class PackSpeedField
             {
                 frames, areas, tables, rows, left_out = pack["manifest"]?["left_out_tables"]?.ToJsonString(), megabytes = Math.Round(bytes / 1e6, 1),
                 results_seconds = Math.Round(At("results"), 1), close_seconds = Math.Round(At("close"), 1), load_seconds = Math.Round(load, 1),
-                start_seconds = Math.Round(At("start"), 1), analysis_seconds = Math.Round(At("analysis"), 1), slowest,
+                start_seconds = Math.Round(At("start"), 1), analysis_seconds = Math.Round(At("analysis"), 1), slowest, numeric = status["probe"]?.ToJsonString(),
             };
         });
+    }
+
+    /// <summary>
+    /// How fast the program gives the shell results through its numeric results calls (Results.AreaForceShell and the
+    /// like: numbers, not formatted table text), against its tables: 0.4.68 full test, ETABS gave each 2.1-million-row
+    /// shell table in about 150 s (about 14,000 rows a second), so the large model took about 15 minutes. Run on the
+    /// large model while the program is open, a load case at a time for the first cases. Never fails: it measures.
+    /// </summary>
+    public static JsonObject NumericProbe(ICsiLink link)
+    {
+        var o = new JsonObject();
+        var cases = link.LoadCases().Take(3).ToList();
+        foreach (var (call, doubles) in new[] { ("AreaForceShell", 19), ("AreaJointForceShell", 6), ("AreaStressShell", 20), ("AreaStrainShell", 20) })
+        {
+            var parts = new JsonArray();
+            long rows = 0, ms = 0;
+            foreach (var c in cases)
+            {
+                var said = link.Raw($"time {call} for {c}", m =>
+                {
+                    try
+                    {
+                        m.Results.Setup.DeselectAllCasesAndCombosForOutput();
+                        m.Results.Setup.SetCaseSelectedForOutput(c, true);
+                        object results = m.Results;
+                        var args = new object[3 + 5 + 1 + doubles];
+                        args[0] = "All"; args[1] = 2; args[2] = 0;
+                        for (var i = 3; i < 8; i++) args[i] = Array.Empty<string>();
+                        args[8] = Array.Empty<double>();
+                        for (var i = 9; i < args.Length; i++) args[i] = Array.Empty<double>();
+                        var refs = new System.Reflection.ParameterModifier(args.Length);
+                        for (var i = 2; i < args.Length; i++) refs[i] = true;
+                        var w = Stopwatch.StartNew();
+                        var ret = results.GetType().InvokeMember(call, System.Reflection.BindingFlags.InvokeMethod, null, results, args, [refs], null, null);
+                        return (object)$"{Convert.ToInt32(args[2])}|{w.ElapsedMilliseconds}|{ret}";
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException) { return "error|" + (ex.InnerException ?? ex).Message; }
+                }) as string ?? "";
+                var bits = said.Split('|');
+                if (bits.Length == 3 && long.TryParse(bits[0], out var n) && long.TryParse(bits[1], out var t)) { rows += n; ms += t; parts.Add((JsonNode)$"{c}: {n} rows in {t} ms (answer {bits[2]})"); }
+                else { parts.Add((JsonNode)$"{c}: {said}"); break; }
+            }
+            o[call] = new JsonObject { ["rows"] = rows, ["ms"] = ms, ["rows_per_second"] = ms > 0 ? Math.Round(rows * 1000.0 / ms) : 0, ["cases"] = parts };
+        }
+        return o;
     }
 
     /// <summary>The tables measured: a small input table, a story result and an element result, the first with data of each.</summary>

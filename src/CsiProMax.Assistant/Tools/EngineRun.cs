@@ -41,6 +41,10 @@ public static class EngineRun
 
     /// <summary>The field test sets this: after each run, what the results lost is checked against the program before it closes.</summary>
     public static bool CheckLoss { get; set; }
+
+    /// <summary>The field test's measuring while the program still holds the run's results (after the results step); its answer is in Status's "probe".</summary>
+    public static Func<ICsiLink, JsonObject>? WhileOpen { get; set; }
+    private static JsonObject? _probe;
     private static OfflineEtabs? _model;
 
     // The last analysis: the model it was of, its revision, and the program's own file holding its results.
@@ -114,7 +118,7 @@ public static class EngineRun
             if (!current)
                 try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
                 catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
-            Lines.Clear(); _error = ""; _pack = null; _lost = null; _done = false; _running = true; _closed = false; _keptOpen = false; _cancel = false; _window = null; _seenNotices = 0;
+            Lines.Clear(); _error = ""; _pack = null; _lost = null; _probe = null; _done = false; _running = true; _closed = false; _keptOpen = false; _cancel = false; _window = null; _seenNotices = 0;
             _mon = new RunMonitor(program) { CaseCount = CasesOf(model) };
             // The model as the instability check reads it, taken here on the window's thread; checked in the background.
             AnalysisModel? check = null;
@@ -339,6 +343,13 @@ public static class EngineRun
                 try { lost = Pack.Missing(window.Link, built.Content, [], []); }
                 catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { lost = ["the check could not be made: " + ex.Message]; }
                 lock (Gate) _lost = lost;
+            }
+            if (WhileOpen is { } probe)
+            {
+                JsonObject found;
+                try { found = probe(window.Link); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { found = new JsonObject { ["error"] = ex.Message }; }
+                lock (Gate) _probe = found;
             }
         }
         catch (OutOfMemoryException)
@@ -700,6 +711,7 @@ public static class EngineRun
             {
                 ["running"] = _running, ["done"] = _done, ["program"] = _program, ["phase"] = _phase, ["error"] = _error,
                 ["lines"] = new JsonArray(Lines.Select(l => (JsonNode)l).ToArray()), ["pack_file"] = _packFile,
+                ["probe"] = _probe?.DeepClone(),
                 ["lost"] = _lost is null ? null : new JsonArray(_lost.Select(l => (JsonNode)l).ToArray()),
                 ["model_changed"] = _model is not null && _model.Revision != _startRevision,
                 // Whether the last analysis is of the model as it is now: a design then needs no new analysis.
