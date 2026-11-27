@@ -297,6 +297,12 @@ public sealed class LoadCombo
 {
     public string Name { get; set; } = "";
     public List<List<string>> Lines { get; set; } = [];
+    /// <summary>ETABS's Load Combination Notes (Modify/Show Notes...); its .e2k has no place for them, so they go in
+    /// through the "Load Combination Definitions" table.</summary>
+    public string? Notes { get; set; }
+    /// <summary>An ETABS default design combination not converted to a user one ("Auto Combination: Yes (Not Editable)").
+    /// ETABS's .e2k does not write these; they go in through the "Load Combination Definitions" table (Is Auto Yes).</summary>
+    public bool Auto { get; set; }
 }
 
 public sealed class RawSection

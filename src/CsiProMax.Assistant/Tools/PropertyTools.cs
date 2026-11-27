@@ -188,7 +188,10 @@ public static class PropertyTools
                 Core(() => link.Edit(m =>
                 {
                     PropertyDefs.SetLink(m, name, a.Text("type", "LINEAR"), dofs);
-                    var kept = StructureExtras.Fields.Keys.Where(StructureExtras.IsLinkTable).Select(t => StructureExtras.Get(m, t, name)).FirstOrDefault(r => r.Count > 0) ?? new Dictionary<string, string>();
+                    // The link's own fields (mass, weight, inertias, spring factors, notes) go with it to its type's table; a row of
+                    // the Link/Support Property Data form also holds its direction's fields, which this tool's directions replace.
+                    var kept = (StructureExtras.Fields.Keys.Where(StructureExtras.IsLinkTable).Select(t => StructureExtras.Get(m, t, name)).FirstOrDefault(r => r.Count > 0) ?? new Dictionary<string, string>())
+                        .Where(kv => StructureExtras.LinkFields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase)).ToDictionary(kv => kv.Key, kv => kv.Value);
                     StructureExtras.RemoveLink(m, name);
                     var table = StructureExtras.LinkTable(a.Text("type", "LINEAR"));
                     if (kept.Count > 0) StructureExtras.Set(m, table, name, kept);
