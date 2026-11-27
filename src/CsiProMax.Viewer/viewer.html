@@ -5014,12 +5014,20 @@ function hmDefineMenu() {
       ["Soil Subgrade Properties...", "m:spr:area"], ["Point Spring Properties...", "m:spr:point"], ["Line Spring Properties...", "m:spr:line"], ["Wall Properties...", "m:wallSections"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], 0, ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], fns, ["Mass Source...", "m:mass"], 0,
     ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
+  // ETABS 23.2's Define menu and its Section Properties submenu, item for item and in its order (pictured Define/00 Define
+  // menu, 00 Section Properties submenu). The Engine's own extras the menu does not have follow its last separator, so
+  // nothing they do is lost until they find their ETABS place.
+  // dt gives {only, item}: the same item under ETABS's own label.
+  const relabel = (x, label) => x && x.item ? {only: x.only, item: [label, x.item[1]]} : x;
+  const pzItem = relabel(dt("Panel Zone Properties..."), "Panel Zone...");
   return [["Material Properties...", "m:materials"],
-    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Deck Sections...", "m:decks"], ["Slab Sections...", "m:shellSections"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
-      ...hinges, dt("Panel Zone Properties..."), ["Tendon Sections...", "m:ex:tendonsections"], 0, ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Slab Layers..."), dt("Wall Layers..."), dt("Wall Auto Select Lists..."), dt("Frame Release Definitions...")]],
-    ["Spring Properties", springs], ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."),
-    fns, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], dt("Auto Construction Sequence..."), dt("Walking Vibrations..."), ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0,
-    ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
+    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Slab Sections...", "m:shellSections"], ["Deck Sections...", "m:decks"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
+      ...hinges, pzItem]],
+    ["Spring Properties", springs], 0, ["Diaphragms...", "m:st:diaphragm"], 0, ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], 0, ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], 0,
+    fns, dt("Generalized Displacements..."), 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), 0, ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0,
+    relabel(dt("Auto Construction Sequence..."), "Auto Construction Sequence Case..."), dt("Walking Vibrations..."), 0,
+    ["Engine Extras", [["Tendon Sections...", "m:ex:tendonsections"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Frame Release Definitions..."), ["Hyperstatic Load Cases...", "m:ex:hyperstatic"],
+      ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]]]];
 }
 // ---- SAFE forms (Ahmed 2026-11-27: every SAFE form identical to SAFE 23's, every option working) ----
 // Each SAFE form of the Engine's SAFE menus, with SAFE's own tables behind it ("SAFE | <table>", by the names SAFE's own
@@ -5374,8 +5382,9 @@ const sapLdOpts = (id, del, what) => `<fieldset><legend>Options</legend>${del ? 
 const sapLdPat = (defs, id) => `<select id="${id}" style="width:225px">${opts(defs.load_patterns.map(p => p.name), hm.pattern && defs.load_patterns.some(p => p.name === hm.pattern) ? hm.pattern : (defs.load_patterns[0] || {}).name)}</select>`;
 const sapLdGrid = rows => `<div style="display:grid;grid-template-columns:190px 230px;gap:6px 8px;align-items:center">${rows.map(([l, c]) => `<span>${l}</span>${c}`).join("")}</div>`;
 async function sapLdStart(t) {
-  const names = t === "joint" ? hmJoints() : hmSelected(t === "frame" ? "f" : "a");
-  if (!names.length) { hmSay(t === "joint" ? "Select the joints first." : t === "frame" ? "Select the frames first." : "Select the areas first.", true); return null; }
+  const names = t === "joint" ? hmJoints() : t === "frame" ? hmSelected("f") : t === "area" ? hmSelected("a") : sapXSelected(t);
+  // SAP2000 26.3 keeps the Cable, Tendon, Solid and Link/Support Loads items enabled with none selected: the form opens and OK applies to nothing.
+  if (!names.length && ["joint", "frame", "area"].includes(t)) { hmSay({joint: "Select the joints first.", frame: "Select the frames first.", area: "Select the areas first.", cable: "Select the cable objects first.", tendon: "Select the tendon objects first.", solid: "Select the solid objects first.", link: "Select the link/support objects first."}[t], true); return null; }
   const defs = await hmDefs();
   if (!defs.load_patterns.length) { hmSay("Define a load pattern first (Define > Load Patterns).", true); return null; }
   return {names, defs, u: sapUnits()};
@@ -5383,6 +5392,7 @@ async function sapLdStart(t) {
 // Sets the rows; option is SAP2000's Options choice. True when it worked.
 async function sapLdSet(d, table, names, pattern, option, rows) {
   if (pattern) hm.pattern = pattern;
+  if (!names.length) return true;
   const j = await hmRun("assign_sap_loads", {table, objects: names, pattern: pattern || undefined, option, rows: option === "delete" ? [] : rows}, true);
   if (!j.ok) { formError(d, j.error); return false; }
   hmSay("Done. Edit > Undo steps back."); return true;
@@ -5682,7 +5692,7 @@ function hmSapAreaUniformToFrame() { return sapAreaUniform(true); }
 // or By Joint Pattern, Options. Solid: the Face list 1 to 6 in place of the loaded face.
 async function sapSurfacePressure(solid) {
   const s = await sapLdStart(solid ? "solid" : "area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = solid ? "ssp" : "asp";
-  const face = solid ? `<fieldset><legend>Loaded Face</legend>${sapLdGrid([["Face", `<select id="${p}F" style="width:110px">${opts(["1", "2", "3", "4", "5", "6"], "1")}</select>`]])}</fieldset>`
+  const face = solid ? `<fieldset><legend>Loaded Face</legend>${sapLdGrid([["Face", `<select id="${p}F" style="width:110px">${opts(["1", "2", "3", "4", "5", "6"], "6")}</select>`]])}</fieldset>`
     : `<fieldset><legend>Loaded Face</legend><label><input type="radio" name="${p}F" value="Top" checked> Top</label><label><input type="radio" name="${p}F" value="Bottom"> Bottom</label><label><input type="radio" name="${p}F" value="Edge"> Edge</label>
       <div style="display:grid;grid-template-columns:270px 110px;gap:6px 8px;align-items:center;margin-left:22px"><span>Edge Face Number</span><input id="${p}E" value="" disabled></div></fieldset>`;
   const d = dialog(solid ? "Assign Solid Surface Pressure Loads" : "Assign Area Surface Pressure Loads", `${sapFormCss}<div class="sapF">
@@ -5698,7 +5708,7 @@ async function sapSurfacePressure(solid) {
   const w = sapJpWire(d, p, () => `${u.f}/${u.l}²`);
   const edge = () => { if (solid) return; const on = q(d, `[name=${p}F]:checked`).value === "Edge"; q(d, `#${p}E`).disabled = !on; q(d, `#${p}E`).value = on ? (q(d, `#${p}E`).value || "1") : ""; };
   if (!solid) d.querySelectorAll(`[name=${p}F]`).forEach(r => r.onchange = edge);
-  q(d, `#${p}R`).onclick = () => { if (solid) q(d, `#${p}F`).value = "1"; else { q(d, `[name=${p}F][value=Top]`).checked = true; edge(); } w.reset(); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  q(d, `#${p}R`).onclick = () => { if (solid) q(d, `#${p}F`).value = "6"; else { q(d, `[name=${p}F][value=Top]`).checked = true; edge(); } w.reset(); q(d, `[name=${p}O][value=replace]`).checked = true; };
   return d;
 }
 function hmSapAreaSurfacePressure() { return sapSurfacePressure(false); }
@@ -5716,7 +5726,7 @@ async function sapPorePressure(solid) {
 }
 function hmSapAreaPorePressure() { return sapPorePressure(false); }
 // Temperature (All): Load Pattern, Type (Temperature, Temperature Gradient 3-3), By Element or By Joint Pattern, Options.
-async function hmSapAreaTemperature() {
+async function hmSapAreaTempLoads() {
   const s = await sapLdStart("area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), T = sapLdTemp();
   const d = dialog("Assign Area Temperature Loads", `${sapFormCss}<div class="sapF">
     <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "atP")]])}</fieldset>
@@ -5783,7 +5793,137 @@ async function hmSapAreaWindCp() {
 }
 Object.assign(hmSapAssignForms, {
   alGravity: () => hmSapAreaGravity(), alUniform: () => hmSapAreaUniform(), alToFrame: () => hmSapAreaUniformToFrame(), alSurface: () => hmSapAreaSurfacePressure(),
-  alPore: () => hmSapAreaPorePressure(), alTemperature: () => hmSapAreaTemperature(), alStrain: () => hmSapAreaStrain(), alRotate: () => hmSapAreaRotate(), alWindCp: () => hmSapAreaWindCp(),
+  alPore: () => hmSapAreaPorePressure(), alTemperature: () => hmSapAreaTempLoads(), alStrain: () => hmSapAreaStrain(), alRotate: () => hmSapAreaRotate(), alWindCp: () => hmSapAreaWindCp(),
+});
+
+// ---- Assign > Cable, Tendon, Solid and Link/Support Loads (SAP2000 26.3, pictures Assign/CableLoads, TendonLoads,
+// SolidLoads, LinkLoads). Their objects are SAP2000's own (a model opened from a .s2k), named as SAP2000 names them; the
+// rows go into SAP2000's tables (Cable Loads - Distributed, Tendon Loads - Tension Force Or Stress, ...).
+const sapKindWord = {frame: "Frame", area: "Area", cable: "Cable", tendon: "Tendon", solid: "Solid", link: "Link/Support"};
+const sapLdTable = (kind, what) => `${kind === "link" ? "Link" : sapKindWord[kind]} Loads - ${what}`;
+// Gravity: General (Load Pattern, Coordinate System), Gravity Multipliers, Options.
+async function sapGravityForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs} = s, cs = await sapCsys(), p = "gv" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Gravity Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")], ["Coordinate System", `<select id="${p}C" style="width:225px">${opts(cs, "GLOBAL")}</select>`]])}</fieldset>
+    <fieldset><legend>Gravity Multipliers</legend><div class="g3">${["X", "Y", "Z"].map(x => sapRow("Global " + x, p + x, 0, "")).join("")}</div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, sapLdTable(kind, "Gravity"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value,
+      [{CoordSys: q(d, `#${p}C`).value, MultiplierX: sapLdNum(d, `#${p}X`), MultiplierY: sapLdNum(d, `#${p}Y`), MultiplierZ: sapLdNum(d, `#${p}Z`)}])), {width: 450});
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}C`).value = "GLOBAL"; ["X", "Y", "Z"].forEach(x => q(d, `#${p}${x}`).value = "0"); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+// Cable Distributed: General (Load Pattern, Coordinate System with Local, Load Direction, Load Type), Options, Uniform Load.
+async function hmSapCableDistributed() {
+  const s = await sapLdStart("cable"); if (!s) return; const {names, defs, u} = s, cs = [...await sapCsys(), "Local"];
+  const unitOf = t => t === "Moment" ? `${u.fl}/${u.l}` : u.kl;
+  const d = dialog("Assign Cable Distributed Loads", `${sapFormCss}<div class="sapF"><div style="display:grid;grid-template-columns:1fr 190px;gap:0 12px">
+      <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "cdP")], ["Coordinate System", `<select id="cdC" style="width:165px">${opts(cs, "GLOBAL")}</select>`],
+        ["Load Direction", `<select id="cdD" style="width:165px"></select>`], ["Load Type", `<select id="cdT" style="width:165px">${opts(["Force", "Moment"], "Force")}</select>`]])}</fieldset>
+      <div>${sapLdOpts("cdO")}<fieldset><legend>Uniform Load</legend><input id="cdV" value="0" style="width:90px"> <span class="u" id="cdU">${unitOf("Force")}</span></fieldset></div></div>
+    <button id="cdR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const t = q(d, "#cdT").value;
+      return sapLdSet(d, "Cable Loads - Distributed", names, q(d, "#cdP").value, q(d, "[name=cdO]:checked").value, [{CoordSys: q(d, "#cdC").value, Type: t, Dir: q(d, "#cdD").value, [t === "Moment" ? "MOverL" : "FOverL"]: sapLdNum(d, "#cdV")}]); }), {width: 690});
+  const syncDir = () => { const c = q(d, "#cdC").value, was = q(d, "#cdD").value, list = c === "Local" ? ["1", "2", "3"] : sapGravDirs; q(d, "#cdD").innerHTML = opts(list, list.includes(was) ? was : c === "Local" ? "1" : "Gravity"); };
+  q(d, "#cdC").onchange = syncDir; q(d, "#cdT").onchange = () => q(d, "#cdU").textContent = unitOf(q(d, "#cdT").value);
+  q(d, "#cdR").onclick = () => { q(d, "#cdC").value = "GLOBAL"; q(d, "#cdD").innerHTML = ""; syncDir(); q(d, "#cdT").value = "Force"; q(d, "#cdU").textContent = unitOf("Force"); q(d, "#cdV").value = "0"; q(d, "[name=cdO][value=replace]").checked = true; };
+  syncDir();
+  return d;
+}
+// Temperature (Cable, Tendon, Solid): Load Pattern, Temperature By Element or By Joint Pattern (Joint Pattern, Multiplier), Options.
+async function sapTempForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs} = s, jp = await sapJointPatterns(), T = sapLdTemp(), p = "tm" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Temperature Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Temperature</legend>${sapJpBlock(p, "Temperature", T, jp)}</fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const {v, jp} = w.value();
+      return sapLdSet(d, sapLdTable(kind, "Temperature"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{...(kind === "solid" ? {} : {Type: "Temperature"}), Temp: v, ...(jp ? {JtPattern: jp} : {})}]); }), {width: 470});
+  const w = sapJpWire(d, p, () => T);
+  q(d, `#${p}R`).onclick = () => { q(d, `[name=${p}O][value=replace]`).checked = true; w.reset(); };
+  return d;
+}
+// Strain (Cable, Tendon: the component is Strain11 only, greyed; Solid: Strain11 to Strain23): Load Pattern, Strain Load
+// By Element or By Joint Pattern, Component, Joint Pattern, Strain, Options.
+async function sapStrainForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = "sn" + kind[0], solid = kind === "solid";
+  const comp = solid ? `<select id="${p}C" style="grid-column:span 2">${opts(["Strain11", "Strain22", "Strain33", "Strain12", "Strain13", "Strain23"], "Strain11")}</select>` : `<input id="${p}C" value="Strain11" disabled style="grid-column:span 2">`;
+  const d = dialog(`Assign ${sapKindWord[kind]} Strain Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Strain Load</legend><label><input type="radio" name="${p}B" value="el" checked> By Element</label><label><input type="radio" name="${p}B" value="jp"> By Joint Pattern</label>
+      <div style="display:grid;grid-template-columns:110px 150px 110px 40px;gap:6px 8px;align-items:center;margin-left:22px">
+        <span>Component</span>${comp}<span></span>
+        <span>Joint Pattern</span><select id="${p}J" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
+        <span>Strain</span><span></span><input id="${p}V" value="0"><span class="u">${u.l}/${u.l}</span></div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const jpOn = q(d, `[name=${p}B]:checked`).value === "jp";
+      return sapLdSet(d, sapLdTable(kind, "Strain"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{Component: q(d, `#${p}C`).value, Strain: sapLdNum(d, `#${p}V`), ...(jpOn ? {JtPattern: q(d, `#${p}J`).value} : {})}]); }), {width: 470});
+  const sync = () => { const jpOn = q(d, `[name=${p}B]:checked`).value === "jp"; q(d, `#${p}J`).disabled = !jpOn; if (!jpOn) q(d, `#${p}J`).selectedIndex = -1; else if (q(d, `#${p}J`).selectedIndex < 0) q(d, `#${p}J`).value = "Default"; };
+  d.querySelectorAll(`[name=${p}B]`).forEach(r => r.onchange = sync);
+  q(d, `#${p}R`).onclick = () => { q(d, `[name=${p}B][value=el]`).checked = q(d, `[name=${p}O][value=replace]`).checked = true; if (solid) q(d, `#${p}C`).value = "Strain11"; q(d, `#${p}V`).value = "0"; sync(); };
+  sync();
+  return d;
+}
+// Deformation (Cable, Tendon): Load Pattern, Axial Deformation U1, Replace or Delete.
+async function sapDeformForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs, u} = s, p = "df" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Deformation Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Deformation Loads</legend><div style="display:grid;grid-template-columns:190px 110px 40px;gap:6px 8px;align-items:center"><span>Axial Deformation, U1</span><input id="${p}V" value="0"><span class="u">${u.l}</span></div></fieldset>
+    ${sapLdOpts(p + "O", true)}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, sapLdTable(kind, "Deformation"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{IncludeU1: "Yes", U1: sapLdNum(d, `#${p}V`)}])), {width: 400});
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}V`).value = "0"; q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+// Cable Target Force: Load Pattern, Axial Force P with its Relative Distance, Replace or Delete.
+async function hmSapCableTargetForce() {
+  const s = await sapLdStart("cable"); if (!s) return; const {names, defs, u} = s;
+  const d = dialog("Assign Cable Target Force Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "ctP")]])}</fieldset>
+    <fieldset><legend>Target Force</legend><div style="display:grid;grid-template-columns:130px 100px 40px 100px;gap:4px 8px;align-items:center"><span></span><span style="text-align:center">Target Force</span><span></span><span style="text-align:center">Relative Distance</span>
+      <span>Axial Force, P</span><input id="ctV" value="0"><span class="u">${u.f}</span><input id="ctD" value="0.5"></div></fieldset>
+    ${sapLdOpts("ctO", true)}<button id="ctR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const at = +q(d, "#ctD").value; if (!(at >= 0 && at <= 1)) { formError(d, "The relative distance is from 0 to 1."); return false; }
+      return sapLdSet(d, "Cable Loads - Target Force", names, q(d, "#ctP").value, q(d, "[name=ctO]:checked").value, [{IncludeP: "Yes", P: sapLdNum(d, "#ctV"), RelLocP: String(at)}]);
+    }), {width: 460});
+  q(d, "#ctR").onclick = () => { q(d, "#ctV").value = "0"; q(d, "#ctD").value = "0.5"; q(d, "[name=ctO][value=replace]").checked = true; };
+  return d;
+}
+// Tendon Force/Stress ("Assign Tendon Load"): Tendon Load (Load Pattern, Jack from this Location, Tendon Load Type
+// Force or Stress, the force or stress), Friction and Anchorage Losses, Other Loss Parameters, Replace or Delete,
+// Show Prestress Losses on Tendon Object..., Reset.
+async function hmSapTendonForce() {
+  const s = await sapLdStart("tendon"); if (!s) return; const {names, defs, u} = s, st = `${u.f}/${u.l}²`;
+  const si = u.f === "kN" && u.l === "m", def = {stress: si ? 1500000 : 0, curv: 0.15, wob: si ? 0.003 : 0, slip: si ? 0.006 : 0, es: 0, cr: si ? 35000 : 0, sh: si ? 48000 : 0, re: si ? 35000 : 0};
+  const jack = [["I-End", "I-End (Start) of Tendon"], ["J-End", "J-End (End) of Tendon"], ["Both Ends", "Both Ends Simultaneously"]];
+  const row = (l, id, v, unit) => `<span>${l}</span><input id="${id}" value="${v}" style="width:95px"><span class="u">${esc(unit)}</span>`;
+  const g = rows => `<div style="display:grid;grid-template-columns:270px 100px 50px;gap:6px 8px;align-items:center">${rows}</div>`;
+  const d = dialog("Assign Tendon Load", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Tendon Load</legend><div style="display:grid;grid-template-columns:170px 205px 50px;gap:6px 8px;align-items:center">
+      <span>Load Pattern</span>${sapLdPat(defs, "tfP").replace('style="width:225px"', 'style="width:200px"')}<span></span>
+      <span>Jack from this Location</span><select id="tfJ" style="width:200px">${opts(jack, "I-End")}</select><span></span>
+      <span>Tendon Load Type</span><select id="tfT" style="width:200px">${opts(["Force", "Stress"], "Force")}</select><span></span>
+      <span id="tfVL">Tendon Force</span><input id="tfV" value="0" style="width:95px;justify-self:end"><span class="u" id="tfVU">${u.f}</span></div></fieldset>
+    <fieldset><legend>Friction and Anchorage Losses</legend>${g(row("Curvature Coefficient", "tfK", def.curv, "") + row("Wobble Coefficient", "tfW", def.wob, `1/${u.l}`) + row("Anchorage Set Slip", "tfA", def.slip, u.l))}</fieldset>
+    <fieldset><legend>Other Loss Parameters</legend><p style="margin:2px 0 8px;font-size:12px">Note:  When tendons are modeled as elements, the Other Loss Parameters (elastic, creep, shrinkage and relaxation losses) apply in addition to the losses computed by analysis.</p>
+      ${g(row("Elastic Shortening Stress", "tfE", def.es, st) + row("Creep Stress", "tfC", def.cr, st) + row("Shrinkage Stress", "tfS", def.sh, st) + row("Steel Relaxation Stress", "tfR2", def.re, st))}</fieldset>
+    ${sapLdOpts("tfO", true)}<button id="tfShow" class="reset" style="width:280px">Show Prestress Losses on Tendon Object...</button><button id="tfR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const t = q(d, "#tfT").value;
+      return sapLdSet(d, "Tendon Loads - Tension Force Or Stress", names, q(d, "#tfP").value, q(d, "[name=tfO]:checked").value, [{LoadType: t, [t === "Stress" ? "Stress" : "Force"]: sapLdNum(d, "#tfV"), JackFrom: q(d, "#tfJ").value,
+        Curvature: sapLdNum(d, "#tfK"), Wobble: sapLdNum(d, "#tfW"), LossAnchor: sapLdNum(d, "#tfA"), LossEShort: sapLdNum(d, "#tfE"), LossCreep: sapLdNum(d, "#tfC"), LossShrink: sapLdNum(d, "#tfS"), LossSRelax: sapLdNum(d, "#tfR2")}]); }), {width: 500});
+  const syncT = () => { const str = q(d, "#tfT").value === "Stress"; q(d, "#tfVL").textContent = str ? "Tendon Stress" : "Tendon Force"; q(d, "#tfVU").textContent = str ? st : u.f; q(d, "#tfV").value = str ? def.stress : 0; };
+  q(d, "#tfT").onchange = syncT;
+  q(d, "#tfShow").onclick = () => sapXSelected("tendon").length ? hmSay("SAP2000 shows the prestress losses of a tendon after the analysis has run (Display > Show Tables).") : hmSay("This command requires at least one tendon object to exist in the model.  The command will be aborted.", true);
+  q(d, "#tfR").onclick = () => { q(d, "#tfJ").value = "I-End"; q(d, "#tfT").value = "Force"; syncT(); [["tfK", def.curv], ["tfW", def.wob], ["tfA", def.slip], ["tfE", def.es], ["tfC", def.cr], ["tfS", def.sh], ["tfR2", def.re]].forEach(([id, v]) => q(d, "#" + id).value = v); q(d, "[name=tfO][value=replace]").checked = true; };
+  return d;
+}
+Object.assign(hmSapAssignForms, {
+  clGravity: () => sapGravityForm("cable"), clDistributed: () => hmSapCableDistributed(), clTemperature: () => sapTempForm("cable"), clStrain: () => sapStrainForm("cable"),
+  clDeformation: () => sapDeformForm("cable"), clTarget: () => hmSapCableTargetForce(),
+  tlGravity: () => sapGravityForm("tendon"), tlForce: () => hmSapTendonForce(), tlTemperature: () => sapTempForm("tendon"), tlStrain: () => sapStrainForm("tendon"), tlDeformation: () => sapDeformForm("tendon"),
+  slGravity: () => sapGravityForm("solid"), slSurface: () => sapSurfacePressure(true), slPore: () => sapPorePressure(true), slTemperature: () => sapTempForm("solid"), slStrain: () => sapStrainForm("solid"),
+  llGravity: () => sapGravityForm("link"),
 });
 
 // Assign > Joint > Restraints (SAP2000 26.3: Restraints in Joint Local Directions, Fast Restraints, OK/Close/Apply).
@@ -8422,9 +8562,91 @@ function hmSapJointPatterns(rows) {
   q(d, "#jpDel").onclick = () => { if (L.value === "Default") return; put(L.value, []).then(j => j.ok ? again() : formError(d, j.error)); };
   return d;
 }
+// ETABS 23.2's Generalized Displacements and Generalized Displacement Definition (pictured GenDispl 1, 2): the name, Type
+// (Translational / Rotational), and the Scale Factors grid typed in place (Joint (Unique Name), U1-U3, R1-R3) with Quick Add
+// Selected Joints, Add and Delete. Kept as "Generalized Displacement Definitions" rows.
+function hmEtabsGenDispl(all) {
+  const T = "Generalized Displacement Definitions", dofs = ["U1", "U2", "U3", "R1", "R2", "R3"], u = hmU();
+  const names = [...new Set(all.map(r => r.Name))];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDefineTable(T); };
+  const one = n => {
+    const mine = all.filter(r => r.Name === n), rot = mine.length && /^rot/i.test(mine[0].Type || ""), pre = rot ? "Rot" : "Trans";
+    let rows = mine.map(r => [r.PointName || "", ...dofs.map(k => String(+(r[pre + k + "SF"] || 0)))]), at = -1;
+    let k = 1; while (names.includes("GDisp" + k)) k++;
+    const d = dialog("Generalized Displacement Definition", `<div style="display:grid;grid-template-columns:1fr 250px;gap:10px"><fieldset style="margin:0"><div style="display:grid;grid-template-columns:1fr 190px;align-items:center;padding:10px 8px"><span>Generalized Displacement Name</span><input id="gN" value="${esc(n || "GDisp" + k)}"></div></fieldset>
+        <fieldset style="margin:0"><legend>Type</legend><label style="margin-right:30px"><input type="radio" name="gT" value="Translational" ${rot ? "" : "checked"}> Translational</label><label><input type="radio" name="gT" value="Rotational" ${rot ? "checked" : ""}> Rotational</label></fieldset></div>
+      <fieldset style="margin-top:8px"><legend>Scale Factors</legend><div style="height:220px;overflow:auto;border:2px solid #333;background:#a0a0a0"><table class="grid ly" id="gG" style="width:100%"><thead><tr id="gH"></tr></thead><tbody></tbody></table></div>
+        <div style="display:flex;gap:10px;margin-top:10px"><button id="gQ" style="width:200px;margin-left:30px">Quick Add Selected Joints</button><span style="flex:1"></span><button id="gAdd" style="width:64px">Add</button><button id="gDel" style="width:64px;margin-right:30px">Delete</button></div></fieldset>`,
+      [["OK", async d => {
+        read();
+        const name = q(d, "#gN").value.trim(); if (!name) { formError(d, "Give it a name."); return false; }
+        if (rows.some(r => !r[0])) { formError(d, "Each row needs its joint."); return false; }
+        const p = q(d, "[name=gT]:checked").value === "Rotational" ? "Rot" : "Trans", other = p === "Rot" ? "Trans" : "Rot";
+        const out = rows.map(r => Object.assign({Type: p === "Rot" ? "Rotational" : "Translational", PointName: r[0]}, ...dofs.map((x, i) => ({[p + x + "SF"]: String(+r[i + 1] || 0), [other + x + "SF"]: "0"}))));
+        if (n && n !== name) { const j0 = await hmRun("define_table_rows", {table: T, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+        const j = await hmRun("define_table_rows", {table: T, name, rows: out}, true); if (!j.ok) { formError(d, j.error); return false; }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 780});
+    const body = q(d, "#gG tbody");
+    const read = () => { rows = [...body.querySelectorAll("tr")].map(tr => [...tr.querySelectorAll("input")].map(i => i.value.trim())); };
+    const paint = () => {
+      const r = q(d, "[name=gT]:checked").value === "Rotational";
+      q(d, "#gH").innerHTML = `<th>Joint<br>(Unique Name)</th>` + dofs.map(x => `<th>${x}<br>${x[0] === "R" ? (r ? "" : `${u.l}/rad`) : (r ? `rad/${u.l}` : "")}</th>`).join("");
+      body.innerHTML = rows.map((row, i) => `<tr style="background:#fff;${i === at ? "outline:2px solid #3399ff" : ""}">${row.map((x, j) => `<td><input data-i="${i}" ${j ? 'type="number" step="any" style="text-align:center"' : ""} value="${esc(x)}"></td>`).join("")}</tr>`).join("");
+      body.querySelectorAll("input").forEach(x => { x.onfocus = () => { at = +x.dataset.i; body.querySelectorAll("tr").forEach((t, j) => t.style.outline = j === at ? "2px solid #3399ff" : ""); q(d, "#gDel").disabled = false; }; x.onchange = read; });
+      q(d, "#gDel").disabled = at < 0; q(d, "#gQ").disabled = !selJ.size;
+    };
+    q(d, "#gAdd").onclick = () => { read(); rows.push(["", "0", "0", "0", "0", "0", "0"]); at = rows.length - 1; paint(); };
+    q(d, "#gDel").onclick = () => { read(); if (at < 0) return; rows.splice(at, 1); at = -1; paint(); };
+    q(d, "#gQ").onclick = () => { read(); for (const j of selJ) if (!rows.some(r => r[0] === j)) rows.push([j, "0", "0", "0", "0", "0", "0"]); paint(); };
+    d.querySelectorAll("[name=gT]").forEach(r => r.onchange = () => { read(); paint(); });
+    paint();
+    return d;
+  };
+  const d = listForm("Generalized Displacements", "Generalized Displs", names, [["Add New Gen Displ...", () => one(null)], ["Modify/Show Gen Displ...", n => n && one(n)], ["Delete Gen Displ", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}).then(j => j.ok && again())]], n => one(n));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !names.length;
+  return d;
+}
+// ETABS 23.2's Shell Uniform Load Sets and Shell Uniform Load Set Data (pictured ShellLoadSets 1-3): Uniform Load Set Name,
+// Load Set Loads (Load Pattern, Load Value in force per area, in the gravity direction) with Add and Delete.
+async function hmEtabsLoadSets(all) {
+  const T = "Shell Uniform Load Sets", u = hmU(), defs = await hmDefs(), pats = defs.load_patterns.map(p => p.name);
+  const names = [...new Set(all.map(r => r.Name))];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDefineTable(T); };
+  const one = (n, copy) => {
+    let rows = all.filter(r => r.Name === n).map(r => [r.LoadPattern || pats[0], r.LoadValue || "0"]), at = rows.length ? 0 : -1;
+    let k = 1; while (names.includes("ULoadSet" + k)) k++;
+    const d = dialog("Shell Uniform Load Set Data", `<fieldset><div style="display:grid;grid-template-columns:150px 1fr;align-items:center;padding:6px"><span>Uniform Load Set Name</span><input id="lsN" value="${esc(n && !copy ? n : n ? n + " copy" : "ULoadSet" + k)}"></div></fieldset>
+      <fieldset><legend>Load Set Loads</legend><div style="display:grid;grid-template-columns:1fr 70px;gap:10px"><div style="height:150px;overflow:auto;border:1px solid #333;background:#fff"><table class="grid ly" id="lsG" style="width:100%"><thead><tr><th>Load Pattern</th><th>Load Value<br>(${esc(u.f)}/${esc(u.l)}²)</th></tr></thead><tbody></tbody></table></div>
+        <div style="display:flex;flex-direction:column;gap:6px;padding-top:20px"><button id="lsA">Add</button><button id="lsD">Delete</button></div></div>
+        <div style="margin-top:8px">Note:  Loads are in the gravity direction.</div></fieldset>`,
+      [["OK", async d => {
+        read(); const name = q(d, "#lsN").value.trim(); if (!name) { formError(d, "Give the load set a name."); return false; }
+        if (n && !copy && n !== name) { const j0 = await hmRun("define_table_rows", {table: T, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+        const j = await hmRun("define_table_rows", {table: T, name, rows: rows.map(r => ({LoadPattern: r[0], LoadValue: String(+r[1] || 0)}))}, true); if (!j.ok) { formError(d, j.error); return false; }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 380});
+    const body = q(d, "#lsG tbody");
+    const read = () => { rows = [...body.querySelectorAll("tr")].map(tr => [tr.querySelector("select").value, tr.querySelector("input").value]); };
+    const paint = () => {
+      body.innerHTML = rows.map((r, i) => `<tr><td style="${i === at ? "background:#0078d7" : ""}"><select data-i="${i}" style="text-align:center;${i === at ? "color:#fff" : ""}">${opts(pats, r[0])}</select></td><td><input data-i="${i}" type="number" step="any" style="text-align:center" value="${esc(r[1])}"></td></tr>`).join("");
+      body.querySelectorAll("[data-i]").forEach(x => { x.onfocus = () => { if (at !== +x.dataset.i) { read(); at = +x.dataset.i; paint(); } }; x.onchange = read; });
+      q(d, "#lsD").disabled = at < 0;
+    };
+    q(d, "#lsA").onclick = () => { read(); rows.push([pats.find(p => !rows.some(r => r[0] === p)) || pats[0], "0"]); at = rows.length - 1; paint(); };
+    q(d, "#lsD").onclick = () => { read(); if (at < 0) return; rows.splice(at, 1); at = Math.min(at, rows.length - 1); paint(); };
+    paint();
+    return d;
+  };
+  const d = listForm("Shell Uniform Load Sets", "Uniform Load Sets", names, [["Add New Load Set...", () => one(null)], ["Add Copy of Load Set...", n => n && one(n, true)], ["Modify/Show Load Set...", n => n && one(n)], ["Delete Load Set", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}).then(j => j.ok && again())]], n => one(n));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = b[3].disabled = !names.length;
+  return d;
+}
 async function hmDefineTable(spec) {
   const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000" && spec === "Generalized Displacement Definitions" && dd.tables[spec]) return hmSapGenDispl(dd.tables[spec].rows);
+  if (program === "etabs" && spec === "Generalized Displacement Definitions") return hmEtabsGenDispl((dd.tables[spec] || {rows: []}).rows);
+  if (program === "etabs" && spec === "Shell Uniform Load Sets") return hmEtabsLoadSets((dd.tables[spec] || {rows: []}).rows);
   if (program === "sap2000" && spec === "Joint Pattern Definitions" && dd.tables[spec]) return hmSapJointPatterns(dd.tables[spec].rows);
   if (program === "sap2000" && spec === "Cable Section Definitions" && dd.tables[spec]) return hmSapRodSections("cable", null, dd);
   if (program === "sap2000" && spec === "Solid Property Definitions" && dd.tables[spec]) return hmSapRodSections("solid", null, dd);
@@ -8487,9 +8709,21 @@ function hmSapRebarSizes(was) {
   paint();
   return d;
 }
+// Reinforcing Bar Sizes, as ETABS 23.2 has it (pictured Rebar 1, 2): the Current Bar Set grid (Bar ID, Bar Area, Bar
+// Diameter; type in the blank last row to add a bar), Click To: Clear All Bars, Sort Bars By ID, Add Common Bar Set...
+// (Select Common Rebar Set). OK sets the model's bars to the grid.
+const commonBarSets = {
+  "U.S. Customary": ["in", [["#2", .05, .25], ["#3", .11, .375], ["#4", .2, .5], ["#5", .31, .625], ["#6", .44, .75], ["#7", .6, .875], ["#8", .79, 1], ["#9", 1, 1.128], ["#10", 1.27, 1.27], ["#11", 1.56, 1.41], ["#14", 2.25, 1.693], ["#18", 4, 2.257]]],
+  "SI": ["mm", [6, 8, 10, 12, 14, 16, 18, 20, 22, 25, 28, 32, 36, 40, 50].map(x => [String(x), +(Math.PI * x * x / 4).toFixed(1), x])],
+  "Canadian": ["mm", [["10M", 100, 11.3], ["15M", 200, 16], ["20M", 300, 19.5], ["25M", 500, 25.2], ["30M", 700, 29.9], ["35M", 1000, 35.7], ["45M", 1500, 43.7], ["55M", 2500, 56.4]]],
+  "U.S. Soft Metric": ["mm", [["#10", 71, 9.5], ["#13", 129, 12.7], ["#16", 199, 15.9], ["#19", 284, 19.1], ["#22", 387, 22.2], ["#25", 510, 25.4], ["#29", 645, 28.7], ["#32", 819, 32.3], ["#36", 1006, 35.8], ["#43", 1452, 43], ["#57", 2581, 57.3]]],
+  "Australian": ["mm", [["N10", 80, 10], ["N12", 110, 12], ["N16", 200, 16], ["N20", 310, 20], ["N24", 450, 24], ["N28", 620, 28], ["N32", 800, 32], ["N36", 1020, 36], ["N40", 1260, 40]]],
+  "Korean": ["mm", [["D10", 71.33, 9.53], ["D13", 126.7, 12.7], ["D16", 198.6, 15.9], ["D19", 286.5, 19.1], ["D22", 387.1, 22.2], ["D25", 506.7, 25.4], ["D29", 642.4, 28.6], ["D32", 794.2, 31.8], ["D35", 956.6, 34.9], ["D38", 1140, 38.1], ["D41", 1340, 41.3], ["D51", 2027, 50.8]]],
+};
 async function hmRebarSizes() {
   const dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000") return hmSapRebarSizes(dd.rebar_sizes || []);
+  if (program === "etabs") return hmEtabsRebarSizes(dd.rebar_sizes || []);
   const u = hmU();
   const d = dialog("Reinforcing Bar Sizes", `<table class="list hmgrid"><tr><th>Bar ID</th><th>Area${u.l ? " (" + esc(u.l) + "²)" : ""}</th><th>Diameter${u.l ? " (" + esc(u.l) + ")" : ""}</th><th></th></tr>
     <tr class="edit"><td><input id="rbN"></td><td><input id="rbA" type="number" step="any"></td><td><input id="rbD" type="number" step="any"></td><td><button id="rbAdd">Add / Modify</button></td></tr>
@@ -8499,6 +8733,37 @@ async function hmRebarSizes() {
   d.querySelectorAll("[data-b]").forEach(tr => tr.onclick = () => { const b = dd.rebar_sizes.find(x => x.name === tr.dataset.b); q(d, "#rbN").value = b.name; q(d, "#rbA").value = b.area; q(d, "#rbD").value = b.diameter; });
   d.querySelectorAll("[data-del]").forEach(b => b.onclick = e => { e.stopPropagation(); hmRun("define_rebar_size", {name: b.dataset.del, delete: true}).then(j => j.ok ? again() : formError(d, j.error)); });
   q(d, "#rbAdd").onclick = () => hmRun("define_rebar_size", {name: q(d, "#rbN").value.trim(), area: fnum(d, "#rbA"), diameter: fnum(d, "#rbD")}).then(j => j.ok ? again() : formError(d, j.error));
+}
+function hmEtabsRebarSizes(now) {
+  const u = hmU(), n = x => +(+x).toPrecision(6);
+  let bars = now.map(b => [b.name, String(n(b.area)), String(n(b.diameter))]);
+  const d = dialog("Reinforcing Bar Sizes", `<div style="display:grid;grid-template-columns:1fr 170px;gap:12px"><fieldset style="margin:0"><legend>Current Bar Set</legend>
+      <div style="height:230px;overflow:auto;border:1px solid #888;background:#fff"><table class="grid ly" id="rbG"><thead><tr><th style="width:24px"></th><th>Bar ID</th><th>Bar Area&nbsp; (${esc(u.l)}2)</th><th>Bar Diameter&nbsp; (${esc(u.l)})</th></tr></thead><tbody></tbody></table></div></fieldset>
+    <div id="rbR"><fieldset style="margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="rbClr">Clear All Bars</button><button id="rbSort">Sort Bars By ID</button><button id="rbCom">Add Common Bar Set...</button></div></fieldset></div></div>`,
+    [["OK", d => save(d), true], ["Cancel"]], {width: 640});
+  dfInto(d, "#rbR");
+  const body = q(d, "#rbG tbody");
+  const read = () => { bars = [...body.querySelectorAll("tr")].map(tr => [...tr.querySelectorAll("input")].map(i => i.value.trim())).filter(r => r.some(x => x !== "")); };
+  const paint = () => {
+    body.innerHTML = [...bars, ["", "", ""]].map((b, i) => `<tr><td style="background:#eee;text-align:center">${i < bars.length ? "" : "*"}</td>${b.map((x, k) => `<td><input ${k ? 'type="number" step="any" style="text-align:center"' : 'style="text-align:center"'} value="${esc(x)}"></td>`).join("")}</tr>`).join("");
+    body.querySelectorAll("input").forEach(i => { i.onchange = () => { read(); paint(); }; i.onfocus = () => body.querySelectorAll("tr").forEach(tr => tr.firstChild.textContent = tr.contains(i) ? "\u25B6" : tr === body.lastChild ? "*" : ""); });
+  };
+  q(d, "#rbClr").onclick = () => { bars = []; paint(); };
+  q(d, "#rbSort").onclick = () => { read(); bars.sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})); paint(); };
+  q(d, "#rbCom").onclick = () => dialog("Select Common Rebar Set", `<fieldset><legend>Select</legend><select id="crS" size="14" style="width:100%;height:240px">${Object.keys(commonBarSets).map((k, i) => `<option ${i ? "" : "selected"}>${esc(k)}</option>`).join("")}</select></fieldset>`,
+    [["OK", x => { read(); const [from, set] = commonBarSets[q(x, "#crS").value]; const f = (uLen[u.l] || 1) / (from === "in" ? 39.37008 : 1000);
+      for (const [id, a, di] of set) if (!bars.some(b => b[0] === id)) bars.push([id, String(n(a * f * f)), String(n(di * f))]); paint(); }], ["Cancel"]], {width: 240});
+  async function save(d) {
+    read();
+    const ids = new Set();
+    for (const [id, a, di] of bars) { if (!id || !(+a > 0) || !(+di > 0)) { formError(d, "Each bar needs a Bar ID, an area above 0 and a diameter above 0."); return false; } if (ids.has(id)) { formError(d, "There is a bar " + id + " twice."); return false; } ids.add(id); }
+    for (const b of now) if (!ids.has(b.name)) { const j = await hmRun("define_rebar_size", {name: b.name, delete: true}, true); if (!j.ok) { formError(d, j.error); return false; } }
+    for (const [id, a, di] of bars) { const was = now.find(b => b.name === id); if (was && Math.abs(was.area - a) < 1e-9 * Math.max(1, +a) && Math.abs(was.diameter - di) < 1e-9 * Math.max(1, +di)) continue;
+      const j = await hmRun("define_rebar_size", {name: id, area: +a, diameter: +di}, true); if (!j.ok) { formError(d, j.error); return false; } }
+    hmSay("Reinforcing bar sizes set."); return true;
+  }
+  paint();
+  return d;
 }
 const rebarFields = {
   Column: [["LONGBARMATERIAL", "Longitudinal Bars Material"], ["CONFINEBARMATERIAL", "Confinement Bars Material"], ["PATTERN", "Pattern (R-bars along 3-bars along 2, or C-bars)"], ["TRANSREINF", "Confinement Bars"], ["DESIGNCHECK", "Check/Design"],
@@ -11660,14 +11925,14 @@ async function hmStructure(kind) {
     const one = d0 => dialog("Diaphragm Data", `<div class="g2"><span>Diaphragm</span><input id="zN" value="${esc(d0 ? d0.name : "D" + (sd.diaphragms.length + 1))}" ${d0 ? "disabled" : ""}></div>
       <fieldset><legend>Rigidity</legend><label style="display:block"><input type="radio" name="zR" value="rigid" ${d0 && d0.semi_rigid ? "" : "checked"}> Rigid</label><label style="display:block"><input type="radio" name="zR" value="semi" ${d0 && d0.semi_rigid ? "checked" : ""}> Semi Rigid</label></fieldset>`,
       [["OK", d => submit(d, "define_diaphragm", {name: q(d, "#zN").value.trim(), semi_rigid: q(d, "[name=zR]:checked").value === "semi"}, again)], ["Cancel"]], {width: 340});
-    return listForm("Define Diaphragm", "Diaphragms", sd.diaphragms.map(x => x.name), [["Add New Diaphragm...", () => one(null)], ["Modify/Show Diaphragm...", n => n && one(sd.diaphragms.find(x => x.name === n))], ["Delete Diaphragm", n => n && del("define_diaphragm", {name: n})]], n => one(sd.diaphragms.find(x => x.name === n)));
+    return listForm("Define Diaphragm", "Diaphragms", sd.diaphragms.map(x => x.name), [[program === "etabs" ? "Add New Diaphragm" : "Add New Diaphragm...", () => one(null)], [program === "etabs" ? "Modify/Show Diaphragm" : "Modify/Show Diaphragm...", n => n && one(sd.diaphragms.find(x => x.name === n))], ["Delete Diaphragm", n => n && del("define_diaphragm", {name: n})]], n => one(sd.diaphragms.find(x => x.name === n)));
   }
   if (kind === "pier" || kind === "spandrel") {
     const list = kind === "pier" ? sd.piers : sd.spandrels, T = kind === "pier" ? "Pier" : "Spandrel";
-    const d = dialog(`${T} Labels`, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${T}s</legend>
+    const d = dialog(`${T} Labels`, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${program === "etabs" ? "Wall " : ""}${T}s</legend>
         <input id="zN" style="width:100%;margin-bottom:6px" value="${esc((list[0] || {}).name || (kind === "pier" ? "P1" : "S1"))}">
         <select id="zL" size="12" style="width:100%;height:auto">${list.map(x => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select>
-        ${kind === "spandrel" ? `<label style="display:block;margin-top:6px"><input type="checkbox" id="zM"> Multi-Story Spandrel</label>` : ""}</fieldset>
+        ${kind === "spandrel" ? `<label style="display:block;margin-top:6px"><input type="checkbox" id="zM"> ${program === "etabs" ? "Multistory" : "Multi-Story Spandrel"}</label>` : ""}</fieldset>
       <fieldset style="width:170px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="zAdd">Add New Name</button><button id="zRen">Change Name</button><button id="zDel">Delete Name</button></div></fieldset></div>`,
       [["OK"], ["Cancel"]], {width: 440});
     const L = q(d, "#zL"); if (list.length) L.selectedIndex = 0;
@@ -11706,6 +11971,35 @@ async function hmStructure(kind) {
       const st = () => { delB.disabled = !L.value || L.value === "ALL"; }; L.addEventListener("change", st); st();
       return d;
     }
+    // ETABS 23.2's Define Groups (pictured Groups 1, 2): a grid of Group Name and Color, typed in place, with Add and Delete;
+    // All is always there and cannot be deleted. OK adds, renames, recolours and deletes as the grid says.
+    if (program === "etabs") {
+      let rows = sd.groups.map(g => ({name: g.name, was: g.name, color: g.color})), sel = 0;
+      if (!rows.some(r => /^all$/i.test(r.name))) rows.unshift({name: "All", was: "All", color: "Yellow", fixed: true});
+      const d = dialog("Define Groups", `<fieldset style="margin:0"><legend>Groups</legend><div style="display:grid;grid-template-columns:180px 80px;gap:12px">
+          <div style="height:170px;overflow:auto;border:1px solid #888;background:#fff"><table class="grid ly" id="gG"><thead><tr><th style="text-align:left">Group Name</th><th style="width:40px">Color</th></tr></thead><tbody></tbody></table></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><button id="gA">Add</button><button id="gD">Delete</button></div></div></fieldset>`,
+        [["OK", async d => {
+          const names = rows.map(r => r.name.trim());
+          if (names.some(n => !n)) { formError(d, "Each group needs a name."); return false; }
+          if (new Set(names.map(n => n.toLowerCase())).size !== names.length) { formError(d, "Two groups have the same name."); return false; }
+          for (const g of sd.groups) if (!rows.some(r => r.was === g.name)) { const j = await hmRun("define_group", {name: g.name, delete: true}, true); if (!j.ok) { formError(d, j.error); return false; } }
+          for (const r of rows) { const g = sd.groups.find(x => x.name === r.was); if (g && g.name === r.name.trim() && g.color === r.color) continue; if (!g && r.fixed) continue;
+            const j = await hmRun("define_group", Object.assign({name: r.name.trim(), color: r.color}, g && g.name !== r.name.trim() ? {was: g.name} : {}), true); if (!j.ok) { formError(d, j.error); return false; } }
+          if (hm.defs) hm.defs = null; return true;
+        }, true], ["Cancel"]], {width: 330});
+      const body = q(d, "#gG tbody");
+      const paint = () => {
+        body.innerHTML = rows.map((r, i) => `<tr style="${i === sel ? "background:#0078d7;color:#fff" : ""}"><td><input data-i="${i}" value="${esc(r.name)}" ${r.fixed || /^all$/i.test(r.was || "") ? "readonly" : ""} style="${i === sel ? "background:#0078d7;color:#fff" : ""}"></td><td data-c="${i}" style="background:${matColorCss(r.color)};cursor:pointer"></td></tr>`).join("");
+        body.querySelectorAll("input").forEach(x => { x.onfocus = () => { if (sel !== +x.dataset.i) { sel = +x.dataset.i; paint(); body.querySelector(`input[data-i="${sel}"]`).focus(); } }; x.onchange = () => { rows[+x.dataset.i].name = x.value; }; });
+        body.querySelectorAll("[data-c]").forEach(c => c.onclick = () => { sel = +c.dataset.c; hmColor(rows[sel].color, k => { rows[sel].color = k; paint(); }); });
+        q(d, "#gD").disabled = !rows[sel] || rows[sel].fixed || /^all$/i.test(rows[sel].was || "");
+      };
+      q(d, "#gA").onclick = () => { let i = 1; while (rows.some(r => r.name.toLowerCase() === "group" + i)) i++; rows.push({name: "Group" + i, color: sd.colors[(rows.length + 1) % sd.colors.length] || "Red"}); sel = rows.length - 1; paint(); };
+      q(d, "#gD").onclick = () => { if (q(d, "#gD").disabled) return; rows.splice(sel, 1); sel = Math.max(0, sel - 1); paint(); };
+      paint();
+      return d;
+    }
     // ETABS's Group Definitions have Steel / Concrete / Composite design; SAP2000's Groups 1 - Definitions every use.
     const usesFor = sapX ? [["Selection", "Selection"], ["SectionCut", "Section Cut Definition"], ["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Aluminum", "Aluminum Design"], ["ColdFormed", "Cold Formed Design"], ["Stage", "Staged Construction"], ["Bridge", "Bridge Response Output"], ["AutoSeismic", "Auto Seismic Output"], ["AutoWind", "Auto Wind Output"], ["MassWeight", "Mass and Weight"]]
       : [["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Composite", "Composite Beam Design"]];
@@ -11719,6 +12013,7 @@ async function hmStructure(kind) {
   }
   const one = c => {
     if (sapX) return hmSapSectionCut(sd, c, again);
+    if (program === "etabs") return hmEtabsSectionCut(sd, c, again);
     const o = (c && c.options) || {}, user = /^user/i.test(o.ResultLoc || "");
     const d = dialog("Section Cut Data", `<div class="g2"><span>Section Cut Name</span><input id="zN" value="${esc(c ? c.name : "SCut" + (sd.section_cuts.length + 1))}" ${c ? "disabled" : ""}></div>
       <fieldset><legend>Define Section Cut By</legend><label style="display:inline-block;margin-right:14px"><input type="radio" name="zB" checked> Group</label><label style="display:inline-block"><input type="radio" name="zB" disabled> Quadrilaterals</label>
@@ -11733,6 +12028,30 @@ async function hmStructure(kind) {
     return d;
   };
   return listForm("Section Cuts", "Section Cuts", sd.section_cuts.map(x => x.name), [["Add Section Cut...", () => one(null)], ["Modify/Show Section Cut...", n => n && one(sd.section_cuts.find(x => x.name === n))], ["Delete Section Cut", n => n && del("define_section_cut", {name: n})]], n => one(sd.section_cuts.find(x => x.name === n)));
+}
+// ETABS 23.2's Section Cut Data (pictured Section Cuts 2, 3): SAP2000's form without its Edit menu, Coordinate System,
+// Units and Advanced Axes; the boxes that do not apply are greyed, not hidden, and the side reported is Top or Bottom.
+function hmEtabsSectionCut(sd, c, again) {
+  const d = hmSapSectionCut(sd, c, again);
+  const hide = el => { if (el) el.style.display = "none"; };
+  hide(d.querySelector(".sapMenu")); hide(q(d, "#zCs") && q(d, "#zCs").closest("fieldset").parentElement);
+  hide(q(d, "#zAdv") && q(d, "#zAdv").closest("div"));
+  q(d, "#zQuad").parentElement.id = "zRight"; dfInto(d, "#zRight");
+  if (!c) q(d, "#zN").value = (() => { let i = 1; while (sd.section_cuts.some(x => x.name === "SCut" + i)) i++; return "SCut" + i; })();
+  d.querySelectorAll("#zAxA span").forEach(s => { s.textContent = s.textContent.replace("about  Y", "about  Y'").replace("about  X", "about  X''").replace("about  Z", "about  Z"); });
+  const sq = d.querySelectorAll("[name=zSd]"), side = (c && c.options && c.options.ElemSide) || "Top";
+  sq.forEach((r, i) => { r.value = i ? "Bottom" : "Top"; r.checked = i ? /^bot/i.test(side) : !/^bot/i.test(side); r.parentElement.lastChild.textContent = i ? " Bottom" : " Top"; });
+  const sideFs = q(d, "#zSide"), quadFs = q(d, "#zQuad");
+  if (sideFs) sideFs.insertAdjacentHTML("beforeend", `<div id="zNA" class="kv" style="text-align:center;padding:10px 0">Not applicable for selected options.</div>`);
+  const grey = (fs, off) => { if (!fs) return; fs.style.display = ""; fs.style.color = off ? "#999" : ""; fs.querySelectorAll("input,button").forEach(x => x.disabled = off); };
+  const sync = () => {
+    const qd = (d.querySelector("[name=zB]:checked") || {}).value === "Quadrilateral", des = (d.querySelector("[name=zT]:checked") || {}).value === "Design";
+    grey(quadFs, !qd); if (sideFs) { sideFs.style.display = ""; sideFs.style.color = qd || des ? "" : "#999"; }
+    q(d, "#zSq").style.display = qd ? "" : "none"; q(d, "#zSt").style.display = !qd && des ? "" : "none"; q(d, "#zNA").style.display = qd || des ? "none" : "";
+    const usr = (d.querySelector("[name=zLc]:checked") || {}).value === "1"; ["#zX", "#zY", "#zZ"].forEach(x => q(d, x).disabled = !usr);
+  };
+  d.querySelectorAll("input[type=radio]").forEach(r => r.addEventListener("change", sync)); sync();
+  return d;
 }
 // SAP2000 26.3's Section Cut Data: Edit menu (Copy/Paste), Coordinate System and Units, Defined By Group or Quadrilateral
 // Cutting Planes, Result Type, location, and the local axes (Analysis: rotations and Advanced Axes; Design: Wall/Spandrel/Slab).
@@ -12521,6 +12840,7 @@ async function fnCodes() {
 }
 async function hmFunctions(kind) {
   if (program === "sap2000") return hmSapFunctions(kind);
+  if (program === "etabs") return hmEtabsFunctions(kind);
   const spectrum = kind === "spectrum", a = await hmAnalysis(), list = a.functions.filter(f => f.kind === kind), codes = spectrum ? await fnCodes() : [];
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFunctions(kind); };
   const types = fnTypes(spectrum, codes.map(c => c.code));
@@ -13053,8 +13373,9 @@ const sapMatch = {
     return {th: cur.map((v, i) => [rec[i][0], Math.round(v * 1e7) / 1e7]), spec: spec.map((T, i) => [T, matched[i]]), specRef: spec.map((T, i) => [T, before[i]]), f1, f2};
   },
 };
-async function hmSapMatched(f, after, a) {
-  const vals = f && f.sap_values || {}, name = f ? f.name : await sapNewName();
+async function hmSapMatched(f, after, a, io) {
+  // io: ETABS's form of it (its table and field names, its own new names, User and the (i) marks); none for SAP2000.
+  const vals = io ? io.vals(f) : f && f.sap_values || {}, name = f ? f.name : await (io ? io.newName() : sapNewName());
   const rsList = a.functions.filter(x => x.kind === "spectrum"), thList = a.functions.filter(x => x.kind === "history" && (!f || x.name !== f.name));
   const accU = ["g Units", `${(P.model.units && P.model.units.length) || "m"}/sec^2`];
   let opt = {method: /time/i.test(vals.SpecMatchMethod || "") ? "Time" : "Frequency", range: /user/i.test(vals.FreqRangeOption || "") ? "User" : "Program", f1: RS.n(vals.FreqF1), f2: RS.n(vals.FreqF2), recur: RS.n(vals.nRecur) || 5, factor: RS.n(vals.RecurFact) || 2};
@@ -13101,10 +13422,10 @@ async function hmSapMatched(f, after, a) {
   q(d, "#sfSet").onclick = () => {
     const tm = pick("sfMM") === "Time";
     const s = dialog("Parameters for Response Spectrum Matching", `<fieldset><legend>Frequency Range Options for Scaling</legend>
-      <label><input type="radio" name="sfFR" value="Program" ${opt.range !== "User" ? "checked" : ""}> Program Determined Frequency Range</label><br>
-      <label><input type="radio" name="sfFR" value="User" ${opt.range === "User" ? "checked" : ""}> User Defined Frequency Range</label>
+      <label><input type="radio" name="sfFR" value="Program" ${opt.range !== "User" ? "checked" : ""}> Program Determined Frequency Range</label>${io ? ` <span title="The range is worked out from the target spectrum and the record's time step">&#9432;</span>` : ""}<br>
+      <label><input type="radio" name="sfFR" value="User" ${opt.range === "User" ? "checked" : ""}> User Defined Frequency Range</label>${io ? ` <span title="Only frequencies from f1 to f2 are scaled">&#9432;</span>` : ""}
       <div class="g2" style="grid-template-columns:auto 90px auto;margin-left:20px"><span>Frequency, f1</span><input id="sfF1" value="${isFinite(opt.f1) ? opt.f1 : ""}"><span>cyc/sec</span><span>Frequency, f2</span><input id="sfF2" value="${isFinite(opt.f2) ? opt.f2 : ""}"><span>cyc/sec</span></div></fieldset>
-      ${tm ? `<fieldset><legend>Time Domain Spectral Matching Parameters</legend><div class="g2" style="grid-template-columns:1fr 90px"><span>Number of Recursions</span><input id="sfNR" value="${opt.recur}"><span>Recursion Factor</span><input id="sfRF" value="${opt.factor}"></div></fieldset>` : ""}`,
+      ${tm ? `<fieldset><legend>Time Domain Spectral Matching Parameters</legend><div class="g2" style="grid-template-columns:1fr 90px"><span>Number of Recursions</span><input id="sfNR" value="${opt.recur}"><span>Recursion Factor${io ? ` <span title="Each pass's correction is raised to 1/Recursion Factor, so the record changes gently">&#9432;</span>` : ""}</span><input id="sfRF" value="${opt.factor}"></div></fieldset>` : ""}`,
       [["OK", x => { const r = (x.querySelector("[name=sfFR]:checked") || {}).value, f1 = RS.n(q(x, "#sfF1").value), f2 = RS.n(q(x, "#sfF2").value);
         if (r === "User" && !(f1 > 0 && f2 > f1)) { formError(x, "f1 is above 0 and f2 above f1."); return false; }
         opt = {...opt, range: r, f1, f2}; if (tm) { const nr = Math.round(RS.n(q(x, "#sfNR").value)), rf = RS.n(q(x, "#sfRF").value); if (!(nr >= 1 && rf >= 1)) { formError(x, "The recursions are 1 or more and the factor 1 or more."); return false; } opt.recur = nr; opt.factor = rf; } }], ["Cancel"]], {width: 360});
@@ -13123,9 +13444,10 @@ async function hmSapMatched(f, after, a) {
   const save = () => { if (!result) return; const sv = {TargetRS: q(d, "#sfTR").value || "Program Default", RSAccUnits: q(d, "#sfRU").value, RefAccTH: q(d, "#sfRT").value || "Program Default", RefTHAccUnits: q(d, "#sfTU").value,
       SpecMatchMethod: pick("sfMM") === "Time" ? "Time Domain" : "Frequency Domain", FreqRangeOption: opt.range === "User" ? "User Defined" : "Program Determined", nRecur: String(opt.recur), RecurFact: String(opt.factor)};
     if (opt.range === "User") { sv.FreqF1 = String(opt.f1); sv.FreqF2 = String(opt.f2); }
+    if (io) return io.save(d, f, sv, result.th, after);
     sapSave(d, "history", f, {from: "points", points: result.th, sap_table: "Function - Time History - Matched to Response Spectrum", sap_values: sv}, after); };
   q(d, "#sfOK").onclick = save; q(d, "#sfCan").onclick = () => d.close();
-  q(d, "#sfConv").onclick = () => { if (!result) return; const nm = q(d, "#sfN").value.trim(); d.close(); hmSapUser("history", {name: nm, points: result.th, was: f && f.name}, after); };
+  q(d, "#sfConv").onclick = () => { if (!result) return; const nm = q(d, "#sfN").value.trim(); d.close(); if (io) return io.user(nm, result.th, f && f.name, after); hmSapUser("history", {name: nm, points: result.th, was: f && f.name}, after); };
   go();
 }
 // Helpers of the SAP2000 response spectrum code forms (SAP_RS calc).
@@ -14754,6 +15076,579 @@ SAP_RS["Venezuela COVENIN 1756-2:2019"] = {
     "correction factor 0.65-1.00, use A/B1/B2; field texts guessed as shown. Grid past 1.5 s is a guess.",
 };
 
+// ==== ETABS 23.2 Define > Functions, as ETABS shows them (Ahmed 2026-11-27: identical forms, no greyed or missing option,
+// every button working as in ETABS). Read from ETABS 23.2's own forms (pictures in field/reference-forms/etabs/Define/
+// Functions/): Define Response Spectrum Functions (every code of its type list, From File, User) and Define Time History
+// Functions (From File, User, Sine, Cosine, Ramp, Sawtooth, Triangular, User Periodic, Matched to Response Spectrum). Each
+// function keeps ETABS's own table and fields (define_function etabs_table/etabs_values), so it goes back to ETABS as that
+// code or type with every parameter. A code's spectrum is worked out by the same calculation as SAP2000's form of that
+// code (SAP_RS), its parameters renamed to ETABS's fields; each was checked against the points ETABS lists in the pictures.
+const etFolderDefault = "C:\\Program Files\\Computers and Structures\\ETABS 23\\";
+const etFnFolder = () => { try { return localStorage.getItem("cpm.etFnFolder") || etFolderDefault; } catch (e) { return etFolderDefault; } };
+// ETABS's "Choose Function Type to Add" lists, in its order.
+const etRsOrder = ["ASCE7-10", "ASCE7-16", "ASCE7-22", "Chile Norma NCh2369-2003", "Chile Norma NCh433+DS61", "Chinese2010", "Colombia NSR-10", "Costa Rica Seismic Code 2010",
+  "Dominican Republic R-001", "Ecuador NEC-11 Capitulo 2", "Ecuador Norma NEC-SE-DS 2015", "EUROCODE8", "EUROCODE8-2004", "From File", "Guatemala AGIES NSE 2-10", "IS 1893:2016", "IS1893:2002",
+  "Italian NTC2008", "Italian NTC2018", "Italian3274", "Korean KBC 2009", "Korean KBC 2016", "Korean KDS 41 17 00:2019", "Korean KDS 41 17 00:2024", "Mexico CFE-2008", "Mexico CFE-93",
+  "Mexico NTC-2004", "NBCC2005", "NBCC2010", "NBCC2015", "NBCC2020", "NBCC2025", "NBCC95", "NEHRP97", "NZS1170-2004", "NZS4203", "Peru Norma E.030", "Peru NTE E.030 2014", "SI 413",
+  "SNiP KR 20-02:2018", "SP 14.13330.2014", "TCVN 9386:2012", "TSC-2007", "TSC-2018", "UBC97", "User", "Venezuela COVENIN 1756-2:2001"];
+const etThOrder = ["From File", "User", "Sine", "Cosine", "Ramp", "Sawtooth", "Triangular", "User Periodic", "Matched to Response Spectrum"];
+// The ETABS table of a time history type (its "Functions - Time History - ..." name).
+const etThTable = t => "Functions - Time History - " + (t === "User" ? "User Defined" : t);
+
+// Every code of ETABS 23.2's Response Spectrum type list, from its picture: the window title, the layout (W: Parameters
+// left, graph right, Function Points and Plot Options under it; A: Define Function list and Plot Options right, graph
+// across the bottom; B: as A with the graph bottom left and OK/Cancel at the right; I: Parameters down the left, the
+// name, graph, points and Plot Options on the right), OK/Cancel under the Parameters (okLeft), the list's title, and the
+// Parameters as ETABS lists them. k is ETABS's table field, s the SAP2000 form's key of the same value (its calculation,
+// choices, default and greying are used unless given here); nf: a box ETABS's table has no field for (kept in the .cpm).
+const etRs = (table, title, layout, sap, items, more) => ({table: "Functions - Response Spectrum - " + table, title, layout, sap, items, ...(more || {})});
+const etSep = {sep: true}, etCalcHead = {heading: "Calculated Values for Response Spectrum Curve"};
+const ET_RS = {
+  "ASCE7-10": etRs("ASCE7-10", "Response Spectrum ASCE 7-10 Function Definition", "W", "IBC 2012", [
+    {k: "SsAndS1From", s: "AccOption", label: "Ss and S1 from USGS -", choices: [["Lat/Long", "By Lat/Long"], ["Zip Code", "By Zip Code"], ["User Specified", "User Specified"]], def: "User Specified",
+      map: {"Lat/Long": "Ss and S1 from USGS - by Lat./Long.", "Zip Code": "Ss and S1 from USGS - by Zip Code", "User Specified": "Ss and S1 User Specified"}},
+    {k: "Latitude", label: "Site Latitude (degrees)", help: true, keepLabel: true}, {k: "Longitude", label: "Site Longitude (degrees)", help: true, keepLabel: true}, {k: "ZipCode", label: "Site Zip Code (5-Digits)", help: true, keepLabel: true},
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss"}, {k: "S1", label: "1 Sec Spectral Accel, S1"}, {k: "TL", label: "Long-Period Transition Period", def: "8"}, {blank: true},
+    {k: "SiteClass", label: "Site Class"}, {k: "Fa", label: "Site Coefficient, Fa", indent: true}, {k: "Fv", label: "Site Coefficient, Fv", indent: true}, {blank: true},
+    etCalcHead, {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true}, {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true}]),
+  "ASCE7-16": etRs("ASCE7-16", "Response Spectrum ASCE 7-16 Function Definition", "W", "ASCE 7-16", [
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss"}, {k: "S1", label: "1 Sec Spectral Accel, S1"}, {k: "TL", label: "Long-Period Transition Period", def: "8"}, {blank: true},
+    {k: "SiteClass", label: "Site Class"}, {k: "Fa", label: "Site Coefficient, Fa", indent: true}, {k: "Fv", label: "Site Coefficient, Fv", indent: true}, {blank: true},
+    etCalcHead, {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true}, {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true}], {okLeft: true}),
+  "ASCE7-22": etRs("ASCE7-22", "Response Spectrum ASCE 7-22 Function Definition", "W", "ASCE 7-22", [
+    {k: "Direction", label: "Spectrum Direction", choices: [["Horizontal", "Horizonal"], ["Vertical", "Vertical"]]}, {k: "Type", s: "SpecType", label: "Spectrum Type"},
+    {k: "SDS", s: "Sds", label: "Short-Period Design Spectral Accel, Sds"}, {k: "SD1", s: "Sd1", label: "1 sec Design Spectral Accel, Sd1"}, {k: "TL", label: "Long-Period Transition Period", def: "8"},
+    {k: "SiteClass", label: "Site Class"}, {k: "SMS", s: "Sms", hidden: true}, {k: "SM1", s: "Sm1", hidden: true}], {okLeft: true}),
+  "Chile Norma NCh2369-2003": etRs("Chile Norma NCh2369-2003", "Response Spectrum Function -  Chile Norma NCh2369-2003", "A", "Chile Norma NCh2369-2003", [
+    {blank: true}, {k: "R", label: "Response Modification Factor, R", def: "5"}, {k: "DampParam", s: "Si", label: "Damping Ratio, ξ"}, {k: "BuildCat", s: "Category", label: "Building Category"},
+    {k: "Zone", label: "Seismic Zone"}, {k: "SoilType", label: "Soil Type"}], {legend: "Define Function"}),
+  "Chile Norma NCh433+DS61": etRs("Chile Norma NCh433 DS61", "Response Spectrum Function Definition - Chile Norma NCh433+DS61", "B", "Chile Norma NCh433+DS61", [
+    {k: "Zone", label: "Seismic Zone"}, {k: "SoilType", label: "Soil Type"}, {k: "OccCat", s: "Category", label: "Occupation Category"}]),
+  "Chinese2010": etRs("Chinese GB50011-2010", "Response Spectrum Function Definition - GB50011-2010", "B", "Chinese 2010", [
+    {k: "AlphaMax", label: "Max Influence Factor, AlphaMax"}, {k: "SI", label: "Seismic Intensity, SI"}, {k: "Tg", label: "Characteristic Ground Period, Tg"}, {k: "PTDF", label: "Period Time Discount Factor, PTDF", def: "1"}]),
+  "Colombia NSR-10": etRs("Columbia NSR-10", "Response Spectrum Function - Colombia NSR-10", "A", "Colombia NSR-10", [
+    {k: "Aa", label: "Effective Peak Acceleration, Aa"}, {k: "Av", label: "Effective Peak Velocity, Av"}, {k: "Ae", label: "Reduced Effective Peak Acceleration, Ae"},
+    {k: "Ad", label: "Eff. Peak Accel. for Damage Threshold, Ad"}, {k: "GroupOfUse", s: "GroupUse", label: "Group of Use"}, {k: "Fa", label: "Amplification Factor for Acceleration, Fa"},
+    {k: "Fv", label: "Amplification Factor for Velocity,"}], {legend: "Define Function"}),
+  "Costa Rica Seismic Code 2010": etRs("Costa Rica Seismic Code 2010", "Response Spectrum Function - Costa Rica Seismic Code 2010", "A", "Costa Rica Seismic Code 2010", [
+    {k: "Zone", label: "Seismic Zone"}, {k: "SoilType", label: "Soil Type"}, {k: "Occupancy", label: "Occupancy"}, {k: "DuctOver", s: "Overstrength", label: "Ductility Overstrength"},
+    {k: "OverFactor", s: "OSFactor", label: "Overstrength Factor", def: "2"}], {legend: "Define Function"}),
+  "Dominican Republic R-001": etRs("Dominican Republic R-001", "Response Spectrum Function - Dominican Republic R-001", "A", "Dominican Republic R-001", [
+    {k: "Ss", label: "Sorted Spectral Short Period, Ss"}, {k: "S1", label: "Sorted Spectral Long Period, S1"}, {k: "Fa", label: "Soil Factor for Short Period, Fa"}, {k: "Fv", label: "Soil Factor for Long Period, Fv"},
+    {k: "NearField", s: "Location", label: "Location in Near Field"}, {k: "Class", s: "Classification", label: "Classification by Use of Structure"}, {k: "R", label: "Response Modification Factor, R"}], {legend: "Define Function"}),
+  "Ecuador NEC-11 Capitulo 2": etRs("Ecuador NEC-11 Capitulo 2", "Response Spectrum Function - Ecuador NEC-11 Capitulo 2", "A", "Ecuador NEC-11 Capitulo 2", [
+    {k: "Z", s: "Zone", label: "Zone Coefficient, Z"}, {k: "Eta", s: "Coeff", label: "η Coefficient"}, {k: "Fa", label: "Site Factor, Fa"}, {k: "Fd", label: "Site Factor, Fd"}, {k: "SoilType", label: "Soil Type"},
+    {k: "Fs", s: "FS", label: "Inelastic Behavior Fctor of Subsurface, Fs"}, {k: "I", label: "Importance Factor, I", def: "1"}, {k: "R", label: "Response Modification Factor, R", def: "5"}], {legend: "Define Function"}),
+  "Ecuador Norma NEC-SE-DS 2015": etRs("Ecuador Norma NEC-SE-DS 2015", "Response Spectrum Function - Ecuador Norma NEC-SE-DS 2015", "A", "Ecuador Norma NEC-SE-DS 2015", [
+    {k: "Z", s: "Zone", label: "Zone Coefficient, Z"}, {k: "Eta", s: "Coeff", label: "η Coefficient"}, {k: "Fa", label: "Site Factor, Fa"}, {k: "Fd", label: "Site Factor, Fd"}, {k: "SoilType", label: "Soil Type"},
+    {k: "Fs", s: "FS", label: "Inelastic Behavior Fctor of Subsurface, Fs"}, {k: "I", label: "Importance Factor, I"}, {k: "R", label: "Response Modification Factor, R", def: "5"}], {legend: "Define Function"}),
+  "EUROCODE8": etRs("Eurocode8", "Response Spectrum Function Definition - EuroCode 8", "B", "EuroCode8 1994", [
+    {k: "Ag", label: "Design Ground Acceleration, Ag"}, {k: "SoilClass", label: "Subsoil Class"}, {k: "n", s: "DampFactor", label: "Damping Correction Factor, n", def: "1"}]),
+  "EUROCODE8-2004": etRs("Eurocode8-2004", "EuroCode 8 - 2004 Function Definition", "W", "EuroCode8 2004", [
+    {k: "Country", label: "Country"}, {k: "Direction", label: "Direction"}, {k: "Ag", label: "Ground Acceleration, ag/g"}, {k: "SpecType", label: "Spectrum Type"}, {k: "GroundType", label: "Ground Type"},
+    {k: "S", s: "SoilFact", label: "Soil Factor, S"}, {k: "AvgOverAg", label: "Acceleration Ratio, Avg/Ag"}, {k: "Tb", label: "Spectrum Period, Tb", unit: "sec"}, {k: "Tc", label: "Spectrum Period, Tc", unit: "sec"},
+    {k: "Td", label: "Spectrum Period, Td", unit: "sec"}, {k: "Beta", s: "LBFact", label: "Lower Bound Factor, Beta"}, {k: "q", s: "BehaveFact", label: "Behavior Factor, q", def: "2"}]),
+  "Guatemala AGIES NSE 2-10": etRs("Guatemala AGIES NSE 2-10", "Response Spectrum Function - Guatemala AGIES NSE 2-10", "A", "Guatemala AGIES NSE 2-10", [
+    {k: "IO", s: "I0", label: "Seismicity Index, I0", def: "4"}, {k: "Scr", label: "Spectral sorted for Short Period, Scr"}, {k: "S1r", label: "Spectral sorted for Long Period, S1r"},
+    {k: "Fs", s: "FS", label: "Type of Seismic Source, Fs"}, {k: "Dh", label: "Horizontal Distance to Seismic Source, Dh"}, {k: "TS", label: "Type of Earthquake, TS"},
+    {k: "Fa", label: "Site Coefficient, Fa", def: "1"}, {k: "Fv", label: "Site Coefficient, Fv"}, {k: "R", label: "Response Modification Factor, R", def: "8"}], {legend: "Define Function"}),
+  "IS 1893:2016": etRs("IS1893 2016", "Response Spectrum Function Definition - IS 1893:2016", "B", "IS 1893-2016", [
+    {k: "Zone", s: "SeismicZone", label: "Seismic Zone"}, {k: "Z", label: "Seismic Zone Factor, Z"}, {k: "I", label: "Importance Factor , I", def: "1"}, {k: "SoilType", label: "Soil Type"},
+    {k: "R", label: "Response Reduction Factor, R", def: "5"}]),
+  "IS1893:2002": etRs("IS1893 2002", "Response Spectrum Function Definition - IS 1893:2002", "B", "IS1893 2002", [{k: "Z", label: "Seismic Zone Factor, Z"}, {k: "SoilType", label: "Soil Type"}]),
+  "Italian NTC2008": null, "Italian NTC2018": null,
+  "Italian3274": etRs("Italian 3274", "Response Spectrum Function Definition - Italian Ordinanza 3274", "B", "Italian 3274", [
+    {k: "PGA", label: "Peak Ground Acceleration"}, {k: "SoilType", label: "Soil Type"}, {k: "StructFact", label: "Structure Factor", def: "1"}, {k: "LevDirStr", s: "SpecLevel", label: "Spec Level/Direction/Structure"}]),
+  "Korean KBC 2009": etRs("Korean KBC 2009", "Response Spectrum Korean KBC 2009 Function Definition", "W", "Korean KBC 2009", [
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss"}, {k: "S1", label: "1 Sec Spectral Accel, S1"}, {blank: true}, {k: "SiteClass", label: "Site Class"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, def: "1"}, {k: "Fv", label: "Site Coefficient, Fv", indent: true, def: "1"}, {blank: true},
+    etCalcHead, {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true}, {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true}]),
+  "Korean KBC 2016": etRs("Korean KBC 2016", "Response Spectrum Korean KBC 2016 Function Definition", "W", "KBC 2016", [
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss"}, {k: "S1", label: "1 Sec Spectral Accel, S1"}, {k: "Depth", s: "SoilDepth", label: "The depth to the common rock"}, {blank: true}, {k: "SiteClass", label: "Site Class"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, def: "1"}, {k: "Fv", label: "Site Coefficient, Fv", indent: true, def: "1"}, {blank: true},
+    etCalcHead, {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true}, {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true}], {okLeft: true}),
+  "Korean KDS 41 17 00:2019": null, "Korean KDS 41 17 00:2024": null,
+  "Mexico CFE-2008": etRs("Mexico CFE-2008", "Response Spectrum Function - Mexico CFE-2008", "A", "Mexico CFE-2008", [
+    {k: "Z", s: "Zone", label: "Seismic Zone, Z"}, {k: "Class", s: "Classification", label: "Structural Calssification"}, {k: "S", s: "SoilType", label: "Soil Type, S"},
+    {k: "Q", s: "BehaviorFactor", label: "Seismic Behavior Factor, Q"}, {k: "I", s: "CorrectionFactor", label: "Correction Factor by Irregularityr, I"}], {legend: "Define Function"}),
+  "Mexico CFE-93": etRs("Mexico CFE-93", "Response Spectrum Function - Mexico CFE-93", "A", "Mexico CFE-93", [
+    {k: "Z", s: "Zone", label: "Seismic Zone, Z"}, {k: "Class", s: "Classification", label: "Structural Calssification"}, {k: "S", s: "SoilType", label: "Soil Type, S"},
+    {k: "Q", s: "BehaviorFactor", label: "Seismic Behavior Factor, Q"}, {k: "I", s: "CorrectionFactor", label: "Correction Factor by Irregularityr, I"}], {legend: "Define Function"}),
+  "Mexico NTC-2004": etRs("Mexico NTC-2004", "Response Spectrum Function Definition - Mexico NTC-2004", "B", "Mexico NTC-2004", [
+    {k: "Zone", label: "Seismic Zone"}, {k: "Group", label: "Ranking by Group"}, {k: "Behavior", label: "Seismic Behavior Factor"}, {k: "Correction", label: "Correction Factor by Irregularity"}]),
+  "NBCC2005": null, "NBCC2010": null, "NBCC2015": null,
+  "NBCC2020": etRs("NBCC2020", "Response Spectrum Function Definition -NBCC 2020", "A", "NBCC 2020", ["Sa02", "Sa05", "Sa1", "Sa2", "Sa5", "Sa10"].map(k => ({k})), {legend: "Define Function"}),
+  "NBCC2025": etRs("NBCC2025", "Response Spectrum Function Definition -NBCC 2025", "A", "NBCC 2020", [
+    {k: "Sa02", def: "1.12"}, {k: "Sa05", def: "0.899"}, {k: "Sa1", def: "0.521"}, {k: "Sa2", def: "0.317"}, {k: "Sa5", def: "0.0889"}, {k: "Sa10", def: "0.0363"}], {legend: "Define Function"}),
+  "NBCC95": etRs("NBCC95", "Response Spectrum Function Definition - NBCC 95", "B", "NBCC 95", [
+    {k: "V", label: "Zonal Velocity Ratio, V"}, {k: "Za", label: "Accel. Related Seismic Zone, Za"}, {k: "Zv", label: "Vel. Related Seismic Zone, Zv"}]),
+  "NEHRP97": etRs("NEHRP97", "Response Spectrum Function Definition - NEHRP 97", "B", "NEHRP 97", [
+    {heading: "Design Spectral Response Acceleration"}, {k: "Sds", s: "SDS", label: "at Short Period, Sds", indent: true, def: "1"}, {k: "Sd1", s: "SD1", label: "at 1 Second Period,Sd1", indent: true}]),
+  "NZS1170-2004": etRs("NZS1170-2004", "Response Spectrum Function Definition - NZS1170.5 - 2004(Revised 2016)", "B", "NZS 1170.5-2016", [
+    {k: "SpecType", nf: true, label: "Spectrum Type"}, {k: "SoilClass", s: "SiteClass", label: "Site Subsoil Class"}, {k: "Z", label: "Hazard Factor, Z"}, {k: "R", label: "Return Period Factor, R"},
+    {k: "D", label: "Near Fault Distance, D (km)", def: "20"}, {k: "ConsTSite", label: "Consider Site Period for Spectral Shape Factor"}, {k: "SitePeriod", s: "TSite", label: "Low Amplitude Site Period", def: "1"}]),
+  "NZS4203": etRs("NZS4203", "Response Spectrum Function Definition - NZS4203 1992", "B", "NZS 4203", [
+    {k: "SF", s: "ScaleFactor", label: "Scaling Factor (Sm*Sp*R*Z*L)", def: "1"}, {k: "SoilCat", label: "Site Subsoil Category"}]),
+  "Peru Norma E.030": etRs("Peru Norma E030", "Response Spectrum Function - Peru Norma E.030", "A", "Peru Norma E.030", [
+    {k: "Zone", label: "Seismic Zone"}, {k: "OccCat", s: "Category", label: "Occupation Category"}, {k: "SoilType", label: "Soil Type"}, {k: "Config", s: "Configuration", label: "Structural Configuration"},
+    {k: "R", label: "Response Modification Factor, R", def: "7"}], {legend: "Define Function"}),
+  "Peru NTE E.030 2014": etRs("Peru NTE E030 2014", "Response Spectrum Function - Peru NTE E.030 2014", "A", "Peru NTE E.030 2014", [
+    {k: "Zone", label: "Seismic Zone"}, {k: "OccCat", s: "Category", label: "Occupation Category"}, {k: "SoilType", label: "Soil Type"}, {k: "Ia", label: "Irregularity Factor, Ia", def: "1"},
+    {k: "Ip", label: "Irregularity Factor, Ip", def: "1"}, {k: "R0", label: "Basic Response Modification Factor, R0", def: "7"}], {legend: "Define Function"}),
+  "SI 413": etRs("SI 413", "Response Spectrum Function Definition - SI 413(1995)", "B", "SI 413", [
+    {k: "Z", label: "Ground Acceleration Coefficient, Z"}, {k: "SoilType", label: "Soil Type"}, {k: "I", label: "Importance Factor, I", def: "1"}, {k: "K", label: "Seismic Force Reduction Factor, K", def: "8"}]),
+  "SNiP KR 20-02:2018": null,
+  "SP 14.13330.2014": etRs("SP 14 13330 2014", "Response Spectrum Function - SP 14.13330.2014", "A", "SP 14.13330.2014", [
+    {k: "Direction", s: "StructDir", label: "Direction", choices: ["Horizontal", "Vertical"], def: "Horizontal", map: {Horizontal: "Building Horiz", Vertical: "Building Vert"}},
+    {k: "Seismicity", label: "Seismicity"}, {k: "SoilCat", label: "Soil Category"}, {k: "K0", s: "K0Factor", label: "K0 Factor", def: "1"}, {k: "K1", s: "K1Factor", label: "K1 Factor"},
+    {k: "Kpsi", s: "KPsiFactor", label: "KPsi Factor", def: "1"}, {k: "NonlinSoil", label: "Nonlinear Soil Deformation, a_soil"}, {k: "Asoil", s: "ASoil", sameRow: true}], {legend: "Define Function"}),
+  "TCVN 9386:2012": etRs("TCVN 9386 2012", "TCVN 9386:2012 Function Definition", "W", "TCVN 9386:2012", [
+    {k: "Direction", label: "Direction"}, {k: "Ag", label: "Ground Acceleration, ag/g"}, {k: "GroundType", label: "Ground Type"}, {k: "S", s: "SoilFact", label: "Soil Factor, S"},
+    {k: "AvgOverAg", label: "Acceleration Ratio, Avg/Ag"}, {k: "Tb", label: "Spectrum Period, Tb", unit: "sec"}, {k: "Tc", label: "Spectrum Period, Tc", unit: "sec"}, {k: "Td", label: "Spectrum Period, Td", unit: "sec"},
+    {k: "Beta", s: "LBFact", label: "Lower Bound Factor, Beta"}, {k: "q", s: "BehaveFact", label: "Behavior Factor, q", def: "2"}], {greyOff: ["AvgOverAg"], post: set => { set.AvgOverAg = 0.9; }}),
+  "TSC-2007": etRs("TSC-2007", "Response Spectrum Function Definition - TSC-2007", "B", "TSC 2007", [
+    {k: "Zone", s: "SeismicZone", label: "Seismic Zone"}, {k: "Ao", s: "TSC07A0", label: "Acceleration, Ao"}, {k: "I", s: "TSC07I", label: "Importance Factor , I", def: "1"}, {k: "SiteClass", label: "Site Class"},
+    {k: "R", s: "TSC07R", label: "Seismic Load Reduction Factor, R", def: "8"}]),
+  "TSC-2018": etRs("TSC-2018", "Response Spectrum TSC-2018 Function Definition", "W", "TSC-2018", [
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss"}, {k: "S1", label: "1 Sec Spectral Accel, S1"}, {k: "TL", label: "Long-Period Transition Period", def: "6"}, {k: "R", label: "Response Modification, R", def: "8"},
+    {k: "D", label: "System Overstrength, D", def: "3"}, {k: "I", label: "Occupancy Importance, I", def: "1"}, {k: "SiteClass", label: "Site Class"}, {k: "Fs", label: "Site Coefficient, Fs", indent: true},
+    {k: "F1", label: "Site Coefficient, F1", indent: true}, {k: "Direction", s: "SpecDir", label: "Design Spectrum Direction"}, {blank: true},
+    etCalcHead, {k: "SDS", label: "SDS = Fs * Ss", indent: true}, {k: "SD1", label: "SD1 = F1 * S1", indent: true}], {okLeft: true}),
+  "UBC97": etRs("UBC 97", "Response Spectrum Function Definition - UBC 97", "B", "UBC 97", [{k: "Ca", label: "Seismic Coefficient, Ca"}, {k: "Cv", label: "Seismic Coefficient, Cv"}]),
+  "Venezuela COVENIN 1756-2:2001": etRs("Venezuela COVENIN 1756-2 2001", "Response Spectrum Function - Venezuela COVENIN 1756-2:2001", "A", "Venezuela COVENIN 1756-2:2019", [
+    {k: "Zone", label: "Seismic Zone"}, {k: "SpecForm", s: "Form", label: "Spectral form"}, {k: "CorrFactor", s: "Correction", label: "Correction Factor"}, {k: "Class", s: "Classification", label: "Classification by Use"},
+    {k: "R", label: "Response Modification Factor, R", def: "2"}], {legend: "Define Function"}),
+};
+// Italian NTC 2008 and 2018: the same form (Parameters down the left).
+for (const y of ["2008", "2018"]) ET_RS["Italian NTC" + y] = etRs("Italian NTC" + y, `Response Spectrum Italian NTC ${y} Function Definition`, "I", "Italian NTC " + y, [
+  {k: "Source", s: "AccOption", label: "ag, F0 and Tc* from", choices: [["By Lat/Long", "Latitude/Longitude"], ["By Island", "Island"], ["User Specified", "User Specified"]], def: "User Specified"},
+  {k: "Longitude", label: "Site Longitude", unit: "deg", indent: true}, {k: "Latitude", label: "Site Latitude", unit: "deg", indent: true},
+  {k: "IslandName", s: "Island", label: "Island Name", indent: true, wide: true}, {k: "LimitState", label: "Limit State", indent: true, wide: true, en: v => v.Source !== "User Specified"},
+  {k: "UsageClass", label: "Usage Class", indent: true, wide: true, en: v => v.Source !== "User Specified"}, {k: "NominalLife", label: "Nominal Life", indent: true, en: v => v.Source !== "User Specified"},
+  {k: "PGA", s: "agOverg", label: "Peak Ground Acc., ag/g", indent: true, def: "0.1972"}, {k: "F0", label: "Magnification Factor, F0", indent: true}, {k: "TcStar", s: "Tcs", label: "Reference Period, Tc*", indent: true, def: "0.3332", unit: "sec"},
+  {blank: true}, {k: "SpecType", s: "SpectrumType", label: "Spectrum Type"}, {k: "SoilType", label: "Soil Type"}, {k: "Topography", label: "Topography"}, {k: "hOverH", s: "hoverH", label: "h/H Ratio", def: "1"},
+  {k: "TbTcTd", nf: true, label: "Tb; Tc; Td", unit: "sec", out: true, wide: true, show: r => [r.Tb, r.Tc, r.Td].map(x => isFinite(x) ? (+x).toFixed(3) : "").join(";  ")},
+  {k: "Tb", hidden: true}, {k: "Tc", hidden: true}, {k: "Td", hidden: true},
+  {k: "Xi", s: "Damping", label: "Damping [in %], Xi"}, {k: "q", s: "BehaviorFactor", label: "Behavior Factor, q", def: "1"}]);
+// Korean KDS 41 17 00 2019 and 2024: the same form.
+for (const y of ["2019", "2024"]) ET_RS["Korean KDS 41 17 00:" + y] = etRs("KDS 41 17 00-" + y, `Response Spectrum Korean KDS 41 17 00:${y} Function Definition`, "W", "KDS 41 17 00:2019", [
+  {k: "Zone", s: "SeismicZone", label: "Seismic Zone, Z"}, {k: "S", label: "Effective Ground Accel, S"}, {k: "TL", label: "Long-Period Transition Period, TL"},
+  {k: "S-Wave", s: "SWave", label: "Depth to MR >20 and S-Wave Velocity >= 360 m/s"}, {blank: true}, {k: "SiteClass", label: "Site Class"},
+  {k: "Fa", label: "Site Coefficient, Fa", indent: true}, {k: "Fv", label: "Site Coefficient, Fv", indent: true}, {blank: true},
+  etCalcHead, {k: "SDS", label: "SDS = (2/3) * 2.5 * Fa * S", indent: true}, {k: "SD1", label: "SD1 = (2/3) * Fv * S", indent: true}], {okLeft: true});
+// NBCC 2005 and 2010: the same form; 2015 has Parameters down the left.
+const etSa = [["Sa02", "Spectral Accel, Sa(0.2)"], ["Sa05", "Spectral Accel, Sa(0.5)"], ["Sa1", "Spectral Accel, Sa(1.0)"], ["Sa2", "Spectral Accel, Sa(2.0)"], ["Sa5", "Spectral Accel, Sa(5.0)"], ["Sa10", "Spectral Accel, Sa(10.0)"]];
+for (const y of ["2005", "2010"]) ET_RS["NBCC" + y] = etRs("NBCC" + y, "Response Spectrum Function Definition -NBCC " + y, "A", "NBCC " + y, [
+  {k: "PGA", label: "Peak Ground Acceleration"}, ...etSa.slice(0, 4).map(([k, label]) => ({k, label})), {blank: true}, {k: "SiteClass", label: "Site Class"},
+  {k: "Fa", label: "Site Coefficient, Fa", indent: true}, {k: "Fv", label: "Site Coefficient, Fv", indent: true}], {legend: "Define Function"});
+ET_RS.NBCC2015 = etRs("NBCC2015", "Response Spectrum Function Definition -NBCC 2015", "I", "NBCC 2015", [
+  {k: "PGA", label: "Peak Ground Acceleration"}, ...etSa.map(([k, label]) => ({k, label, def: k === "Sa10" ? "0.009" : undefined})), {k: "SiteClass", label: "Site Class"},
+  ...["F02", "F05", "F1", "F2", "F5", "F10"].map((k, i) => ({k, label: `Site Coefficient, F(${["0.2", "0.5", "1.0", "2.0", "5.0", "10.0"][i]})`, indent: true}))], {legend: "Define Function", nameInline: true});
+for (const k of ["NBCC2020", "NBCC2025"]) ET_RS[k].items.forEach(i => i.label = etSa.find(x => x[0] === i.k)[1]);
+// SNiP KR 20-02:2018 (Kyrgyz Republic): SAP2000 has no such code, so its spectrum is worked out here. From the picture
+// (soil II): Tc 0.72, k 0.45, agv/g 0.8 ag/g; a plateau of 2.5 ag/q from 0 to Tc, then 2.5 ag/q Tc/T, never under Beta ag.
+ET_RS["SNiP KR 20-02:2018"] = etRs("SNIP KR 20-02:2018", "Response Spectrum Function - Kyrgyz Republic (SNiP) KR 20-02:2018", "A", null, [
+  {k: "Direction", label: "Direction", choices: ["Horizontal", "Vertical"], def: "Horizontal"}, {k: "AgOverg", label: "Design Ground Acceleration, ag/g", def: "1"},
+  {k: "AgvOverg", label: "Design Vertical Acceleration, agv/g", out: true, en: v => v.Direction === "Vertical"}, {k: "k", label: "Indicator of a degree, k", out: true, en: () => false},
+  {k: "SoilType", label: "Soil Type", choices: ["I", "II", "III"], def: "II"}, {k: "Tc", label: "Spectrum Period, Tc", out: true},
+  {k: "Beta", label: "Lower Bound Factor, Beta", def: "0.2"}, {k: "q", label: "Behavior Factor, q", def: "3"}], {legend: "Define Function", greyOff: ["AgvOverg", "k"],
+  calc(v) {
+    const ag = RS.n(v.AgOverg), q = RS.n(v.q), beta = RS.n(v.Beta);
+    // Tc and k by soil type: II read from ETABS; I and III are guesses until a picture of them.
+    const [Tc, k] = {I: [0.4, 0.3], II: [0.72, 0.45], III: [1.0, 0.6]}[v.SoilType] || [NaN, NaN];
+    const agv = 0.8 * ag, a = v.Direction === "Vertical" ? agv : ag;
+    const sa = t => Math.max(2.5 * a / q * Math.min(1, t > 0 ? Tc / t : 1), beta * a);
+    // ETABS lists 0, Tc, then ten equal steps from Tc to 5 s (0.428 s for soil II); 6 to 10 s by whole seconds is a guess.
+    const grid = [0, Tc, ...RS.range(Tc, 5, (5 - Tc) / 10).slice(1), 6, 7, 8, 9, 10];
+    return {set: {AgvOverg: agv, k, Tc}, pts: RS.curve(sa, grid)};
+  }});
+delete ET_RS.User; delete ET_RS["From File"];
+
+// An ETABS code's items with what the SAP2000 form of it gives: choices, default, greying, calculated boxes.
+function etRsItems(code) {
+  const S = ET_RS[code]; if (S._items) return S._items;
+  const sap = S.sap ? SAP_RS[S.sap] : null;
+  S._items = S.items.map(i => {
+    if (!i.k) return i;
+    const s = i.s || i.k, si = sap && !i.nf ? sap.items.find(x => x.k === s) || {} : {};
+    const out = {...si, ...i, s};
+    for (const key of ["choices", "def", "out", "check", "hidden"]) if (i[key] === undefined && si[key] !== undefined) out[key] = si[key];
+    if (i.en === undefined && si.en) { const f = si.en; out.en = v => f(etToSap(code, v)); }
+    if (out.def === undefined) out.def = "";
+    if (typeof out.def === "string" && /^-?\d+\.$/.test(out.def)) out.def = out.def.slice(0, -1);
+    if (/^-?\d(\.\d+)?E-\d+$/i.test(String(out.def))) out.def = String(+out.def);
+    return out;
+  });
+  return S._items;
+}
+// ETABS's values to the SAP2000 form's keys (its calculation), with every SAP2000 key not shown here at its default.
+function etToSap(code, v) {
+  const S = ET_RS[code], sap = S.sap ? SAP_RS[S.sap] : null, out = {};
+  if (sap) for (const i of sap.items) if (i.k) out[i.k] = String(i.def ?? "");
+  for (const i of S._items || S.items) if (i.k && !i.nf && v[i.k] !== undefined) { const x = v[i.k]; out[i.s || i.k] = i.map && i.map[x] !== undefined ? i.map[x] : x; }
+  return out;
+}
+function etRsCalc(code, v) {
+  const S = ET_RS[code];
+  if (!S.sap) return S.calc(v);
+  const r = SAP_RS[S.sap].calc(etToSap(code, v)), set = {};
+  for (const i of etRsItems(code)) if (i.k && r.set && r.set[i.s] !== undefined) set[i.k] = r.set[i.s];
+  if (S.post) S.post(set, v);
+  return {set, pts: r.pts};
+}
+
+// The type of a function, as "Choose Function Type to Add" names it.
+function etFnTypeOf(kind, f) {
+  const t = f.etabs_table || "";
+  if (kind === "spectrum") {
+    if (/Response Spectrum - From File$/i.test(t)) return "From File";
+    const code = Object.keys(ET_RS).find(k => ET_RS[k] && ET_RS[k].table.toLowerCase() === t.toLowerCase());
+    if (code) return code;
+    return f.source && f.source.Type === "file" ? "From File" : "User";
+  }
+  const th = etThOrder.find(x => etThTable(x).toLowerCase() === t.toLowerCase());
+  if (th) return th;
+  return {file: "From File", sine: "Sine", cosine: "Cosine", ramp: "Ramp", sawtooth: "Sawtooth", triangular: "Triangular", periodic: "User Periodic"}[f.source && f.source.Type] || "User";
+}
+async function etNewName() { const a = await hmAnalysis(), used = new Set(a.functions.map(f => f.name.toLowerCase())); let i = 1; while (used.has("func" + i)) i++; return "Func" + i; }
+
+// Define Response Spectrum Functions / Define Time History Functions.
+async function hmEtabsFunctions(kind) {
+  const rs = kind === "spectrum", a = await hmAnalysis(), list = a.functions.filter(f => f.kind === kind);
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmEtabsFunctions(kind); };
+  const types = rs ? etRsOrder : etThOrder;
+  const d = dialog(rs ? "Define Response Spectrum Functions" : "Define Time History Functions", `<div style="display:flex;gap:12px">
+      <fieldset style="flex:1;margin:0"><legend>${rs ? "Response Spectra" : "Functions"}</legend>
+      <select id="efL" size="15" style="width:100%;height:100%;min-width:170px">${list.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("")}</select></fieldset>
+      <div style="width:200px;display:flex;flex-direction:column;gap:6px">
+      <fieldset style="margin:0"><legend>Choose Function Type to Add</legend><select id="efT" style="width:100%">${opts(types, rs ? "ASCE7-10" : "Sine")}</select></fieldset>
+      <fieldset style="margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">
+      <button id="efAdd">Add New Function...</button><button id="efMod">${rs ? "Modify/Show Spectrum..." : "Modify/Show Function..."}</button><button id="efDel">${rs ? "Delete Spectrum" : "Delete Function"}</button></div></fieldset>
+      ${rs ? "" : `<fieldset style="margin:0" id="efVG"><legend>Click to:</legend><button id="efView" style="width:100%">View Response Spectrum ...</button></fieldset>`}
+      <fieldset style="margin:0"><legend>Default Function Folder <span title="The folder Browse... starts in for function files">&#9432;</span></legend>
+      <div style="display:flex;gap:6px;align-items:center"><span id="efF" style="flex:1;font-size:11px;word-break:break-all">${esc(etFnFolder())}</span><button id="efFB" title="Choose the default function folder">&#128193;</button></div></fieldset>
+      <div style="display:flex;justify-content:space-around;margin-top:2px"><button id="efOK">OK</button><button id="efCan">Cancel</button></div></div></div>`, [], {width: 430});
+  const L = q(d, "#efL"); if (list.length) L.selectedIndex = 0;
+  const sel = () => list.find(x => x.name === L.value);
+  const mod = () => { const f = sel(); if (f) hmEtabsFunction(kind, etFnTypeOf(kind, f), f, again, a); };
+  // View Response Spectrum: the spectrum of the chosen matched time history (greyed for any other function).
+  const view = () => { const b = d.querySelector("#efView"); if (!b) return; const f = sel(), on = !!f && etFnTypeOf(kind, f) === "Matched to Response Spectrum"; b.disabled = !on; q(d, "#efVG").style.color = on ? "" : "#8d8d8d"; };
+  L.onchange = view; view();
+  if (!rs) q(d, "#efView").onclick = () => { const f = sel(); if (!f || f.points.length < 3) return;
+    const dt = f.points[1][0] - f.points[0][0], periods = RS.range(0.02, 4, 0.02), sp = sapMatch.spectrum(f.points.map(p => p[1]), dt, periods, 0.05);
+    const v = dialog(`Response Spectrum - ${f.name}`, `<div id="efVS" style="width:520px"></div><input id="efVSxy" readonly style="width:300px;display:block;margin:6px auto 0;text-align:center">`, [["OK"]], {width: 560});
+    etGraph(q(v, "#efVS"), periods.map((T, i) => [T, sp[i]]), q(v, "#efVSxy")); };
+  q(d, "#efAdd").onclick = () => hmEtabsFunction(kind, q(d, "#efT").value, null, again, a);
+  q(d, "#efMod").onclick = mod; L.ondblclick = mod;
+  q(d, "#efDel").onclick = () => L.value && hmRun("delete_definition", {kind: "function", name: L.value}, true).then(j => j.ok ? again() : hmSay(j.error, true));
+  q(d, "#efOK").onclick = () => d.close(); q(d, "#efCan").onclick = () => d.close();
+  q(d, "#efFB").onclick = () => {
+    const f = dialog("Default Function Folder", `<div class="g2"><span>Folder</span><input id="efFN" style="width:300px" value="${esc(etFnFolder())}"></div>`, [["OK", x => {
+      const v = q(x, "#efFN").value.trim(); if (!v) return false; try { localStorage.setItem("cpm.etFnFolder", v); } catch (e) {} q(d, "#efF").textContent = v; }], ["Cancel"]], {width: 420});
+    q(f, "#efFN").select();
+  };
+}
+async function hmEtabsFunction(kind, type, f, after, a) {
+  a = a || await hmAnalysis();
+  if (kind === "history" && type === "Matched to Response Spectrum") return hmSapMatched(f, after, a, etMatchedIo);
+  if (type === "From File") return hmEtabsFromFile(kind, f, after);
+  if (type === "User") return hmEtabsUser(kind, f, after);
+  if (kind === "spectrum") return hmEtabsCode(type, f, after);
+  return hmEtabsWave(type, f, after);
+}
+
+// The Function Graph as ETABS draws it: a white plot with a grey grid, the axes' numbers (an "E-3" over them when the
+// values are small), the function in dark red; the box under it shows the point of the function under the mouse, marked
+// with a blue dot. Plot Options: linear or log axes. With no points the grid shows -6E-6 to 6E-6 on both axes, as ETABS.
+const etTicks = (a, b, n) => {
+  if (!(b > a)) b = a + 1;
+  const raw = (b - a) / (n || 7), mag = Math.pow(10, Math.floor(Math.log10(raw))), step = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map(m => m * mag).find(s => s >= raw * 0.999) || raw;
+  const lo = Math.floor(a / step + 1e-9) * step, hi = Math.ceil(b / step - 1e-9) * step, out = [];
+  for (let x = lo; x <= hi + step * 1e-6; x += step) out.push(Math.round(x / step) * step);
+  return out;
+};
+function etGraph(el, pts, readout, plot) {
+  const W = Math.max(320, Math.round(el.clientWidth || 470)), H = Math.max(170, Math.min(230, Math.round(W * 0.36))), L = 52, R = 14, T = 22, B = 24;
+  const lx = /^Log X/.test(plot || ""), ly = /Log Y$/.test(plot || "");
+  const tx = x => lx ? Math.log10(x) : x, ty = y => ly ? Math.log10(y) : y;
+  const use = (pts || []).filter(p => (!lx || p[0] > 0) && (!ly || p[1] > 0)).map(p => [tx(p[0]), ty(p[1])]);
+  const empty = use.length < 2;
+  const xs = empty ? [-6e-6, 6e-6] : use.map(p => p[0]), ys = empty ? [-6e-6, 6e-6] : use.map(p => p[1]);
+  const xt = etTicks(empty ? -6e-6 : Math.min(...xs, lx ? Infinity : 0), Math.max(...xs), 10), yt = etTicks(empty ? -6e-6 : Math.min(...ys, ly ? Infinity : 0), Math.max(...ys));
+  const xa = xt[0], xb = xt[xt.length - 1], ya = yt[0], yb = yt[yt.length - 1];
+  const X = x => L + (x - xa) / ((xb - xa) || 1) * (W - L - R), Y = y => H - B - (y - ya) / ((yb - ya) || 1) * (H - T - B);
+  const big = Math.max(Math.abs(ya), Math.abs(yb)), e = big > 0 && big < 0.5 ? (big < 1e-3 ? -6 : -3) : 0, ex = Math.max(Math.abs(xa), Math.abs(xb)) < 1e-3 && empty ? -6 : 0;
+  const lab = (v, p) => { const s = v / Math.pow(10, p); return (Math.abs(s) < 1e-9 ? 0 : s).toFixed(Math.abs(xt[1] - xt[0]) / Math.pow(10, p) < 1 || p ? 2 : 1); };
+  const ylab = v => { const s = v / Math.pow(10, e), st = (yt[1] - yt[0]) / Math.pow(10, e); return (Math.abs(s) < 1e-9 ? 0 : s).toFixed(st >= 10 ? 0 : st >= 1 ? 1 : 2); };
+  let g = "";
+  for (const x of xt) g += `<line x1="${X(x)}" x2="${X(x)}" y1="${T}" y2="${H - B}" stroke="#d6d6d6"/><text x="${X(x)}" y="${H - B + 13}" font-size="9" text-anchor="middle" fill="#222">${lx ? (Math.pow(10, x)).toPrecision(2) : lab(x, ex)}</text>`;
+  for (const y of yt) g += `<line x1="${L}" x2="${W - R}" y1="${Y(y)}" y2="${Y(y)}" stroke="#d6d6d6"/><text x="${L - 6}" y="${Y(y) + 3}" font-size="9" text-anchor="end" fill="#222">${ly ? (Math.pow(10, y)).toPrecision(2) : ylab(y)} -</text>`;
+  const path = empty ? "" : `<polyline fill="none" stroke="#a01010" stroke-width="1.3" points="${use.map(p => X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1)).join(" ")}"/>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;background:transparent;cursor:crosshair"><rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="#fff" stroke="#bbb"/>${g}
+    ${e ? `<text x="${L - 26}" y="${T - 8}" font-size="9" fill="#222">E${e}</text>` : ""}${ex ? `<text x="${W - R}" y="${H - 2}" font-size="9" text-anchor="end" fill="#222">E${ex}</text>` : ""}${path}<circle id="etDot" r="3.5" fill="#1010e0" style="display:none"/></svg>`;
+  const svg = el.firstChild, dot = svg.querySelector("#etDot");
+  if (readout && !empty) svg.onmousemove = ev => {
+    const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * W, x = xa + (sx - L) / (W - L - R) * (xb - xa);
+    let i = 1; while (i < use.length - 1 && use[i][0] < x) i++;
+    const [x0, y0] = use[i - 1], [x1, y1] = use[i], c = Math.max(x0, Math.min(x1, x)), y = x1 > x0 ? y0 + (y1 - y0) * (c - x0) / (x1 - x0) : y1;
+    dot.setAttribute("cx", X(c)); dot.setAttribute("cy", Y(y)); dot.style.display = "";
+    readout.value = `(${(lx ? Math.pow(10, c) : c).toFixed(6)}, ${(ly ? Math.pow(10, y) : y).toFixed(6)})`;
+  };
+}
+// The point lists of a form: Function Points (two lists, Period and Acceleration, side by side) or a Define Function list
+// with its entry row (greyed where the program makes the points).
+const etPlotOpts = (name, axes) => `<fieldset style="margin:0;flex:1"><legend>Plot Options</legend>${["Linear X - Linear Y", "Linear X - Log Y", "Log X - Linear Y", "Log X - Log Y"].map((t, i) =>
+  `<label style="display:block;margin:5px 0"><input type="radio" name="${name}" value="${t}" ${i === 0 ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>`;
+const etPointsTwo = (xh, yh, rows) => `<fieldset style="margin:0"><legend>Function Points</legend><div style="display:flex;gap:4px">${[["efPX", xh], ["efPY", yh]].map(([id, h]) => `<div style="text-align:center">${h}
+  <div id="${id}" class="scroll" style="width:100px;height:${(rows || 9) * 16}px;border:1px solid #888;background:#fff;text-align:left"></div></div>`).join("")}</div></fieldset>`;
+const etDefineList = (legend, xh, yh, entry, buttons, rows) => `<fieldset style="margin:0"><legend>${legend}</legend><div style="display:flex;gap:10px;align-items:flex-start"><div style="width:180px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;text-align:center">${xh ? `<span>${xh}</span><span>${yh}</span>` : ""}</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr"><input id="efX" style="width:100%" ${entry ? "" : "disabled"}><input id="efY" style="width:100%" ${entry ? "" : "disabled"}></div>
+  <div class="scroll" style="height:${(rows || 7) * 16}px;border:1px solid #888;background:#fff"><table class="list" style="width:100%;table-layout:fixed"><tbody id="efRows"></tbody></table></div></div>
+  ${buttons ? `<div style="display:flex;flex-direction:column;gap:6px;width:66px;margin-top:22px"><button id="efA">Add</button><button id="efM">Modify</button><button id="efR">Delete</button></div>` : ""}</div></fieldset>`;
+// A number as ETABS lists it (4 significant digits after the point, no trailing zeros).
+const etNum = x => { x = +x; if (!isFinite(x)) return ""; const r = +x.toPrecision(6); return String(Math.abs(r) < 1e-12 ? 0 : r); }; // ETABS lists 6 significant digits (0.309017).
+function etPaintPoints(d, pts, pick, onPick) {
+  const px = d.querySelector("#efPX");
+  if (px) { // Function Points: two lists side by side, a row picked in one picked in both (the first at the start, as ETABS).
+    const py = q(d, "#efPY"), at = pick >= 0 ? pick : pts.length ? 0 : -1;
+    const fill = (box, j) => { box.innerHTML = pts.map((p, i) => `<div data-i="${i}" style="padding:0 3px;line-height:16px;cursor:default${i === at ? ";background:#0078d7;color:#fff" : ""}">${etNum(p[j])}</div>`).join("");
+      box.querySelectorAll("[data-i]").forEach(r => r.onclick = () => etPaintPoints(d, pts, +r.dataset.i, onPick)); };
+    fill(px, 0); fill(py, 1); return; }
+  const rows = d.querySelector("#efRows"); if (!rows) return;
+  rows.innerHTML = pts.map((p, i) => `<tr data-i="${i}" style="cursor:default${i === pick ? ";background:#0078d7;color:#fff" : ""}"><td>${etNum(p[0])}</td><td>${etNum(p[1])}</td></tr>`).join("");
+  if (onPick) rows.querySelectorAll("tr").forEach(r => r.onclick = () => onPick(+r.dataset.i));
+}
+// The entry row's Add, Modify and Delete, greyed until there is something for them to do (as ETABS).
+function etEntry(d, get, set, getPick, setPick, run) {
+  const xy = () => [parseFloat(q(d, "#efX").value), parseFloat(q(d, "#efY").value)];
+  const en = () => { const ok = xy().every(isFinite); q(d, "#efA").disabled = !ok; q(d, "#efM").disabled = !ok || getPick() < 0; q(d, "#efR").disabled = getPick() < 0; };
+  const put = (p, at) => { if (p.some(x => !isFinite(x))) return; const l = get().slice(); if (at >= 0) l[at] = p; else l.push(p); l.sort((x, y) => x[0] - y[0]);
+    for (let i = 1; i < l.length; i++) if (l[i][0] === l[i - 1][0]) return formError(d, "That value is in the list already."); formError(d, ""); set(l); setPick(l.indexOf(p)); run(); en(); };
+  q(d, "#efA").onclick = () => put(xy(), -1);
+  q(d, "#efM").onclick = () => getPick() >= 0 && put(xy(), getPick());
+  q(d, "#efR").onclick = () => { if (getPick() < 0) return; const l = get().slice(); l.splice(getPick(), 1); set(l); setPick(-1); run(); en(); };
+  q(d, "#efX").oninput = q(d, "#efY").oninput = en;
+  q(d, "#efY").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (!q(d, "#efA").disabled) put(xy(), -1); } };
+  en();
+  return en;
+}
+function etSave(d, kind, f, args, after) {
+  const name = q(d, "#efN").value.trim();
+  if (!name) { formError(d, "The function needs a name."); return false; }
+  Object.assign(args, {name, kind, was: f && f.name !== name ? f.name : undefined});
+  if (args.etabs_values) for (const k of Object.keys(args.etabs_values)) { const x = String(args.etabs_values[k] ?? "").trim(); if (x === "") delete args.etabs_values[k]; else args.etabs_values[k] = x; }
+  if (kind === "spectrum") { args.damping = fnum(d, "#efD"); if (!(args.damping >= 0 && args.damping < 1)) { formError(d, "The damping ratio is from 0 to below 1."); return false; } }
+  if (!args.points || args.points.length < 2) { formError(d, "The function needs two points at least."); return false; }
+  return submit(d, "define_function", args, after);
+}
+const etOkCancel = (center) => `<div style="display:flex;justify-content:${center ? "center" : "space-around"};gap:40px;margin-top:10px"><button id="efOK" class="primary" style="min-width:80px">OK</button><button id="efCan" style="min-width:80px">Cancel</button></div>`;
+
+// A code's Response Spectrum form, drawn from its spec (ET_RS): Parameters as ETABS lists them, the calculated boxes,
+// the points ETABS makes from them (its list is read-only), the Function Graph and Plot Options, Convert to User Defined.
+async function hmEtabsCode(code, f, after) {
+  const S = ET_RS[code]; if (!S) return hmSay(`There is no ${code} form.`, true);
+  const items = etRsItems(code), vals = f && f.etabs_values || {}, src = f && f.source || {}, name = f ? f.name : await etNewName(), damp = f ? f.damping : 0.05;
+  const v0 = {}; for (const i of items) if (i.k) v0[i.k] = i.nf ? (src["e:" + i.k] ?? (i.choices ? (Array.isArray(i.choices[0]) ? i.choices[0][0] : i.choices[0]) : i.def)) : vals[i.k] ?? (i.def ?? "");
+  const item = i => {
+    if (i.hidden) return "";
+    if (i.sep) return `<hr style="grid-column:1/4;width:100%;border:0;border-top:1px solid var(--fgroup)">`;
+    if (i.blank) return `<span style="grid-column:1/4;height:8px"></span>`;
+    if (i.heading) return `<span style="grid-column:1/4">${esc(i.heading)}</span>`;
+    const pad = i.indent ? "padding-left:14px" : "";
+    if (i.check) return `<label data-l="${esc(i.k)}" style="grid-column:1/${i.sameNext ? 2 : 4};${pad}"><input type="checkbox" data-k="${esc(i.k)}" ${/^(yes|true|1)$/i.test(String(v0[i.k])) ? "checked" : ""}> ${esc(i.label)}</label>`;
+    const help = i.help ? `<button type="button" class="efHelp" title="ETABS looks this up in the USGS hazard data for the site" style="padding:0 5px" disabled>?</button>` : "";
+    const w = i.wide ? "width:150px" : "width:105px";
+    const ctl = i.choices ? `<select data-k="${esc(i.k)}" style="${w}">${opts(i.choices, String(v0[i.k]))}</select>` : `<input data-k="${esc(i.k)}" value="${esc(v0[i.k])}" style="${w}">`;
+    const lab = i.sameRow ? "" : `<span data-l="${esc(i.k)}" style="white-space:pre;${pad}">${esc(i.label || "")}</span>`;
+    return `${lab}<span style="display:flex;gap:6px;justify-content:flex-end">${help}${ctl}</span><span class="u">${esc(i.unit || "")}</span>`;
+  };
+  const shown = items.filter(i => !i.hidden);
+  const rowsHtml = shown.map((i, n) => { const next = shown[n + 1]; if (i.check && next && next.sameRow) return item({...i, sameNext: true}); return item(i); }).join("");
+  const conv = `<div style="text-align:center;margin-top:auto;padding-top:10px"><button id="efConv">Convert to User Defined</button></div>`;
+  const params = `<fieldset style="margin:0;display:flex;flex-direction:column;${S.layout === "W" || S.layout === "I" ? "width:330px" : "flex:1"}"><legend>Parameters</legend>
+    <div class="g2" style="grid-template-columns:1fr auto 26px;gap:5px 6px">${rowsHtml}</div>${conv}${S.okLeft ? etOkCancel() : ""}</fieldset>`;
+  const nameRow = S.nameInline ? `<fieldset style="margin:0;flex:1"><div style="display:flex;align-items:center;gap:8px;padding-top:6px"><span>Function Name</span><input id="efN" value="${esc(name)}" style="flex:1"></div></fieldset>`
+    : `<fieldset style="margin:0;flex:1"><div style="display:flex;align-items:center;gap:10px;padding-top:6px"><span style="flex:1;padding-left:18px">Function Name</span><input id="efN" value="${esc(name)}" style="width:${S.layout === "W" ? 230 : 110}px"></div></fieldset>`;
+  const dampFs = `<fieldset style="margin:0;${S.layout === "W" ? "width:330px" : "width:175px"}"><legend style="white-space:nowrap">Function Damping Ratio</legend>${S.layout === "W" ? `<div style="display:flex;align-items:center;justify-content:space-between;padding:0 10px"><span>Damping Ratio</span><input id="efD" value="${esc(damp)}" style="width:100px"></div>`
+    : `<div style="text-align:center"><input id="efD" value="${esc(damp)}" style="width:110px"></div>`}</fieldset>`;
+  const graph = `<fieldset style="margin:0;flex:1"><legend>Function Graph</legend><div id="efG"></div><input id="efXY" readonly style="display:block;width:70%;margin:6px auto 0;text-align:center"></fieldset>`;
+  const list = etDefineList(S.legend || "Defined Function", "Period", "Acceleration", false, false, 5);
+  let body;
+  if (S.layout === "W") body = `<div style="display:flex;gap:10px">${nameRow}${dampFs}</div><div style="display:flex;gap:10px;margin-top:8px">${params}<div style="flex:1;display:flex;flex-direction:column;gap:8px">${graph}
+      <div style="display:flex;gap:10px">${etPointsTwo("Period", "Acceleration", 9)}${etPlotOpts("efPO")}</div></div></div>${S.okLeft ? "" : etOkCancel(true)}`;
+  else if (S.layout === "I") body = `<div style="display:flex;gap:10px">${params}<div style="flex:1;display:flex;flex-direction:column;gap:8px"><div style="display:flex;gap:10px">${nameRow}${dampFs}</div>${graph}
+      <div style="display:flex;gap:10px">${S.legend ? list : etPointsTwo("Period", "Acceleration", 9)}${etPlotOpts("efPO")}</div></div></div>${etOkCancel(true)}`;
+  else if (S.layout === "A") body = `<div style="display:flex;gap:10px">${nameRow}${dampFs}</div><div style="display:flex;gap:10px;margin-top:8px">${params}<div style="width:200px;display:flex;flex-direction:column;gap:8px">${list}${etPlotOpts("efPO")}</div></div>
+      <div style="margin-top:8px">${graph}</div>${etOkCancel(true)}`;
+  else body = `<div style="display:flex;gap:10px">${nameRow}${dampFs}</div><div style="display:flex;gap:10px;margin-top:8px">${params}<div style="width:200px">${list}</div></div>
+      <div style="display:flex;gap:10px;margin-top:8px">${graph}<div style="width:150px;display:flex;flex-direction:column;gap:10px">${etPlotOpts("efPO")}<div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:20px"><button id="efOK" class="primary" style="min-width:80px">OK</button><button id="efCan" style="min-width:80px">Cancel</button></div></div></div>`;
+  const d = dialog(S.title, body, [], {width: S.layout === "W" || S.layout === "I" ? 1000 : 620});
+  q(d, ".dt b").style.whiteSpace = "pre"; // ETABS's own title spacing ("Response Spectrum Function -  Chile ...")
+  let pts = [], last = {};
+  const read = () => { const v = {}; d.querySelectorAll("[data-k]").forEach(x => v[x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "No") : x.value);
+    for (const i of items) if (i.k && !(i.k in v)) v[i.k] = String(v0[i.k] ?? ""); return v; };
+  const plot = () => (d.querySelector("[name=efPO]:checked") || {}).value;
+  const run = () => {
+    const v = read();
+    // Which boxes ETABS greys in this state; a calculated box is filled by the form.
+    for (const i of items) if (i.k) d.querySelectorAll(`[data-k="${CSS.escape(i.k)}"]`).forEach(x => { x.disabled = i.en ? !i.en(v) : !!i.out; });
+    let r; try { r = etRsCalc(code, v); } catch (e) { r = null; }
+    last = r && r.set || {};
+    for (const i of items) if (i.k) { const l = d.querySelector(`[data-l="${CSS.escape(i.k)}"]`); if (l) l.style.color = (i.en && !i.en(v) && !i.out && !i.keepLabel) || (S.greyOff || []).includes(i.k) || (i.out && !i.show && (last[i.k] === "" || last[i.k] === undefined)) ? "#8d8d8d" : ""; }
+    for (const i of items) if (i.k && i.show) { const box = d.querySelector(`[data-k="${CSS.escape(i.k)}"]`); if (box) box.value = i.show(last); }
+    for (const [k, x] of Object.entries(last)) { const box = d.querySelector(`[data-k="${CSS.escape(k)}"]`); if (box && box.disabled && box.tagName === "INPUT" && box.type !== "checkbox") box.value = typeof x === "number" ? etNum(x) : x; else if (box && box.disabled && box.tagName === "SELECT") box.value = x; }
+    pts = r && r.pts ? r.pts.map(p => [+p[0], +p[1]]) : [];
+    formError(d, pts.length >= 2 ? "" : "These parameters give no spectrum: check the values.");
+    etPaintPoints(d, pts, -1); etGraph(q(d, "#efG"), pts, q(d, "#efXY"), plot());
+  };
+  // The table's fields: what the form shows (a greyed calculated box as worked out), the form-only boxes apart.
+  const values = () => { const v = read(), out = {}, form = {};
+    for (const i of items) if (i.k) { const box = d.querySelector(`[data-k="${CSS.escape(i.k)}"]`), off = box && box.disabled, x = off && i.k in last ? (typeof last[i.k] === "number" ? String(+last[i.k].toPrecision(10)) : last[i.k]) : v[i.k];
+      if (i.nf) form[i.k] = String(x ?? ""); else out[i.k] = String(x ?? ""); }
+    return {out, form}; };
+  const ok = () => { const {out, form} = values(); return etSave(d, "spectrum", f, {from: "points", points: pts, etabs_table: S.table, etabs_values: out, etabs_form: Object.keys(form).length ? form : undefined}, after); };
+  q(d, "#efOK").onclick = ok; q(d, "#efCan").onclick = () => d.close();
+  d.querySelectorAll("[data-k]").forEach(x => { x.onchange = run; x.oninput = run; });
+  d.querySelectorAll("[name=efPO]").forEach(x => x.onchange = () => etGraph(q(d, "#efG"), pts, q(d, "#efXY"), plot()));
+  q(d, "#efConv").onclick = () => { if (pts.length < 2) return; const nm = q(d, "#efN").value.trim(), dr = +q(d, "#efD").value; d.close();
+    hmEtabsUser("spectrum", {name: nm, damping: dr, points: pts, was: f && f.name}, after); };
+  run();
+}
+
+// User: the points typed in (or converted from a code, a type or a file).
+async function hmEtabsUser(kind, f, after) {
+  const rs = kind === "spectrum", name = f ? f.name : await etNewName();
+  let pts = f ? f.points.map(p => [p[0], p[1]]) : [], pick = -1;
+  const fixed = f && "was" in f ? (f.was ? {name: f.was} : null) : f;
+  const body = rs ? `<fieldset style="margin:0"><div style="display:flex;align-items:center;gap:14px;justify-content:center;padding-top:6px"><span>Response Spectrum Function Name</span><input id="efN" value="${esc(name)}" style="width:210px"></div></fieldset>
+      <fieldset><legend>Function Damping Ratio</legend><div style="text-align:center"><input id="efD" value="${esc(f && f.damping != null ? f.damping : 0.05)}" style="width:95px"></div></fieldset>
+      <div style="display:flex;gap:10px;align-items:flex-start"><div style="width:330px">${etDefineList("Defined Function", "Period", "Value", true, true, 6)}</div>
+      <div style="flex:1;margin-top:170px"><fieldset style="margin:0"><legend>Function Graph</legend><div id="efG"></div><input id="efXY" readonly style="display:block;width:90%;margin:6px auto 0"></fieldset></div></div>${etOkCancel(true)}`
+    : `<fieldset style="margin:0"><div style="display:flex;align-items:center;gap:14px;justify-content:center;padding-top:6px"><span>Time History Function</span><input id="efN" value="${esc(name)}" style="width:165px"></div></fieldset>
+      <div style="margin-top:8px">${etDefineList("Define Function", "Time", "Value", true, true, 8)}</div>
+      <fieldset style="margin-top:8px"><legend>Function Graph</legend><div id="efG"></div><input id="efXY" readonly style="display:block;width:70%;margin:6px auto 0"></fieldset>${etOkCancel(true)}`;
+  const d = dialog(rs ? "Response Spectrum Function Definition - User Defined" : "Time History Function Definition - User Defined", body, [], {width: rs ? 760 : 520});
+  const run = () => { etPaintPoints(d, pts, pick, i => { pick = i; q(d, "#efX").value = etNum(pts[i][0]); q(d, "#efY").value = etNum(pts[i][1]); run(); en(); }); etGraph(q(d, "#efG"), pts, q(d, "#efXY")); };
+  const en = etEntry(d, () => pts, x => { pts = x; }, () => pick, x => { pick = x; }, run);
+  q(d, "#efOK").onclick = () => etSave(d, kind, fixed, {from: "points", points: pts, etabs_table: rs ? "Functions - Response Spectrum - User Defined" : etThTable("User"), etabs_values: {}}, after);
+  q(d, "#efCan").onclick = () => d.close();
+  run();
+}
+
+// From File: the file's numbers read as the form says. A spectrum: Header Lines to Skip, Frequency or Period vs Value. A
+// time history: header lines, prefix characters per line, points per line, time and value pairs or values at equal
+// intervals, free or fixed format. ETABS's table keeps the file's settings and the points read, so the function goes back
+// to ETABS complete even where the file is not; OK and Convert to User are greyed until a file is read, as in ETABS.
+async function hmEtabsFromFile(kind, f, after) {
+  const rs = kind === "spectrum", vals = f && f.etabs_values || {}, src = f && f.source || {}, name = f ? f.name : await etNewName();
+  let pts = f ? f.points.map(p => [p[0], p[1]]) : [], text = null;
+  const vt = vals.ValueType || "", pairs = rs ? !/freq/i.test(vt) : vt ? !/equal|interval/i.test(vt) : false;
+  const fileFs = `<fieldset style="margin:0;flex:1"><legend>Function File</legend><div style="display:flex;justify-content:space-between;align-items:center"><span style="padding-left:8px">File Name</span><button id="efB">Browse...</button></div>
+      <input id="efFN" readonly style="width:100%;margin:3px 0;height:26px" value="${esc(vals.Filename || "")}">
+      <div style="margin-top:6px">File Loaded From</div><input id="efFrom" readonly style="width:100%;margin:3px 0;height:26px" value="${esc(src["f:from"] || (vals.Filename ? vals.Filename : "No file specified or file not found."))}">
+      <div class="g2" style="grid-template-columns:1fr 100px;margin-top:8px"><span>Header Lines to Skip</span><input id="efH" value="${esc(vals.HeaderSkip ?? (rs ? "0" : "2"))}">
+      ${rs ? "" : `<span>Prefix Chars. Per Line to Skip</span><input id="efP" value="${esc(vals.PrefixSkip ?? "0")}"><span>Number of Points per Line</span><input id="efK" value="${esc(vals.NumPoints ?? "8")}">`}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px"><button id="efConv">${rs ? "Convert to User Defined" : "Convert to User"}</button><button id="efView">View File</button></div></fieldset>`;
+  const graph = `<fieldset style="margin:0;flex:1"><legend>Function Graph</legend><div id="efG"></div><input id="efXY" readonly style="display:block;width:80%;margin:6px auto 0"></fieldset>`;
+  const body = rs ? `<fieldset style="margin:0"><div style="display:flex;align-items:center;gap:14px;justify-content:center;padding-top:6px"><span>Response Spectrum Function Name</span><input id="efN" value="${esc(name)}" style="width:165px"></div></fieldset>
+      <div style="display:flex;gap:10px;margin-top:8px"><div style="width:250px;display:flex;flex-direction:column;gap:8px"><div style="display:flex;gap:8px">
+        <fieldset style="margin:0;flex:1"><legend>Function Damping Ratio</legend><input id="efD" value="${esc(f ? f.damping : 0.05)}" style="width:72px;margin-top:8px"></fieldset>
+        <fieldset style="margin:0;flex:1.3"><legend>Values are:</legend><label style="display:block"><input type="radio" name="efV" value="Frequency vs Value" ${!pairs ? "checked" : ""}> Frequency vs Value</label>
+        <label style="display:block"><input type="radio" name="efV" value="Period vs Value" ${pairs ? "checked" : ""}> Period vs Value</label></fieldset></div>${fileFs}</div>${graph}</div>${etOkCancel(true)}`
+    : `<fieldset style="margin:0"><div style="display:flex;align-items:center;gap:14px;justify-content:center;padding-top:6px"><span>Time History Function</span><input id="efN" value="${esc(name)}" style="width:165px"></div></fieldset>
+      <div style="display:flex;gap:10px;margin-top:8px">${fileFs}<div style="width:240px;display:flex;flex-direction:column;gap:8px">
+        <fieldset style="margin:0"><legend>Values are:</legend><label style="display:block;margin:3px 0"><input type="radio" name="efV" value="Time and Function Values" ${pairs ? "checked" : ""}> Time and Function Values</label>
+        <label><input type="radio" name="efV" value="Values at Equal Intervals" ${!pairs ? "checked" : ""}> Values at Equal Intervals of</label> <input id="efI" style="width:70px" value="${esc(vals.EqualInt ?? "0.02")}"></fieldset>
+        <fieldset style="margin:0"><legend>Format Type</legend><label style="display:block;margin:3px 0"><input type="radio" name="efFT" value="Free" ${!/fix/i.test(vals.FormatType || "") ? "checked" : ""}> Free Format</label>
+        <label style="display:block;margin:3px 0"><input type="radio" name="efFT" value="Fixed" ${/fix/i.test(vals.FormatType || "") ? "checked" : ""}> Fixed Format</label>
+        <div style="display:flex;justify-content:flex-end;gap:6px;align-items:center"><span>Characters per Item</span><input id="efFL" style="width:70px" value="${esc(vals.CharPerItem || "")}"></div></fieldset></div></div>
+      <div style="margin-top:8px">${graph}</div>${etOkCancel(true)}`;
+  const d = dialog(rs ? "Response Spectrum Function Definition - From File" : "Time History Function Definition - From File", body, [], {width: rs ? 780 : 600});
+  const on = () => {
+    const eq = (d.querySelector("[name=efV]:checked") || {}).value === "Values at Equal Intervals", fx = (d.querySelector("[name=efFT]:checked") || {}).value === "Fixed";
+    if (d.querySelector("#efI")) q(d, "#efI").disabled = !eq;
+    if (d.querySelector("#efFL")) q(d, "#efFL").disabled = !fx;
+    q(d, "#efConv").disabled = q(d, "#efOK").disabled = pts.length < 2; q(d, "#efView").disabled = text === null;
+  };
+  const readFile = () => {
+    if (text === null) return true;
+    const skip = Math.max(0, parseInt(q(d, "#efH").value) || 0), pre = rs ? 0 : Math.max(0, parseInt(q(d, "#efP").value) || 0), mode = (d.querySelector("[name=efV]:checked") || {}).value;
+    const fixedW = !rs && (d.querySelector("[name=efFT]:checked") || {}).value === "Fixed" ? parseInt(q(d, "#efFL").value) : 0;
+    const per = rs ? 0 : Math.max(1, parseInt(q(d, "#efK").value) || 1), nums = [];
+    for (const raw of text.split(/\r?\n/).slice(skip)) {
+      const l = raw.slice(pre);
+      let it = fixedW > 0 ? Array.from({length: Math.ceil(l.length / fixedW)}, (_, i) => l.slice(i * fixedW, (i + 1) * fixedW).trim()).filter(Boolean) : l.trim().split(/[\s,;]+/).filter(Boolean);
+      if (per && mode === "Values at Equal Intervals") it = it.slice(0, per);
+      for (const x of it) { const v = Number(x); if (isFinite(v)) nums.push(v); }
+    }
+    if (mode === "Values at Equal Intervals") { const di = RS.n(q(d, "#efI").value); if (!(di > 0)) { formError(d, "The equal interval is above 0."); return false; } pts = nums.map((y, i) => [Math.round(i * di * 1e9) / 1e9, y]); }
+    else { pts = []; for (let i = 0; i + 1 < nums.length; i += 2) pts.push(mode === "Frequency vs Value" ? [nums[i] ? 1 / nums[i] : 0, nums[i + 1]] : [nums[i], nums[i + 1]]); pts.sort((x, y) => x[0] - y[0]); }
+    formError(d, ""); return true;
+  };
+  const run = () => { readFile(); on(); etGraph(q(d, "#efG"), pts, q(d, "#efXY")); };
+  q(d, "#efB").onclick = () => { const i = document.createElement("input"); i.type = "file"; i.onchange = () => { const fl = i.files[0]; if (!fl) return;
+    q(d, "#efFN").value = fl.name; q(d, "#efFrom").value = etFnFolder().replace(/\\?$/, "\\") + fl.name; fl.text().then(t => { text = t; run(); }); }; i.click(); };
+  q(d, "#efView").onclick = () => text !== null && dialog(q(d, "#efFN").value, `<textarea readonly style="width:560px;height:360px;font-family:monospace">${esc(text)}</textarea>`, [["OK"]], {width: 600});
+  d.querySelectorAll("#efH,#efP,#efK,#efI,#efFL,[name=efV],[name=efFT]").forEach(x => x.onchange = run);
+  q(d, "#efOK").onclick = () => { if (!readFile()) return; if (pts.length < 2) return formError(d, "Choose the function file (Browse...): it has no points yet.");
+    const ev = {Filename: q(d, "#efFN").value, HeaderSkip: q(d, "#efH").value, ValueType: (d.querySelector("[name=efV]:checked") || {}).value || ""};
+    if (!rs) Object.assign(ev, {PrefixSkip: q(d, "#efP").value, NumPoints: q(d, "#efK").value, FormatType: (d.querySelector("[name=efFT]:checked") || {}).value === "Fixed" ? "Fixed" : "Free",
+      CharPerItem: q(d, "#efFL").disabled ? "" : q(d, "#efFL").value, EqualInt: q(d, "#efI").disabled ? "" : q(d, "#efI").value});
+    etSave(d, kind, f, {from: "file", points: pts, etabs_table: rs ? "Functions - Response Spectrum - From File" : etThTable("From File"), etabs_values: ev, file: {from: q(d, "#efFrom").value}}, after); };
+  q(d, "#efCan").onclick = () => d.close();
+  q(d, "#efConv").onclick = () => { if (!readFile() || pts.length < 2) return; const nm = q(d, "#efN").value.trim(), damp = rs ? +q(d, "#efD").value : 0.05; d.close(); hmEtabsUser(kind, {name: nm, damping: damp, points: pts, was: f && f.name}, after); };
+  on(); etGraph(q(d, "#efG"), pts, q(d, "#efXY"));
+}
+
+// Sine, Cosine, Ramp, Sawtooth, Triangular and User Periodic: Parameters on the left, the points ETABS makes from them on
+// the right (User Periodic: one cycle typed in, with Add, Modify and Delete), the graph across the bottom.
+const etWaves = {
+  Sine: [["Period", "Period", "1"], ["StepsPerCyc", "Number of Steps per Cycle", "20"], ["NumCycles", "Number of Cycles", "5"], ["Amplitude", "Amplitude", "1"]],
+  Cosine: [["Period", "Period", "1"], ["StepsPerCyc", "Number of Steps per Cycle", "20"], ["NumCycles", "Number of Cycles", "5"], ["Amplitude", "Amplitude", "1"]],
+  Ramp: [["RampTime", "Ramp Time", "1"], ["Amplitude", "Amplitude", "1"], ["MaxTime", "Maximum Time", "20"]],
+  Sawtooth: [["Period", "Period", "1"], ["RampTime", "Ramp Time", "0.1"], ["NumCycles", "Number of Cycles", "5"], ["Amplitude", "Amplitude", "1"]],
+  Triangular: [["Period", "Period", "1"], ["NumCycles", "Number of Cycles", "5"], ["Amplitude", "Amplitude", "1"]],
+  "User Periodic": [["NumCycles", "Number of Cycles", "5"]],
+};
+async function hmEtabsWave(type, f, after) {
+  const P = etWaves[type]; if (!P) return hmSay(`There is no ${type} form.`, true);
+  const vals = f && f.etabs_values || {}, name = f ? f.name : await etNewName(), periodic = type === "User Periodic";
+  // User Periodic keeps its one cycle in ETABS's table rows.
+  let cycle = periodic && f ? (f.etabs_points && f.etabs_points.length ? f.etabs_points.map(p => [p[0], p[1]]) : f.points.map(p => [p[0], p[1]])) : [], pick = -1;
+  const d = dialog(`Time History Function Definition - ${type}`, `<fieldset style="margin:0"><div style="display:flex;align-items:center;gap:14px;justify-content:center;padding-top:6px"><span>Time History Function</span><input id="efN" value="${esc(name)}" style="width:165px"></div></fieldset>
+      <div style="display:flex;gap:10px;margin-top:8px"><fieldset style="margin:0;flex:1;display:flex;flex-direction:column"><legend>Parameters</legend><div class="g2" style="grid-template-columns:1fr 75px">${P.map(([k, label, def]) => `<span>${esc(label)}</span><input data-k="${k}" value="${esc(vals[k] ?? def)}">`).join("")}</div>
+        <div style="text-align:center;margin-top:auto;padding-top:14px"><button id="efConv">Convert to User</button></div></fieldset>
+      <div style="width:${periodic ? 270 : 180}px">${etDefineList("Define Function", "Time", "Value", periodic, periodic, 8)}</div></div>
+      <fieldset style="margin-top:8px"><legend>Function Graph</legend><div id="efG"></div><input id="efXY" readonly style="display:block;width:50%;margin:6px auto 0"></fieldset>${etOkCancel(true)}`, [], {width: 560});
+  const v = () => { const o = {}; d.querySelectorAll("[data-k]").forEach(x => o[x.dataset.k] = x.value.trim()); return o; };
+  const make = () => sapWavePoints(type, v(), cycle);
+  let en = () => {};
+  const run = () => { const p = make(), ok = typeof p !== "string"; formError(d, ok ? "" : p);
+    etPaintPoints(d, periodic ? cycle : ok ? p : [], pick, periodic ? i => { pick = i; q(d, "#efX").value = etNum(cycle[i][0]); q(d, "#efY").value = etNum(cycle[i][1]); run(); en(); } : null);
+    if (!periodic && ok && p.length) { q(d, "#efX").value = etNum(p[0][0]); q(d, "#efY").value = etNum(p[0][1]); }
+    etGraph(q(d, "#efG"), ok ? p : [], q(d, "#efXY")); };
+  if (periodic) { en = etEntry(d, () => cycle, x => { cycle = x; }, () => pick, x => { pick = x; }, run); q(d, "#efX").value = "0"; q(d, "#efY").value = "0"; en(); }
+  d.querySelectorAll("[data-k]").forEach(x => { x.oninput = run; });
+  q(d, "#efOK").onclick = () => { const p = make(); if (typeof p === "string") return formError(d, p);
+    etSave(d, "history", f, {from: "points", points: p, etabs_table: etThTable(type), etabs_values: v(), etabs_points: periodic ? cycle : undefined}, after); };
+  q(d, "#efCan").onclick = () => d.close();
+  q(d, "#efConv").onclick = () => { const p = make(); if (typeof p === "string") return formError(d, p); const nm = q(d, "#efN").value.trim(); d.close(); hmEtabsUser("history", {name: nm, points: p, was: f && f.name}, after); };
+  run();
+}
+
+// Matched to Response Spectrum: SAP2000's form is the same window in ETABS (pictures TH 10, 10a-10c); only its table and
+// field names differ, and ETABS puts an (i) beside each frequency range choice and the recursion factor.
+const etMatchedKeys = {TargetRS: "TgtRS", RSAccUnits: "TgtRSUnits", RefAccTH: "RefTH", RefTHAccUnits: "RefTHUnits", SpecMatchMethod: "SpecMatchMethod", FreqRangeOption: "FreqRangeOpt", FreqF1: "f1", FreqF2: "f2", nRecur: "nRecursions", RecurFact: "RecurFactor"};
+const etMatchedIo = {
+  etabs: true,
+  vals: f => { const e = f && f.etabs_values || {}, out = {}; for (const [s, k] of Object.entries(etMatchedKeys)) if (e[k] !== undefined) out[s] = e[k]; return out; },
+  newName: etNewName,
+  save: (d, f, sv, th, after) => { const ev = {}; for (const [s, k] of Object.entries(etMatchedKeys)) if (sv[s] !== undefined) ev[k] = sv[s];
+    return sapSave(d, "history", f, {from: "points", points: th, etabs_table: etThTable("Matched to Response Spectrum"), etabs_values: ev}, after); },
+  user: (name, th, was, after) => hmEtabsUser("history", {name, points: th, was}, after),
+};
+
 // Define > Load Cases as the programs show it: a table of Load Case Name and Load Case Type, and Click to: Add New Case,
 // Add Copy of Case, Modify/Show Case, Delete Case, Show Load Case Tree.
 async function hmCases() {
@@ -14889,14 +15784,14 @@ async function hmMass() {
   const a = await hmAnalysis(), ms = a.mass_source;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMass(); };
   // SAP2000 26.3's "Mass Source" (read on Ahmed's PC): Click to: without Make Default, and a Default Mass Source box below it.
-  const sap = program === "sap2000";
-  const d = listForm(sap ? "Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
+  const sap = program === "sap2000", one = sap || program === "etabs"; // ETABS 23.2 has the same list (pictured MassSource 1)
+  const d = listForm(one ? "Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
     ["Add New Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
     ["Add Copy of Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
     ["Modify/Show Mass Source...", () => hmMassData(again)],
     ["Delete Mass Source", () => hmSay("The default mass source cannot be deleted.", true)],
-    ...(sap ? [] : [["Make Default", () => hmSay(ms.name + " is the default mass source.")]]),
-  ], () => hmMassData(again), sap ? `<fieldset style="margin:8px 0 0"><legend>Default Mass Source</legend><select style="width:100%"><option>${esc(ms.name)}</option></select></fieldset>` : "");
+    ...(one ? [] : [["Make Default", () => hmSay(ms.name + " is the default mass source.")]]),
+  ], () => hmMassData(again), one ? `<fieldset style="margin:8px 0 0"><legend>Default Mass Source</legend><select style="width:100%"><option>${esc(ms.name)}</option></select></fieldset>` : "");
   d.querySelectorAll("[data-a]").forEach(b => { if (!/Modify/.test(b.textContent)) b.disabled = !/Default/.test(b.textContent) || false; });
 }
 async function hmMassData(after) {
@@ -14940,11 +15835,22 @@ async function hmMassData(after) {
   q(d, "#mDel").onclick = () => { if (at < 0) return; loads.splice(at, 1); at = -1; paint(); };
   q(d, "#mL").onchange = sync; if (q(d, "#mM")) q(d, "#mM").onchange = sync;
   sync(); paint();
+  // ETABS 23.2 (pictured MassSource 2, 3): the name and Mass Source on the left, the multipliers and Mass Options on the right.
+  if (program === "etabs") {
+    const db = d.querySelector(".db"), [nm, src, mul, opt] = [q(d, "#mN").closest("div"), d.querySelectorAll(".db > fieldset")[0], q(d, "#mMul"), d.querySelectorAll(".db > fieldset")[2]];
+    const L = document.createElement("div"), R = document.createElement("div"), box = document.createElement("fieldset");
+    db.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:12px"; box.style.margin = "0 0 8px"; box.appendChild(nm); nm.style.padding = "8px 4px";
+    L.append(box, src); R.append(mul, opt); db.append(L, R); d.style.width = "920px";
+    q(d, "#mT").style.width = "100%"; q(d, "#mT").parentElement.style.cssText = "flex:1;min-height:120px;border:1px solid #888;background:#fff";
+    d.querySelectorAll(".db label").forEach(l => l.style.margin = "6px 0");
+    if (!ms.move && !(ms.move_x || ms.move_y)) { q(d, "#mX").value = 0.05; q(d, "#mY").value = 0.05; }
+  }
 }
 
 async function hmPDelta() {
   const a = await hmAnalysis(), defs = await hmDefs(), pd = a.pdelta;
   let loads = pd.loads.map(l => ({...l}));
+  if (program === "etabs") return hmEtabsPDelta(pd, defs);
   const d = dialog("P-Delta Options", `<fieldset><legend>Automation</legend>${[["none", "None"], ["non-iterative", "Non-iterative, based on mass"], ["iterative", "Iterative, based on loads"]].map(([k, t]) => `<label style="display:block"><input type="radio" name="pM" value="${k}" ${pd.method === k ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>
     <fieldset><legend>Iteration Controls</legend><div class="g2"><span>Maximum iterations</span><input id="pI" type="number" value="${pd.iterations || 5}"><span>Relative tolerance</span><input id="pT" type="number" step="any" value="${pd.tolerance || 0.001}"></div></fieldset>
     <fieldset><legend>Load Patterns (iterative)</legend><table class="list hmgrid" id="pL"></table><button id="pAdd" style="margin-top:6px">Add</button></fieldset>`,
@@ -14956,6 +15862,35 @@ async function hmPDelta() {
   };
   q(d, "#pAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); paint(); };
   paint();
+}
+
+// ETABS 23.2's Preset P-Delta Options (pictured PDelta 1, 2): Automation Method (None, Non-iterative - Based on Mass,
+// Iterative - Based on Loads); Iterative P-Delta Load Case (Load Pattern and Scale Factor with Add, Modify, Delete) and the
+// Relative Convergence Tolerance, greyed unless the method is iterative.
+function hmEtabsPDelta(pd, defs) {
+  let loads = pd.loads.map(l => ({...l})), at = -1;
+  const pats = defs.load_patterns.map(p => p.name);
+  const d = dialog("Preset P-Delta Options", `<fieldset><legend>Automation Method</legend>${[["none", "None"], ["non-iterative", "Non-iterative - Based on Mass"], ["iterative", "Iterative - Based on Loads"]].map(([k, t]) => `<label style="display:block;margin:4px 0"><input type="radio" name="pM" value="${k}" ${(pd.method || "none") === k ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>
+    <fieldset id="pIt"><legend>Iterative P-Delta Load Case</legend><div style="display:grid;grid-template-columns:1fr 80px;gap:10px"><div><div style="display:grid;grid-template-columns:1fr 1fr;text-align:center"><span>Load Pattern</span><span>Scale Factor</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr"><select id="pP">${opts(pats, pats[0])}</select><input id="pF" type="number" step="any" value="1"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;height:110px;border:1px solid #888;background:#fff;overflow:auto;align-content:start" id="pL"></div></div>
+      <div style="display:flex;flex-direction:column;gap:6px;padding-top:36px"><button id="pAdd">Add</button><button id="pMod">Modify</button><button id="pDel">Delete</button></div></div>
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;margin-top:12px"><span style="white-space:nowrap">Relative Convergence Tolerance</span><input id="pT" type="number" step="any" value="${pd.tolerance || 0.0001}"></div></fieldset>`,
+    [["OK", d => submit(d, "define_pdelta", {method: q(d, "[name=pM]:checked").value, iterations: pd.iterations || 5, tolerance: fnum(d, "#pT"), loads: loads.map(l => ({pattern: l.pattern, factor: +l.factor}))}), true], ["Cancel"]], {width: 340});
+  const paint = () => {
+    q(d, "#pL").innerHTML = loads.map((l, i) => `<span data-i="${i}" style="padding:1px 4px;${i === at ? "background:#0078d7;color:#fff" : ""}">${esc(l.pattern)}</span><span data-i="${i}" style="padding:1px 4px;${i === at ? "background:#0078d7;color:#fff" : ""}">${esc(String(l.factor))}</span>`).join("");
+    d.querySelectorAll("#pL [data-i]").forEach(s => s.onclick = () => { at = +s.dataset.i; q(d, "#pP").value = loads[at].pattern; q(d, "#pF").value = loads[at].factor; paint(); });
+    const it = q(d, "[name=pM]:checked").value === "iterative";
+    q(d, "#pIt").style.color = it ? "" : "#999"; q(d, "#pIt").querySelectorAll("input,select,button").forEach(x => x.disabled = !it);
+    if (it) q(d, "#pMod").disabled = q(d, "#pDel").disabled = at < 0;
+  };
+  const row = () => ({pattern: q(d, "#pP").value, factor: fnum(d, "#pF")});
+  q(d, "#pAdd").onclick = () => { const r = row(); if (!r.pattern) return; const k = loads.findIndex(l => l.pattern === r.pattern); if (k >= 0) loads[k] = r; else loads.push(r); at = -1; paint(); };
+  q(d, "#pMod").onclick = () => { if (at < 0) return; loads[at] = row(); paint(); };
+  q(d, "#pDel").onclick = () => { if (at < 0) return; loads.splice(at, 1); at = -1; paint(); };
+  d.querySelectorAll("[name=pM]").forEach(r => r.onchange = paint);
+  paint();
+  return d;
 }
 
 // ---- Edit > Model Text: the model in the program's own text, one section at a time (the safety net) ----

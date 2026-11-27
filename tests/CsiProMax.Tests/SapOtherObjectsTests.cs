@@ -129,5 +129,43 @@ static class SapOtherObjectsTests
                 catch (Exception ex) when (ex is ToolInputException or ArgumentException or CsiProMax.Assistant.Etabs.EtabsException) { Check(ex.Message.Contains(says, StringComparison.OrdinalIgnoreCase), $"'{says}' expected in: {ex.Message}"); }
             }
         });
+
+        yield return ("sap2000 Assign > Cable, Tendon, Solid and Link/Support Loads: rows set by load pattern with Add, Replace and Delete, in SAP2000's tables (Frame-named with Cable/Tendon flags where SAP2000 has them), through the .s2k and back", () =>
+        {
+            var m = S2kReader.Read(WithOthers(), "Others").Model;
+            var pat = m.LoadPatterns[0].Name;
+            Dictionary<string, string> R(params (string K, string V)[] f) => f.ToDictionary(x => x.K, x => x.V);
+            var link = new OfflineEtabs(m);
+            JsonNode Set(string table, string obj, string option, params Dictionary<string, string>[] rows) =>
+                CaseTools.All.Single(x => x.Name == "assign_sap_loads").Invoke(JsonDocument.Parse(JsonSerializer.Serialize(new { table, objects = new[] { obj }, pattern = pat, option, rows })).RootElement, link);
+            Set("Cable Loads - Distributed", "C1", "replace", R(("CoordSys", "Local"), ("Type", "Force"), ("Dir", "2"), ("FOverL", "3")));
+            Set("Cable Loads - Distributed", "C1", "add", R(("CoordSys", "GLOBAL"), ("Type", "Moment"), ("Dir", "Z"), ("MOverL", "1.5")));
+            Set("Cable Loads - Gravity", "C2", "replace", R(("CoordSys", "GLOBAL"), ("MultiplierX", "0"), ("MultiplierY", "0"), ("MultiplierZ", "-1")));
+            Set("Cable Loads - Temperature", "C2", "replace", R(("Type", "Temperature"), ("Temp", "20"), ("JtPattern", "Default")));
+            Set("Tendon Loads - Tension Force Or Stress", "T1", "replace", R(("LoadType", "Stress"), ("Stress", "1500000"), ("JackFrom", "I-End"), ("Curvature", "0.15"), ("Wobble", "0.003"), ("LossAnchor", "0.006")));
+            Set("Tendon Loads - Strain", "T1", "replace", R(("Component", "Strain11"), ("Strain", "0.0001")));
+            Set("Solid Loads - Surface Pressure", "S1", "replace", R(("Face", "6"), ("Pressure", "4")));
+            Set("Link Loads - Gravity", "L1", "replace", R(("CoordSys", "GLOBAL"), ("MultiplierX", "0"), ("MultiplierY", "0"), ("MultiplierZ", "-1")));
+            Check(SapOtherObjects.Rows(m, "cable", "C1", "Cable Loads - Distributed").Count == 2, "Add to Existing keeps the first cable load");
+            Set("Cable Loads - Distributed", "C1", "replace", R(("CoordSys", "GLOBAL"), ("Type", "Force"), ("Dir", "Gravity"), ("FOverL", "2")));
+            var c1 = SapOtherObjects.Rows(m, "cable", "C1", "Cable Loads - Distributed");
+            Check(c1.Count == 1 && c1[0]["Dir"] == "Gravity" && !c1[0].ContainsKey("MOverL"), "Replace leaves the one new row, with none of the old fields: " + string.Join(" | ", c1.Select(r => string.Join(",", r))));
+            var text = S2kWriter.Write(m).Text;
+            var grav = Rows(text, "CABLE LOADS - GRAVITY");
+            Check(grav.Count == 1 && grav[0].GetValueOrDefault("Frame") == "C2" && grav[0].GetValueOrDefault("Cable") == "Yes" && grav[0].GetValueOrDefault("Tendon") == "No" && grav[0].GetValueOrDefault("MultiplierZ") == "-1",
+                "cable gravity in SAP2000's frame shape: " + string.Join(" | ", grav.Select(r => string.Join(",", r))));
+            Check(Rows(text, "CABLE LOADS - DISTRIBUTED").Single().GetValueOrDefault("Cable") == "C1", "cable distributed names the cable");
+            Check(Rows(text, "TENDON LOADS - TENSION FORCE OR STRESS").Single() is var t && t.GetValueOrDefault("Tendon") == "T1" && t.GetValueOrDefault("Stress") == "1500000" && t.GetValueOrDefault("LoadPat") == pat, "the tendon load");
+            Check(Rows(text, "TENDON LOADS - STRAIN").Single().GetValueOrDefault("Tendon") == "Yes", "the tendon strain row says Tendon=Yes");
+            Check(Rows(text, "SOLID LOADS - SURFACE PRESSURE").Single().GetValueOrDefault("Face") == "6", "the solid face 6 pressure");
+            Check(Rows(text, "LINK LOADS - GRAVITY").Single().GetValueOrDefault("Link") == "L1", "the link gravity");
+            var again = S2kReader.Read(text, "Again").Model;
+            Check(SapOtherObjects.Rows(again, "cable", "C2", "Cable Loads - Temperature").Single()["JtPattern"] == "Default", "the cable temperature by joint pattern came back from the .s2k");
+            Set("Cable Loads - Temperature", "C2", "delete");
+            Check(SapOtherObjects.Rows(m, "cable", "C2", "Cable Loads - Temperature").Count == 0, "Delete Existing Loads takes the cable's temperature load off");
+            foreach (var (table, obj, says) in new[] { ("Cable Loads - Distributed", "NOPE", "There is no cable"), ("Solid Loads - Gravity", "C1", "There is no solid") })
+                try { Set(table, obj, "replace", R(("CoordSys", "GLOBAL"))); throw new Exception("not refused: " + table); }
+                catch (Exception ex) when (ex is ToolInputException or ArgumentException) { Check(ex.Message.Contains(says), $"'{says}' expected in: {ex.Message}"); }
+        });
     }
 }
