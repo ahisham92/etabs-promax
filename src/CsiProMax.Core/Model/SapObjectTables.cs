@@ -32,6 +32,11 @@ public static class SapObjectTables
         ["Frame P-Delta Force Assignments"] = ("frame", true, ["CoordSys", "Direction", "Force"]),
         ["Frame Rebar Ratio For Creep Analysis Assignments"] = ("frame", false, ["IsUser", "UserRatio"]),
         ["Frame Spring Assignments"] = ("frame", true, ["Type", "Stiffness", "SimpleType", "LinkProp", "Dir1Type", "Dir", "Axis1Angle", "CoordSys", "VecX", "VecY", "VecZ", "Axis2Angle", "AutoBridge", "BridgeObj"]),
+        ["Frame Material Temperatures"] = ("frame", false, ["Cable", "Tendon", "Temp", "JtPattern"]),
+        ["Frame Offset Along Length Assignments"] = ("frame", false, ["Type", "LengthI", "LengthJ", "RigidFactor"]),
+        ["Frame Hinge Assigns 00 - Hinge Distribution Type"] = ("frame", false, ["HgeDistrTyp", "IsHgeLenRel", "HgeLenRel", "HgeLenAbs", "IntgrType", "SpaceType", "MaxSpace", "NumHgeSpace", "HngAtEnds"]),
+        ["Frame Hinge Assigns 02 - User Defined Properties"] = ("frame", true, ["HgeDistrTyp", "AssignProp", "GenHinge", "SaveFibResp", "DistType", "RelDist", "AbsDist", "ActualRDist", "ActualDist", "LenOWType", "LenOWRel", "LenOWAbs"]),
+        ["Frame Hinge Assigns 09 - Hinge Overwrites"] = ("frame", false, ["AutoDivide", "RelLength", "UseHngLenOW", "NoLoadDrop", "LimNegStiff"]),
         ["Frame Loads - Gravity"] = ("frame", true, ["Cable", "Tendon", "LoadPat", "CoordSys", "MultiplierX", "MultiplierY", "MultiplierZ"]),
         ["Frame Loads - Deformation"] = ("frame", true, ["Cable", "Tendon", "LoadPat", "IncludeU1", "IncludeU2", "IncludeU3", "IncludeR1", "IncludeR2", "IncludeR3", "U1", "U2", "U3", "R1", "R2", "R3"]),
         ["Frame Loads - Target Force"] = ("frame", true, ["Cable", "Tendon", "LoadPat", "IncludeP", "IncludeV2", "IncludeV3", "IncludeT", "IncludeM2", "IncludeM3", "P", "V2", "V3", "T", "M2", "M3", "RelLocP", "RelLocV2", "RelLocV3", "RelLocT", "RelLocM2", "RelLocM3"]),
@@ -78,7 +83,8 @@ public static class SapObjectTables
 
     /// <summary>Tables the Modeler's own model also carries (a coarser way): S2kReader keeps SAP2000's row on the object too,
     /// and S2kWriter writes that row in place of the one it makes from the model.</summary>
-    public static readonly string[] AlsoNative = ["Joint Added Mass Assignments", "Joint Spring Assignments 1 - Uncoupled"];
+    public static readonly string[] AlsoNative = ["Joint Added Mass Assignments", "Joint Spring Assignments 1 - Uncoupled", "Frame Offset Along Length Assignments",
+        "Frame Hinge Assigns 00 - Hinge Distribution Type", "Frame Hinge Assigns 02 - User Defined Properties", "Frame Hinge Assigns 09 - Hinge Overwrites"];
 
     public static bool Has(string table) => Tables.ContainsKey(table);
 

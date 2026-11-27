@@ -23,7 +23,7 @@ public static class ModelerTools
             """
             {"type":"object","required":["title"],"properties":{
               "title":{"type":"string"},
-              "program":{"type":"string","enum":["etabs","sap2000","safe"],"description":"The CSI program the model is for (default etabs): the Modeler then offers what that program has, and saving writes its file (.e2k, .s2k or .f2k) beside the .cpm."},
+              "program":{"type":"string","enum":["etabs","sap2000","safe"],"description":"The CSI program the model is for (default etabs): the Modeler then offers what that program has, and saving writes its file (.e2k, .s2k or .f2k) beside the Modeler's own file (.cpme, .cpms or .cpmf)."},
               "template":{"type":"string","enum":["empty","concrete_frame","blank","grid_only","beam","steel_deck","staggered_truss","flat_slab","flat_slab_perimeter_beams","waffle_slab","two_way_or_ribbed_slab"],"description":"empty or concrete_frame; or one of the program's New Model Quick Templates (blank ... two_way_or_ribbed_slab), built from x_grids, y_grids, story_data and 'quick'."},
               "x_grids":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"},"at":{"type":"number"},"visible":{"type":"boolean"},"bubble":{"type":"string"}}},"description":"Quick templates: the grid lines spaced along X (a line at x = at), in m."},
               "y_grids":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"},"at":{"type":"number"},"visible":{"type":"boolean"},"bubble":{"type":"string"}}}},
@@ -37,7 +37,7 @@ public static class ModelerTools
             """, Ask.Always, NewModel, a => $"Start a new model '{a.Text("title")}' (replaces the one open in the Modeler)"),
 
         new("set_model_program",
-            "Changes the CSI program the Modeler's model is for (etabs, sap2000 or safe): the Modeler then offers what that program has, and saving writes its file beside the .cpm. Nothing in the model is removed: what the new program has no place for stays in the .cpm and is said in the answer.",
+            "Changes the CSI program the Modeler's model is for (etabs, sap2000 or safe): the Modeler then offers what that program has, and saving writes its file beside the Modeler's own file, which takes that program's extension (.cpme, .cpms or .cpmf). Nothing in the model is removed: what the new program has no place for stays in the Modeler's file and is said in the answer.",
             """{"type":"object","required":["program"],"properties":{"program":{"type":"string","enum":["etabs","sap2000","safe"]}}}""",
             Ask.Changes, SetProgram, a => $"Make the model for {StructuralModel.TargetName(a.Text("program"))}"),
 
@@ -47,12 +47,12 @@ public static class ModelerTools
             Ask.Never, SetDisplayUnits),
 
         new("open_model_file",
-            "Opens a model file in the Modeler: an ETABS text file (.e2k, .$et), a SAP2000 text file (.s2k, .$2k), a SAFE text file (.f2k, .$fk) or a Modeler file (.cpm). A .s2k or .f2k the Modeler saved opens exactly as it was saved; one SAP2000 or SAFE wrote is read from its tables (levels from the Z grid lines, members on the level of their top end), and what has no place in the Modeler yet comes back in not_read. Everything in an .e2k is kept, also what the Modeler does not show, and is written back on save. The model in the Modeler now is replaced.",
-            """{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"The file's full path."}}}""",
+            "Opens a model file in the Modeler: an ETABS text file (.e2k, .$et), a SAP2000 text file (.s2k, .$2k), a SAFE text file (.f2k, .$fk) or a Modeler file (.cpme for ETABS, .cpms for SAP2000, .cpmf for SAFE, or an old .cpm). A .s2k or .f2k the Modeler saved opens exactly as it was saved; one SAP2000 or SAFE wrote is read from its tables (levels from the Z grid lines, members on the level of their top end), and what has no place in the Modeler yet comes back in not_read. Everything in an .e2k is kept, also what the Modeler does not show, and is written back on save. The model in the Modeler now is replaced. With 'for_program', a file made for another program is not opened: the answer says so (needs_choice), and the call is made again with 'convert' true (the model is made for for_program) or false (it stays for the file's program).",
+            """{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"The file's full path."},"for_program":{"type":"string","enum":["etabs","sap2000","safe"],"description":"The program the Modeler's window works in. Leave it out to keep the file's own program."},"convert":{"type":"boolean","description":"With for_program: true makes a file of another program a model for for_program, false keeps the file's program."}}}""",
             Ask.Always, Open, a => $"Open {a.Text("path")} (replaces the model open in the Modeler)"),
 
         new("save_model_as",
-            "Saves the Modeler's model under a name: an ETABS text file (.e2k) that licensed ETABS imports with File > Import > ETABS .e2k text file, and the Modeler's own .cpm beside it. Default folder: Documents\\CSI ProMax\\Models. The model is checked first and the findings come back with the answer.",
+            "Saves the Modeler's model under a name: an ETABS text file (.e2k) that licensed ETABS imports with File > Import > ETABS .e2k text file, and the Modeler's own file beside it with the extension of the model's program (.cpme, .cpms or .cpmf). Default folder: Documents\\CSI ProMax\\Models. The model is checked first and the findings come back with the answer.",
             """{"type":"object","properties":{"name":{"type":"string","description":"File name without extension. Default: the model's title."},"folder":{"type":"string"}}}""",
             Ask.Always, SaveAs, a => $"Save the model as {(a.Text("name").Length > 0 ? a.Text("name") : "its title")}.e2k"),
 
@@ -187,6 +187,7 @@ public static class ModelerTools
         var target = Target(a.Need("program"));
         var was = o.Model.Target;
         o.Edit(m => m.Target = target);
+        o.ChooseProgram = false;
         var kept = new List<string>();
         var x = o.Model.Extras;
         if (target != "sap2000" && x is not null && (x.Constraints.Count + x.Lanes.Count + x.Vehicles.Count + x.MovingCases.Count) > 0) kept.Add("joint constraints and moving loads (SAP2000 only)");
@@ -195,7 +196,7 @@ public static class ModelerTools
         {
             ["program"] = StructuralModel.TargetName(target), ["was"] = StructuralModel.TargetName(was),
             ["kept_but_not_used"] = new JsonArray(kept.Select(k => (JsonNode)k).ToArray()),
-            ["saves"] = target switch { "sap2000" => ".cpm, .e2k and .s2k", "safe" => ".cpm, .e2k and .f2k", _ => ".cpm and .e2k" },
+            ["saves"] = target switch { "sap2000" => ".cpms, .e2k and .s2k", "safe" => ".cpmf, .e2k and .f2k", _ => ".cpme and .e2k" },
         };
     }
 
@@ -214,8 +215,25 @@ public static class ModelerTools
         else
         try { opened = OfflineEtabs.Open(path); }
         catch (Exception ex) when (ex is E2k.E2kFormatException or JsonException or IOException or InvalidDataException) { throw new ToolInputException($"The file could not be read: {ex.Message}"); }
+        // The window works in one program: a file made for another is converted only when the person says so, and
+        // with no window asking (the chat, the CLI, the tests) the file keeps its own program.
+        var mine = a.Text("for_program").ToLowerInvariant();
+        var theirs = opened.Model.Target is { Length: > 0 } t ? t : "etabs";
+        if (mine.Length > 0 && mine != theirs)
+        {
+            if (!a.TryGetProperty("convert", out var c) || c.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                return new JsonObject
+                {
+                    ["opened"] = false, ["needs_choice"] = true, ["path"] = path,
+                    ["file_program"] = StructuralModel.TargetName(theirs), ["file_program_key"] = theirs,
+                    ["window_program"] = StructuralModel.TargetName(Target(mine)), ["window_program_key"] = mine,
+                };
+        }
         o.Replace(opened.Model, OfflineEtabs.SavesTo(path, opened));
+        // Converted: the model is now for the window's program, which its file does not say yet, so it is unsaved.
+        if (mine.Length > 0 && mine != theirs && a.Flag("convert", false)) o.Edit(m => m.Target = Target(mine));
         var result = Summary(o).AsObject();
+        if (o.Model.Target != theirs) result["converted_from"] = StructuralModel.TargetName(theirs);
         if (o.Path.Length == 0) result["note"] = "Opened as a copy: saving writes a new .e2k, the file you opened is not changed.";
         // What another program's file had that the Modeler has no place for yet: for the chat to say if asked, never a pop-up.
         if (opened.Notes.Count > 0) result["not_read"] = new JsonArray(opened.Notes.Take(40).Select(n => (JsonNode)n).ToArray());
@@ -234,14 +252,14 @@ public static class ModelerTools
         var program = o.Model.Target;
         return new JsonObject
         {
-            ["file"] = o.ProgramFile.Length > 0 ? o.ProgramFile : saved, ["e2k"] = saved, ["modeler_file"] = Path.ChangeExtension(saved, ModelFile.Extension),
+            ["file"] = o.ProgramFile.Length > 0 ? o.ProgramFile : saved, ["e2k"] = saved, ["modeler_file"] = ModelFile.PathFor(saved, o.Model.Target),
             ["program"] = StructuralModel.TargetName(program),
             ["errors"] = findings.Count(f => f.Severity == Severity.Error), ["warnings"] = findings.Count(f => f.Severity == Severity.Warning),
             ["findings"] = new JsonArray(findings.Take(30).Select(f => (JsonNode)$"{f.Severity}: {f.Message}").ToArray()),
             ["next"] = program switch
             {
-                "sap2000" => o.ProgramFile.Length > 0 ? "In licensed SAP2000: File > Import > SAP2000 .s2k Text File, then run the analysis there. The Modeler does not analyse." : "The .s2k could not be written; the .cpm and .e2k hold the model.",
-                "safe" => o.ProgramFile.Length > 0 ? "In licensed SAFE: File > Import > SAFE .F2K file, then run the analysis and design there. The Modeler does not analyse." : "No floor here has slabs SAFE can take, so no .f2k was written; the .cpm and .e2k hold the model.",
+                "sap2000" => o.ProgramFile.Length > 0 ? "In licensed SAP2000: File > Import > SAP2000 .s2k Text File, then run the analysis there. The Modeler does not analyse." : "The .s2k could not be written; the .cpms and .e2k hold the model.",
+                "safe" => o.ProgramFile.Length > 0 ? "In licensed SAFE: File > Import > SAFE .F2K file, then run the analysis and design there. The Modeler does not analyse." : "No floor here has slabs SAFE can take, so no .f2k was written; the .cpmf and .e2k hold the model.",
                 _ => "In licensed ETABS: File > Import > ETABS .e2k text file, then run the analysis there. The Modeler does not analyse.",
             },
         };

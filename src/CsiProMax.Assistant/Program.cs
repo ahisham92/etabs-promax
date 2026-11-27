@@ -18,7 +18,8 @@ namespace CsiProMax.Assistant;
 /// </summary>
 public static class Program
 {
-    /// <summary>The Modeler's model: the file named after --modeler when there is one and it reads, otherwise a new model.</summary>
+    /// <summary>The Modeler's model: the file named after --modeler when there is one and it reads (for the program the
+    /// file is for), otherwise a new model whose program the window asks for first.</summary>
     private static OfflineEtabs OpenModeler(string[] args)
     {
         var at = Array.IndexOf(args, "--modeler");
@@ -26,7 +27,9 @@ public static class Program
         if (file is not null && File.Exists(file))
             try { var opened = OfflineEtabs.Open(file); return new OfflineEtabs(opened.Model, OfflineEtabs.SavesTo(file, opened)); }
             catch (Exception ex) when (ex is IOException or CsiProMax.E2k.E2kFormatException or System.Text.Json.JsonException or InvalidDataException) { Note("modeler file", ex); }
-        return new OfflineEtabs();
+        // Started with no file (the Engine's shortcut): the window first asks which program to work in. A file given
+        // (a double-click on it) says its program itself, so nothing is asked.
+        return new OfflineEtabs { ChooseProgram = true };
     }
 
     /// <summary>
@@ -133,6 +136,16 @@ public static class Program
         }
         // The version, printed, and no window: on 2026-11-27 "--version" on Ahmed's PC opened a CSI ProMax window instead.
         if (args.Contains("--version")) { Console.WriteLine(VersionText()); return 0; }
+        // Asks the full field test running on this PC to stop at its next step and write its report (FieldTest.StopFileFor).
+        if (args.Contains("--fieldtest-stop"))
+        {
+            var stop = FieldTest.StopFileFor(null);
+            if (!FieldTest.RunningOnThisPc()) { Console.WriteLine("No full field test is running on this PC."); return 1; }
+            Directory.CreateDirectory(Path.GetDirectoryName(stop)!);
+            File.WriteAllText(stop, DateTime.Now.ToString("u"));
+            Console.WriteLine("Asked the running field test to stop at its next step: " + stop);
+            return 0;
+        }
         if (args.Contains("--check-update"))
         {
             try

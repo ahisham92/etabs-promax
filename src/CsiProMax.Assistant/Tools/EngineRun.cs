@@ -116,7 +116,7 @@ public static class EngineRun
             string file = "";
             var folder = RunFolder(model);
             if (!current)
-                try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
+                try { file = model.WriteForRun(Path.Combine(folder, RunName(model) + ".e2k")); }
                 catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
             Lines.Clear(); _error = ""; _pack = null; _lost = null; _probe = null; _done = false; _running = true; _closed = false; _keptOpen = false; _cancel = false; _window = null; _seenNotices = 0;
             _mon = new RunMonitor(program) { CaseCount = CasesOf(model) };
@@ -152,6 +152,14 @@ public static class EngineRun
         var root = model.Path.Length > 0 ? Path.GetDirectoryName(model.Path)! : OfflineEtabs.DefaultFolder;
         return Path.Combine(root, name + " run");
     }
+
+    /// <summary>
+    /// The name the run's file is written under: the model file's own name, and the model's title only for a model never
+    /// saved. A Verification example (HK CP-2013 Ex002.EDB) carries the title of another ("Eurocode 2-2004 CO-FR-002"),
+    /// so its run was written under that name (0.4.70 full test, 2026-11-27).
+    /// </summary>
+    internal static string RunName(OfflineEtabs model) =>
+        model.Path.Length > 0 && Path.GetFileNameWithoutExtension(model.Path.Replace('\\', '/')) is { Length: > 0 } own ? Safe(own) : Safe(model.Model.Title);
 
     private static string Safe(string title)
     {
@@ -214,7 +222,7 @@ public static class EngineRun
             // then written again and analysed first, never handed to the program as a missing file.
             if (!mustAnalyse && !File.Exists(file))
             {
-                try { file = _model!.WriteForRun(Path.Combine(folder, Safe(_model.Model.Title) + ".e2k")); }
+                try { file = _model!.WriteForRun(Path.Combine(folder, RunName(_model) + ".e2k")); }
                 catch (EtabsException ex) { Fail($"The analysed {program.Name} model file is gone and the model could not be written again: {ex.Message}"); return; }
                 mustAnalyse = true;
                 Say($"The analysed model file is gone, so {program.Name} analyses the model again first");

@@ -155,10 +155,28 @@ public static class FieldTest
             // One full test at a time on a PC, whoever starts it: two at once opened windows of the same program
             // seconds apart and worked in each other's (Ahmed's PC, 2026-11-25).
             if (o.Full) only = OnlyOne(o.LockFile);
+            if (o.Full)
+            {
+                _stopFile = StopFileFor(o.LockFile);
+                try { File.Delete(_stopFile); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* an old request is not this run's */ }
+            }
             return RunCore(link, o);
         }
-        finally { only?.Dispose(); Volatile.Write(ref _running, 0); }
+        finally { _stopFile = null; only?.Dispose(); Volatile.Write(ref _running, 0); }
     }
+
+    /// <summary>
+    /// The file that asks a running full test to stop: each step not yet started is then listed as not tested, its
+    /// scratch windows close and the report and zip are written, so the lock is free for the next run. A session that
+    /// may not end processes (Ahmed's PC, 2026-11-27: 0.4.70's run went on for hours after its fix was released)
+    /// writes it with --fieldtest-stop.
+    /// </summary>
+    public static string StopFileFor(string? lockFile) => Path.ChangeExtension(lockFile ?? DefaultLockFile, ".stop");
+
+    private static volatile string? _stopFile;
+
+    /// <summary>Whether the running full test was asked to stop (<see cref="StopFileFor"/>).</summary>
+    public static bool StopRequested => _stopFile is { } f && File.Exists(f);
 
     /// <summary>True while a full field test runs on this PC, in this window or any other process (it holds the lock file).</summary>
     public static bool RunningOnThisPc(string? file = null)
@@ -1113,7 +1131,7 @@ public static class FieldTest
     /// <summary>File kinds the zip takes from the test's folder: what was written and read, never the programs' model files.</summary>
     private static readonly HashSet<string> Small = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".md", ".txt", ".log", ".out", ".json", ".csv", ".e2k", ".$et", ".s2k", ".$2k", ".f2k", ".$fk", ".cpm", ".cpmx",
+        ".md", ".txt", ".log", ".out", ".json", ".csv", ".e2k", ".$et", ".s2k", ".$2k", ".f2k", ".$fk", ".cpme", ".cpms", ".cpmf", ".cpm", ".cpmx",
         ".xlsx", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".png", ".jpg",
         // The scratch models themselves and what the programs wrote beside them (Ahmed, 2026-11-26: one run must bring
         // everything needed, with no second ask): only the test's own models are in the work folder.
