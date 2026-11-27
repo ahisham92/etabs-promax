@@ -5231,6 +5231,8 @@ async function hmDefineTable(spec) {
   const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000" && spec === "Generalized Displacement Definitions" && dd.tables[spec]) return hmSapGenDispl(dd.tables[spec].rows);
   if (program === "sap2000" && spec === "Joint Pattern Definitions" && dd.tables[spec]) return hmSapJointPatterns(dd.tables[spec].rows);
+  if (program === "sap2000" && spec === "Cable Section Definitions" && dd.tables[spec]) return hmSapRodSections("cable", null, dd);
+  if (program === "sap2000" && spec === "Solid Property Definitions" && dd.tables[spec]) return hmSapRodSections("solid", null, dd);
   const defs = tables.map(t => dd.tables[t]); if (defs.some(x => !x)) return hmSay("The " + progLabel(program) + " model has no " + tables[0] + ".", true);
   const key = t => dd.tables[t].fields[0][0];
   const names = [...new Set(tables.flatMap(t => dd.tables[t].rows.map(r => r[key(t)])))];
@@ -6579,11 +6581,94 @@ function hmSapConstraints(xd, again) {
   const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !xd.constraints.length;
   return d;
 }
+// SAP2000 26.3's Tendon Sections, Cable Sections and Solid Properties: the list with Add New / Add Copy / Modify/Show /
+// Delete, and Tendon Section Data, Cable Section Data and Solid Property Data as SAP2000 shows them. Kept as SAP2000's
+// own table rows (Tendon/Cable Section Definitions, Solid Property Definitions); a tendon section is also the Engine's own.
+async function hmSapRodSections(kind, xd, dd) {
+  dd = dd || (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  if (kind === "tendon") xd = xd || (await hmRun("extra_definitions", {}, true)).result || {tendon_sections: []};
+  const pd = (await hmRun("property_definitions", {}, true)).result || {materials: []};
+  const K = {tendon: {table: "Tendon Section Definitions", key: "TendonSect", list: "Tendon Sections", what: "Sections", title: "Tendon Section Data", name: "Tendon Section Name", pre: "TEN", unit: "Section", color: "Magenta", mat: m => /tendon/i.test(m.type)},
+    cable: {table: "Cable Section Definitions", key: "CableSect", list: "Cable Sections", what: "Sections", title: "Cable Section Data", name: "Cable Section Name", pre: "CAB", unit: "Section", color: "Yellow", mat: m => /steel|tendon|rebar/i.test(m.type)},
+    solid: {table: "Solid Property Definitions", key: "SolidProp", list: "Solid Properties", what: "Properties", title: "Solid Property Data", name: "Property Name", pre: "Solid", unit: "Property", color: "Gray8Dark", mat: () => true}}[kind];
+  const rows = ((dd.tables[K.table] || {}).rows || []).slice();
+  if (kind === "tendon") for (const t of xd.tendon_sections || []) if (!rows.some(r => r.TendonSect === t.name)) rows.push({TendonSect: t.name, Material: t.material, Specify: "Area", Area: String(t.strand_area), ModelOpt: "Elements", PreType: "Prestress"});
+  const names = rows.map(r => r[K.key]);
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmSapRodSections(kind); };
+  const mats = pd.materials.filter(K.mat).map(m => m.name), u = hmU();
+  const one = (src, copy) => {
+    const r = Object.assign({}, src || {});
+    let k = 1; while (names.includes(K.pre + k)) k++;
+    if (!src) Object.assign(r, kind === "solid" ? {MatAngleA: "0", MatAngleB: "0", MatAngleC: "0", InComp: "Yes"} : {Specify: "Area", Area: String(+(sapConv(6.452e-4, {f: "kN", l: "m"}, u, 0, 2, 0)).toPrecision(4)), ModelOpt: "Elements", PreType: "Prestress"});
+    r.Color = r.Color || K.color; if (copy || !src) r[K.key] = copy ? src[K.key] + " copy" : K.pre + k;
+    const mods = {}; ["AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod", "MMod", "WMod"].forEach(x => { if (r[x] != null) mods[x.toUpperCase()] = +r[x]; });
+    const fs = (legend, body) => `<fieldset style="margin:0 0 8px"><legend>${legend}</legend>${body}</fieldset>`;
+    const grid = rowsHtml => `<div style="display:grid;grid-template-columns:1fr 130px;gap:5px 8px;align-items:center">${rowsHtml}</div>`;
+    const matSel = `<span>${kind === "solid" ? "Material Name" : "Material Property"}</span><div style="display:flex;gap:4px"><button id="rP" style="width:22px;padding:0">+</button><select id="rM" style="flex:1">${opts(mats, mats.includes(r.Material) ? r.Material : mats[0])}</select></div>`;
+    const ro = id => `<input id="${id}" class="grey" readonly>`;
+    const props = kind === "solid" ? "" : fs(kind === "tendon" ? "Tendon Properties" : "Cable Properties", grid(`<label><input type="radio" name="rS" value="Diameter" ${/^dia/i.test(r.Specify || "") ? "checked" : ""}> Specify ${kind === "tendon" ? "Tendon" : "Cable"} Diameter</label><input id="rD" type="number" step="any">
+        <label><input type="radio" name="rS" value="Area" ${/^dia/i.test(r.Specify || "") ? "" : "checked"}> Specify ${kind === "tendon" ? "Tendon" : "Cable"} Area</label><input id="rA" type="number" step="any">
+        <span style="padding-left:22px">Torsional Constant</span>${ro("rJ")}<span style="padding-left:22px">Moment of Inertia</span>${ro("rI")}<span style="padding-left:22px">Shear Area</span>${ro("rAs")}`)
+        + (kind === "cable" ? `<div style="text-align:center"><button id="rMod">Modify/Show Cable Property Modifiers...</button></div>` : ""));
+    const d = dialog(K.title, fs("", grid(`<b>${K.name}</b><input id="rN" value="${esc(r[K.key])}" ${src && !copy ? "disabled" : ""}><span>Section Notes</span><button id="rNo">Modify/Show...</button>${kind === "solid" ? `<span>Display Color</span><span style="text-align:right"><button id="rC" style="width:22px;height:16px;padding:0"></button></span>` : ""}`))
+      + (kind === "tendon" ? fs("Tendon Modeling Options For Analysis Model", `<label style="display:block"><input type="radio" name="rO" value="Loads" ${/^load/i.test(r.ModelOpt || "") ? "checked" : ""}> Model Tendon as Loads</label><label style="display:block"><input type="radio" name="rO" value="Elements" ${/^load/i.test(r.ModelOpt || "") ? "" : "checked"}> Model Tendon as Elements</label>`)
+          + fs("Tendon Parameters", grid(`<span>Prestress Type</span><select disabled><option>Prestress</option></select>${matSel}`)) : "")
+      + (kind === "cable" ? fs("Cable Material", grid(matSel)) : "")
+      + (kind === "solid" ? fs("Material", grid(`${matSel}<span>Material Angle A</span><input id="rAa" type="number" step="any" value="${r.MatAngleA || 0}"><span>Material Angle B</span><input id="rAb" type="number" step="any" value="${r.MatAngleB || 0}"><span>Material Angle C</span><input id="rAc" type="number" step="any" value="${r.MatAngleC || 0}">`))
+          + fs("Type", `<label><input type="checkbox" id="rIc" ${/^no/i.test(r.InComp || "") ? "" : "checked"}> Incompatible Modes</label>`) : "")
+      + props
+      + (kind === "solid" ? "" : `<div style="display:flex;justify-content:space-between;align-items:center">${fs("Units", `<select id="rU" style="width:120px">${opts(sapUnitNames, sapUnitName(u))}</select>`)}<span>Display <button id="rC" style="width:22px;height:16px;padding:0;margin-left:30px"></button></span></div>`),
+      [["OK", async d => {
+        const n = q(d, "#rN").value.trim(); if (!n) { formError(d, "Give it a name."); return false; }
+        if ((!src || copy) && names.includes(n)) { formError(d, "There is one named " + n + " already."); return false; }
+        r[K.key] = n; r.Material = q(d, "#rM").value;
+        if (kind === "solid") { r.MatAngleA = String(fnum(d, "#rAa")); r.MatAngleB = String(fnum(d, "#rAb")); r.MatAngleC = String(fnum(d, "#rAc")); r.InComp = q(d, "#rIc").checked ? "Yes" : "No"; }
+        else {
+          calc(); const back = (v, lp) => String(+sapConv(v, units, u, 0, lp, 0).toPrecision(8));
+          r.Specify = q(d, "[name=rS]:checked").value; r.Diameter = back(dia, 1); r.Area = back(area, 2); r.TorsConst = back(J, 4); r.I = back(I, 4); r.AS = back(As, 2);
+          if (kind === "tendon") { r.ModelOpt = q(d, "[name=rO]:checked").value; r.PreType = "Prestress"; }
+          Object.entries(mods).forEach(([x, v]) => r[x.replace("MOD", "Mod").replace(/^([A-Z][0-9]?)MOD$/, "$1Mod")] = String(v));
+        }
+        if (kind === "tendon") { const j = await hmRun("define_tendon_section", {name: n, material: r.Material, strand_area: +r.Area}, true); if (!j.ok) { formError(d, j.error); return false; } }
+        if (src && !copy && src[K.key] !== n) await hmRun("define_table_rows", {table: K.table, name: src[K.key], rows: []}, true);
+        const j = await hmRun("define_table_rows", {table: K.table, name: n, rows: [Object.fromEntries(Object.entries(r).filter(([, v]) => v !== "" && v != null))]}, true);
+        if (!j.ok) { formError(d, j.error); return false; }
+        again();
+      }, true], ["Cancel"]], {width: 380});
+    let units = u, dia = 0, area = 0, J = 0, I = 0, As = 0;
+    const calc = () => {
+      if (kind === "solid") return;
+      const byD = q(d, "[name=rS]:checked").value === "Diameter";
+      if (byD) { dia = parseFloat(q(d, "#rD").value) || 0; area = Math.PI * dia * dia / 4; } else { area = parseFloat(q(d, "#rA").value) || 0; dia = Math.sqrt(4 * area / Math.PI); }
+      I = Math.PI * Math.pow(dia, 4) / 64; J = 2 * I; As = 0.9 * area;
+      const f4 = v => v !== 0 && Math.abs(v) < 1e-2 ? sapFmt(v) : String(+v.toPrecision(4)); // SAP2000 shows 4 figures here
+      q(d, "#rD").value = f4(dia); q(d, "#rA").value = f4(area); q(d, "#rJ").value = f4(J); q(d, "#rI").value = f4(I); q(d, "#rAs").value = f4(As);
+      q(d, "#rD").disabled = !byD; q(d, "#rA").disabled = byD;
+    };
+    if (kind !== "solid") {
+      area = +(r.Area || 0); dia = +(r.Diameter || 0) || Math.sqrt(4 * area / Math.PI); q(d, "#rD").value = dia; q(d, "#rA").value = area; calc();
+      d.querySelectorAll("[name=rS]").forEach(x => x.onchange = calc); q(d, "#rD").onchange = q(d, "#rA").onchange = calc;
+      q(d, "#rU").onchange = () => { calc(); const nu = sapUnitOf(q(d, "#rU").value); q(d, "#rD").value = sapConv(dia, units, nu, 0, 1, 0); q(d, "#rA").value = sapConv(area, units, nu, 0, 2, 0); units = nu; calc(); };
+    }
+    if (kind === "cable") q(d, "#rMod").onclick = () => hmModifiers(["AMOD", "A2MOD", "A3MOD", "JMOD", "I2MOD", "I3MOD", "MMOD", "WMOD"], mods, o => Object.assign(mods, o), "Cable Property/Stiffness Modification Factors");
+    const sw = () => q(d, "#rC").style.background = matColorCss(r.Color); sw();
+    q(d, "#rC").onclick = () => hmColor(r.Color, c => { r.Color = c; sw(); });
+    q(d, "#rNo").onclick = () => dialog(kind === "solid" ? "Solid Property Notes" : K.title.replace(" Data", " Notes"), `<textarea id="nT" rows="5" maxlength="255" style="width:100%;box-sizing:border-box">${esc(r.Notes || "")}</textarea><p class="kv" style="margin:4px 0 0">Note: Notes are limited to 255 characters maximum.</p>`, [["OK", n => { r.Notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420});
+    q(d, "#rP").onclick = () => hmSapMaterials();
+    return d;
+  };
+  const find = n => rows.find(r => r[K.key] === n);
+  const del = async n => { if (kind === "tendon" && (xd.tendon_sections || []).some(t => t.name === n)) { const j = await hmRun("define_tendon_section", {name: n, delete: true}, true); if (!j.ok) return hmSay(j.error, true); } const j = await hmRun("define_table_rows", {table: K.table, name: n, rows: []}, true); j.ok ? again() : hmSay(j.error, true); };
+  const d = listForm(K.list, K.what, names, [["Add New " + K.unit + "...", () => one(null)], ["Add Copy of " + K.unit + "...", n => n && one(find(n), true)], ["Modify/Show " + K.unit + "...", n => n && one(find(n))], ["Delete " + K.unit, n => n && del(n)]], n => one(find(n)));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = b[3].disabled = !names.length;
+  return d;
+}
 // ---- What the .e2k has no place for: SAP2000 joint constraints and moving loads, SAFE design strips ----
 async function hmExtras(what) {
   const xd = (await hmRun("extra_definitions", {}, true)).result; if (!xd) return;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmExtras(what); };
   if (what === "constraints" && program === "sap2000") return hmSapConstraints(xd, again);
+  if (what === "tendonsections" && program === "sap2000") return hmSapRodSections("tendon", xd);
   const u = hmU(), nums = (d, sel) => (q(d, sel).value || "").split(/[\s,;]+/).map(parseFloat).filter(isFinite);
   const kinds = {
     constraints: {title: "Define Joint Constraints", list: xd.constraints, tool: "define_constraint", form: hmConstraint},

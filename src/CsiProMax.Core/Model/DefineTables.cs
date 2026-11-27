@@ -51,6 +51,9 @@ public static class DefineTables
         ["Area Section Property Design Parameters"] = ["Section", "RebarMat", "RebarOpt", "CoverTop1", "CoverTop2", "CoverBot1", "CoverBot2"],
         ["Area Section Property - Time Dependent"] = ["Section", "TypeSize", "AutoSFSize", "UserValSize"],
         // SAP2000 26.3 Define items the Engine keeps as its own table rows (Define menu read on Ahmed's PC 2026-11-27), every field.
+        // Tendon Section Data's SAP2000 fields (modeling option, diameter or area, colour, notes); the Engine's own tendon
+        // section (name, material, strand area) is kept as for ETABS and SAFE.
+        ["Tendon Section Definitions"] = ["TendonSect", "ModelOpt", "PreType", "Material", "Specify", "Diameter", "Area", "TorsConst", "I", "AS", "Color", "TotalWt", "TotalMass", "AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod", "MMod", "WMod", "GUID", "Notes"],
         ["Cable Section Definitions"] = ["CableSect", "Material", "Specify", "Diameter", "Area", "TorsConst", "I", "AS", "Color", "TotalWt", "TotalMass", "AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod", "MMod", "WMod", "GUID", "Notes"],
         ["Solid Property Definitions"] = ["SolidProp", "Material", "MatAngleA", "MatAngleB", "MatAngleC", "InComp", "Color", "GUID", "Notes", "TotalWt", "TotalMass"],
         ["Link Frequency Dependent Properties 01 - General"] = ["Link", "Color", "GUID", "Notes"],
