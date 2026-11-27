@@ -80,6 +80,14 @@ public static class ModelerCheck
         },
         // The Analyze and Draw toggles and forms of the program's own menus: run here without starting the program or
         // changing the model.
+        // The Edit items that change the model at once: done, then undone, so the check's model stays as it was.
+        ...Object.fromEntries(["m:ete:cut", "m:ete:join", "m:ete:reverse", "m:ete:relabel", "m:ete:splitEdges", "m:ete:mergeShells", "m:ete:userMesh", "m:ete:gridAtJoints"].map(k => [k, async it => {
+          const was = hm.state && hm.state.rev; await act(it.act); await wait(900);
+          const changed = hm.state && hm.state.rev !== was, said = document.getElementById("hint").textContent;
+          if (changed) { await hmRun("undo", null, true); await wait(400); }
+          closeDialogs();
+          return {ok: (changed ? "changed the model, then undone: " : "") + said.slice(0, 160)};
+        }])),
         "m:etn:alive": async it => {
           await act(it.act); const on = ticked(it.act); await act(it.act); const off = !ticked(it.act);
           return on && off ? {ok: "Model Alive ticks on and off (no change made meanwhile, so no run)"} : {fail: "Model Alive does not tick on and off"};
@@ -690,7 +698,7 @@ public static class ModelerCheck
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL", "m:ete:beamsToSlab", "m:ete:convertMesh", "m:ete:divLinks", "m:ete:revLinks", "m:ete:removeJoints", "m:ete:reverseWall", "m:ete:wallOpenings", "m:ete:wallCurve"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();
