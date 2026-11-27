@@ -41,6 +41,21 @@ try {
   1..5 | ForEach-Object { Time "LoadPatterns.GetNameList (baseline call)" { $k = 0; [string[]]$x = $null; $m.LoadPatterns.GetNameList([ref]$k, [ref]$x) } }
   Time "GetAllTables" { $k=0; [string[]]$a=$null; [string[]]$b=$null; [int[]]$c=$null; [bool[]]$d=$null; $m.DatabaseTables.GetAllTables([ref]$k,[ref]$a,[ref]$b,[ref]$c,[ref]$d) }
   Time "GetAvailableTables" { $k=0; [string[]]$a=$null; [string[]]$b=$null; [int[]]$c=$null; $m.DatabaseTables.GetAvailableTables([ref]$k,[ref]$a,[ref]$b,[ref]$c) }
+  1..3 | ForEach-Object { Time "GetModelFilename (called before every table read)" { $m.GetModelFilename($true) } }
+  # Every table ETABS lists with data, read once each as a pack reads them: the real total, the refused ones, the slowest.
+  $k=0; [string[]]$keys=$null; [string[]]$names=$null; [int[]]$imp=$null; [bool[]]$empty=$null
+  $m.DatabaseTables.GetAllTables([ref]$k,[ref]$keys,[ref]$names,[ref]$imp,[ref]$empty) | Out-Null
+  $all = [Diagnostics.Stopwatch]::StartNew(); $times = @(); $refused = 0
+  for ($i = 0; $i -lt $keys.Length; $i++) {
+    if ($empty[$i]) { continue }
+    $w = [Diagnostics.Stopwatch]::StartNew()
+    [string[]]$f=$null; [string[]]$fl=$null; [string[]]$d=$null; $v=0; $r=0
+    try { $ret = $m.DatabaseTables.GetTableForDisplayArray($keys[$i], [ref]$fl, "", [ref]$v, [ref]$f, [ref]$r, [ref]$d) } catch { $ret = "x" }
+    if ($ret -ne 0) { $refused++ }
+    $times += [pscustomobject]@{ ms = $w.ElapsedMilliseconds; table = $keys[$i]; rows = $r; ret = $ret }
+  }
+  Say ("EVERY TABLE WITH DATA: {0} tables, {1:N0} ms in all, {2} refused" -f $times.Count, $all.ElapsedMilliseconds, $refused)
+  $times | Sort-Object ms -Descending | Select-Object -First 20 | ForEach-Object { Say ("{0,8:N0} ms  {1} rows  ret {2}  {3}" -f $_.ms, $_.rows, $_.ret, $_.table) }
   $tables = @("Load Pattern Definitions", "Story Definitions", "Base Reactions", "Story Drifts", "Joint Displacements", "Element Forces - Beams", "Element Forces - Area Shells", "Joint Assignments - Springs")
   foreach ($t in $tables) {
     foreach ($i in 1..3) {
@@ -52,7 +67,7 @@ try {
   }
   # Results through cAnalysisResults (one call for every object), for comparison with the tables.
   $m.Results.Setup.DeselectAllCasesAndCombosForOutput() | Out-Null
-  foreach ($c in $cases) { $m.Results.Setup.SetCaseSelectedForOutput($c) | Out-Null }
+  foreach ($c in $cases) { $m.Results.Setup.SetCaseSelectedForOutput($c, $true) | Out-Null }
   Time "Results.JointDispl All" { $k=0; [string[]]$o=$null;[string[]]$e=$null;[string[]]$lc=$null;[string[]]$st=$null;[double[]]$sn=$null;[double[]]$u1=$null;[double[]]$u2=$null;[double[]]$u3=$null;[double[]]$r1=$null;[double[]]$r2=$null;[double[]]$r3=$null
     $ret = $m.Results.JointDispl("All", [ETABSv1.eItemTypeElm]::GroupElm, [ref]$k,[ref]$o,[ref]$e,[ref]$lc,[ref]$st,[ref]$sn,[ref]$u1,[ref]$u2,[ref]$u3,[ref]$r1,[ref]$r2,[ref]$r3); "ret $ret n $k" }
   Time "Results.FrameForce All" { $k=0; [string[]]$o=$null;[double[]]$os=$null;[string[]]$e=$null;[double[]]$es=$null;[string[]]$lc=$null;[string[]]$st=$null;[double[]]$sn=$null;[double[]]$p=$null;[double[]]$v2=$null;[double[]]$v3=$null;[double[]]$t=$null;[double[]]$m2=$null;[double[]]$m3=$null
