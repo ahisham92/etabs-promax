@@ -540,11 +540,13 @@ public static class S2kWriter
 
         // The tables of a SAP2000 file the Modeler opened that it has no form for, as the file had them.
         // SAP2000's own hinge definitions, kept as its table rows.
-        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.IsSap(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
+        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.SapHinges.ContainsKey(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges[t].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()));
         // The preference and analysis option forms (ProgramForms), as SAP2000's own tables.
         foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => ProgramForms.HasForm(ProgramOptions.Sap2000, x.Key) && !x.Key.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Take(1).Select(r => (IReadOnlyList<(string, string)>)ProgramForms.Fields(ProgramOptions.Sap2000, t).Where(f => r.ContainsKey(f.Key)).Select(f => (f.Key, r[f.Key])).ToList()).Where(r => r.Count > 0));
+        // SAP2000's own load tables: every Load Pattern, Load Case and Load Combination field its forms have.
+        SapLoadTables.MergeInto(m, tables);
         KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;

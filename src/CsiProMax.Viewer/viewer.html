@@ -6344,8 +6344,130 @@ async function hmGrids() {
   paint("X"); paint("Y");
 }
 
+// ======== SAP2000 load forms (SAP2000 26.3's own Define > Load Patterns, Load Cases, Load Combinations) ========
+// Built from pictures of SAP2000 26.3 on Ahmed's PC (field/reference-forms/sap2000/Define). Every option of SAP2000's
+// form is here; what the model has no field for is kept as SAP2000's own table rows (SapLoadTables in Core), which
+// the .s2k carries to SAP2000 as they are.
+let sapLoadFields = {};
+const sapRows = async () => { const j = await hmPost({tool: "definition_data", args: {}}).catch(() => null); if (j && j.ok && j.result && j.result.sap_load_fields) sapLoadFields = j.result.sap_load_fields; return (j && j.ok && j.result && j.result.tables) || {}; };
+const sapRowsOf = (tables, table, key, name) => ((tables[table] || {}).rows || []).filter(r => r[key] === name);
+const sapPut = (table, name, rows) => hmRun("define_table_rows", {table, name, rows}, true);
+// The Type list as SAP2000 26.3 shows it: the short list with More..., then the whole list.
+const sapPatternTypesShort = ["Dead", "Live", "Roof Live", "Quake", "Wind", "Snow", "SeaState", "Other"];
+const sapPatternTypes = ["Dead", "Super Dead", "Live", "Reducible Live", "Roof Live", "Pattern Live", "Notional", "Quake", "Wind", "Snow", "Temperature", "Vehicle Live", "Wave",
+  "SeaState", "Settlement", "Prestress", "Hyperstatic", "Construction", "Hydrostatic", "Hor Earth Pr", "Transportation", "Other"];
+// SAP2000's word in the table (DesignType) where it is not the word the form shows.
+const sapPatternTable = {"Reducible Live": "Reduce Live"};
+const sapPatternShown = v => Object.keys(sapPatternTable).find(k => sapPatternTable[k] === v) || v;
+// The model's own pattern type for each of SAP2000's (the model writes the rest as SAP2000's word kept beside it).
+const sapPatternModel = t => ({"Dead": "Dead", "Super Dead": "Super Dead", "Live": "Live", "Reducible Live": "Reducible Live", "Roof Live": "Roof Live", "Pattern Live": "Pattern Live",
+  "Notional": "Notional", "Quake": "Seismic", "Wind": "Wind", "Snow": "Snow", "Temperature": "Temperature", "Prestress": "Prestress-Final", "Construction": "Construction"})[t] || "Other";
+const sapPatternFromModel = t => ({"Seismic": "Quake", "Seismic (Drift)": "Quake", "Prestress-Final": "Prestress", "Prestress-Transfer": "Prestress", "Pattern Live - Auto": "Pattern Live"})[t] || t;
+// Auto Lateral Load Pattern lists, in SAP2000 26.3's order, each with the table its parameters go in ("Auto Seismic - " + table).
+const sapSeismicCodes = [["UBC 94", "UBC94"], ["UBC 97", "UBC97"], ["UBC 97 Isolated", "UBC97 Isolated"], ["BOCA 96", "BOCA96"], ["NBCC 95", "NBCC95"], ["NBCC 2005", "NBCC 2005"], ["NBCC 2010", "NBCC 2010"],
+  ["NBCC 2015", "NBCC 2015"], ["NBCC 2020", "NBCC 2020"], ["ASCE 7-22", "ASCE 7-22"], ["ASCE 7-16", "ASCE 7-16"], ["IBC 2003", "IBC2003"], ["IBC 2006", "IBC2006"], ["IBC 2009", "IBC2009"], ["IBC 2012", "IBC2012"],
+  ["NEHRP 97", "NEHRP97"], ["Chinese 2010", "Chinese 2010"], ["IS1893 2002", "IS1893:2002"], ["IS 1893-2016", "IS 1893:2016"], ["Eurocode8 2004", "Eurocode8 2004"], ["AS 1170 2007", "AS 1170 2007"],
+  ["NZS 1170 2004", "NZS 1170 2004"], ["Italian NTC 2018", "ITALIAN NTC 2018"], ["Italian NTC 2008", "ITALIAN NTC 2008"], ["TCVN 9386-2012", "TCVN 9386-2012"], ["TSC-2018", "TSC-2018"], ["TSC 2007", "TSC 2007"],
+  ["KDS 41 17 00-2019", "KDS 41 17 00-2019"], ["KBC2009", "KBC 2009"], ["KBC 2016", "KBC 2016"], ["Dominican Republic R-001", "Dominican Republic R-001"], ["User Coefficient", "User Coefficient"], ["User Loads", "User Loads"], ["None", ""]];
+const sapWindCodes = [["API 4F 2013", "API 4F 2013"], ["API 4F 2008", "API 4F"], ["ASCE 7-22", "ASCE 7-22"], ["ASCE 7-16", "ASCE 7-16"], ["ASCE 7-10", "ASCE7-10"], ["ASCE 7-05", "ASCE7-05"], ["ASCE 7-02", "ASCE7-02"],
+  ["ASCE 7-95", "ASCE7-95"], ["ASCE 7-88", "ASCE7-88"], ["AS/NZS 1170.2:2011", "AS-NZS 1170 2 2011"], ["AS/NZS 1170.2:2002", "AS-NZS 1170 2 2002"], ["BOCA 96", "BOCA96"], ["BS 6399-95", "BS6399-95"],
+  ["Chinese 2012", "Chinese 2010"], ["Eurocode1 2005", "Eurocode1 2005"], ["IS 875-2015", "IS 875-2015"], ["IS875 1987", "IS875-1987"], ["Italian NTC 2018", "ITALIAN NTC 2018"], ["Italian NTC 2008", "ITALIAN NTC 2008"],
+  ["KBC 2016", "KBC 2016"], ["Mexican", "Mexican"], ["NBCC 2020", "NBCC 2020"], ["NBCC 2015", "NBCC 2015"], ["NBCC 2010", "NBCC 2010"], ["NBCC 2005", "NBCC 2005"], ["NBCC 95", "NBCC95"],
+  ["SP 20.13330.2016", "SP 20.13330.2016"], ["TS 498-97", "TS 498-97"], ["UBC 97", "UBC97"], ["UBC 94", "UBC94"], ["User Defined", "User"], ["None", ""]];
+const sapAutoList = type => type === "Quake" ? sapSeismicCodes : type === "Wind" ? sapWindCodes : null;
+const sapAutoTable = (type, code) => code ? (type === "Wind" ? "Auto Wind - " : "Auto Seismic - ") + code : "";
+// The pattern as the form shows it: the model's pattern with SAP2000's own row of it.
+const sapPattern = (p, row) => ({name: p.name, type: row && row.DesignType && sapPatternModel(sapPatternShown(row.DesignType)) === p.type ? sapPatternShown(row.DesignType) : sapPatternFromModel(p.type),
+  self: p.self_weight, auto: (row && row.AutoLoad) || "", row: row || {}});
+
+async function hmSapPatterns() {
+  let defs = await hmDefs(), tables = await sapRows(), more = false;
+  const list = () => (hm.defs || defs).load_patterns.map(p => sapPattern(p, sapRowsOf(tables, "Load Pattern Definitions", "LoadPat", p.name)[0]));
+  let pick = list().length ? 0 : -1;
+  const d = dialog("Define Load Patterns", `<div style="display:flex;gap:10px;align-items:stretch">
+      <fieldset style="flex:1;margin:0"><legend>Load Patterns</legend><table class="list hmgrid" style="width:calc(100% - 40px);table-layout:fixed"><colgroup><col style="width:34%"><col style="width:25%"><col style="width:16%"><col style="width:25%"></colgroup><thead>
+        <tr><th style="text-align:center">Load Pattern Name</th><th style="text-align:center">Type</th><th style="text-align:center">Self Weight<br>Multiplier</th><th style="text-align:center">Auto Lateral<br>Load Pattern</th></tr>
+        <tr class="edit"><td><input id="spN" style="width:100%;box-sizing:border-box"></td><td><select id="spT" style="width:100%"></select></td><td><input id="spS" type="number" step="any" value="0" style="width:100%;box-sizing:border-box"></td><td><select id="spA" style="width:100%"></select></td></tr></thead></table>
+        <div style="display:flex;gap:8px;margin-top:4px"><div class="scroll" style="flex:1;height:150px;border:1px solid #999"><table class="list hmgrid" style="width:100%;table-layout:fixed"><colgroup><col style="width:34%"><col style="width:25%"><col style="width:16%"><col style="width:25%"></colgroup><tbody id="spL"></tbody></table></div>
+        <div style="display:flex;flex-direction:column;justify-content:center;gap:24px"><button id="spUp" title="Move Up">&#9650;</button><button id="spDn" title="Move Down">&#9660;</button></div></div></fieldset>
+      <div style="width:210px;display:flex;flex-direction:column;justify-content:space-between"><fieldset style="margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px">
+        <button id="spAdd">Add New Load Pattern</button><button id="spCopy">Add Copy of Load Pattern</button><button id="spMod">Modify Load Pattern</button>
+        <button id="spLat">Modify Lateral Load Pattern...</button><button id="spDel">Delete Load Pattern</button><button id="spNotes" style="margin-top:10px">Show Load Pattern Notes...</button></div></fieldset></div></div>`,
+    [["OK"], ["Cancel"]], {width: 820});
+  const typeOpts = v => opts([...(more || !sapPatternTypesShort.includes(v) ? sapPatternTypes : sapPatternTypesShort), ...(more ? [] : [["More...", "More..."]])], v);
+  const autoOpts = (type, v) => { const l = sapAutoList(type); q(d, "#spA").disabled = !l; q(d, "#spA").innerHTML = l ? opts(l.map(([lab, t]) => [t, lab]), v || "") : ""; };
+  const fill = () => { const p = list()[pick]; if (!p) return; q(d, "#spN").value = p.name; q(d, "#spT").innerHTML = typeOpts(p.type); q(d, "#spT").value = p.type; q(d, "#spS").value = p.self; autoOpts(p.type, p.auto); };
+  const paint = () => {
+    const L = list();
+    q(d, "#spL").innerHTML = L.map((p, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td class="r">${num(p.self)}</td><td>${esc(sapAutoList(p.type) ? (sapAutoList(p.type).find(c => c[1] === p.auto) || [p.auto || "None"])[0] : "")}</td></tr>`).join("");
+    const p = L[pick];
+    q(d, "#spLat").disabled = !p || !sapAutoList(p.type) || !p.auto; // SAP2000 greys it for a pattern with no auto lateral load
+    q(d, "#spDel").disabled = L.length <= 1; // and keeps one pattern at least
+    q(d, "#spMod").disabled = q(d, "#spCopy").disabled = !p;
+    d.querySelectorAll("#spL [data-i]").forEach(tr => tr.onclick = () => { pick = +tr.dataset.i; paint(); fill(); });
+  };
+  q(d, "#spT").innerHTML = typeOpts("Dead"); autoOpts("Dead", "");
+  q(d, "#spT").onchange = () => { const v = q(d, "#spT").value; if (v === "More...") { more = true; q(d, "#spT").innerHTML = typeOpts("Dead"); q(d, "#spT").focus(); return; } autoOpts(v, ""); };
+  // SAP2000's own check before a Vehicle Live pattern: its paths (lanes) and vehicles must exist.
+  const vehicleOk = async () => { if (q(d, "#spT").value !== "Vehicle Live") return true; const x = await hmPost({tool: "extra_definitions", args: {}}).catch(() => null), r = x && x.ok ? x.result : {};
+    if ((r.lanes || []).length && (r.vehicles || []).length) return true; sapMessage("Paths and vehicles must exist before a Vehicle Live load pattern is defined."); return false; };
+  const save = async (name, was) => {
+    formError(d, "");
+    const type = q(d, "#spT").value, self = fnum(d, "#spS"), auto = q(d, "#spA").disabled ? "" : q(d, "#spA").value;
+    if (!name) return formError(d, "Give the load pattern a name.");
+    const old = was ? list().find(p => p.name === was) : null;
+    const j = await hmRun("define_load_pattern", {name, was: was || undefined, type: sapPatternModel(type), self_weight: self}, true); if (!j.ok) return formError(d, j.error);
+    const row = {...(old ? old.row : {}), DesignType: sapPatternTable[type] || type, SelfWtMult: String(self), AutoLoad: auto}; delete row.LoadPat;
+    if (!auto) delete row.AutoLoad;
+    const k = await sapPut("Load Pattern Definitions", name, [row]); if (!k.ok) return formError(d, k.error);
+    // A code taken off, or another code: the old code's row goes (SAP2000 keeps one code per pattern).
+    if (old && old.auto && (old.auto !== auto || old.type !== type)) await sapPut(sapAutoTable(old.type, old.auto), name, []);
+    tables = await sapRows(); defs = await hmDefs(); pick = list().findIndex(p => p.name === name); paint(); fill();
+  };
+  q(d, "#spAdd").onclick = async () => { const n = q(d, "#spN").value.trim(); if (list().some(p => p.name === n)) return formError(d, `There is already a load pattern named '${n}'.`); if (await vehicleOk()) save(n); };
+  q(d, "#spMod").onclick = async () => { const p = list()[pick]; if (p && await vehicleOk()) save(q(d, "#spN").value.trim(), p.name); };
+  q(d, "#spCopy").onclick = async () => {
+    const p = list()[pick]; if (!p) return; let n = p.name + "-1", i = 1; while (list().some(x => x.name === n)) n = p.name + "-" + ++i;
+    const j = await hmRun("define_load_pattern", {name: n, type: sapPatternModel(p.type), self_weight: p.self}, true); if (!j.ok) return formError(d, j.error);
+    const row = {...p.row}; delete row.LoadPat; delete row.GUID; await sapPut("Load Pattern Definitions", n, [row]);
+    if (p.auto) { const ar = sapRowsOf(tables, sapAutoTable(p.type, p.auto), "LoadPat", p.name).map(r => { const c = {...r}; delete c.LoadPat; return c; }); if (ar.length) await sapPut(sapAutoTable(p.type, p.auto), n, ar); }
+    tables = await sapRows(); pick = list().findIndex(x => x.name === n); paint(); fill();
+  };
+  q(d, "#spDel").onclick = async () => { const p = list()[pick]; if (!p) return; const j = await hmRun("delete_definition", {kind: "load_pattern", name: p.name}, true); if (!j.ok) return formError(d, j.error);
+    if (p.auto) await sapPut(sapAutoTable(p.type, p.auto), p.name, []); await sapPut("Load Pattern Definitions", p.name, []); tables = await sapRows(); pick = Math.min(pick, list().length - 1); paint(); fill(); };
+  q(d, "#spLat").onclick = () => { const p = list()[pick]; if (p) hmSapLateral(p, async () => { tables = await sapRows(); paint(); }); };
+  q(d, "#spNotes").onclick = () => { const p = list()[pick]; if (p) sapNotes("Load Pattern Notes", p.name, p.row.Notes || "", async notes => { const row = {...p.row, Notes: notes}; delete row.LoadPat; const k = await sapPut("Load Pattern Definitions", p.name, [row]); tables = await sapRows(); return k; }); };
+  // The arrows move the highlighted pattern up or down the list, as SAP2000's do.
+  const move = async dir => { const L = list(), to = pick + dir; if (pick < 0 || to < 0 || to >= L.length) return; const p = L[pick], j = await hmRun("define_load_pattern", {name: p.name, was: p.name, type: sapPatternModel(p.type), self_weight: p.self, position: to}, true); if (!j.ok) return formError(d, j.error); pick = to; paint(); fill(); };
+  q(d, "#spUp").onclick = () => move(-1); q(d, "#spDn").onclick = () => move(1);
+  paint(); fill();
+}
+// Modify Lateral Load Pattern: the pattern's code parameters, every field of SAP2000's table of that code. The values
+// SAP2000 works out itself (period used, coefficient used, weight used, base shear) are shown and not edited.
+const sapOutFields = ["TUsed", "CoeffUsed", "WeightUsed", "BaseShear", "FtUsed", "VeOverWUsed"];
+async function hmSapLateral(p, after) {
+  const tables = await sapRows(), table = sapAutoTable(p.type, p.auto), fields = sapLoadFields[table];
+  if (!fields) return sapMessage(`SAP2000 26.3 has no table for the ${p.auto} code.`);
+  const label = (sapAutoList(p.type).find(c => c[1] === p.auto) || [p.auto])[0], row = {...(sapRowsOf(tables, table, "LoadPat", p.name)[0] || {})};
+  const d = dialog(`${label} ${p.type === "Wind" ? "Wind" : "Seismic"} Load Pattern`, `<div class="g2" style="margin-bottom:6px"><span>Load Pattern</span><b>${esc(p.name)}</b></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px">${fields.slice(1).map(f => `<label style="display:contents"><span>${esc(f)}</span><input data-k="${esc(f)}" value="${esc(row[f] ?? "")}" ${sapOutFields.includes(f) ? "readonly" : ""}></label>`).join("")}</div>
+      <p class="kv">Blank = SAP2000's own default for the code.</p>`,
+    [["OK", d => { const out = {}; d.querySelectorAll("[data-k]").forEach(x => { if (x.value.trim() !== "" && !sapOutFields.includes(x.dataset.k)) out[x.dataset.k] = x.value.trim(); });
+      sapPut(table, p.name, Object.keys(out).length ? [out] : []).then(j => { if (!j.ok) return formError(d, j.error); d.close(); if (after) after(); }); return false; }, true], ["Cancel"]], {width: 560});
+  return d;
+}
+// SAP2000's message box: its text and OK.
+function sapMessage(text) { return dialog("SAP2000", `<p style="margin:10px 6px 14px;white-space:pre-line">${esc(text)}</p>`, [["OK"]], {width: 420}); }
+// Notes kept with a definition (the table's Notes field).
+function sapNotes(title, name, text, save) {
+  const d = dialog(title, `<div class="g2"><span>Name</span><b>${esc(name)}</b></div><textarea id="snT" rows="10" style="width:100%;box-sizing:border-box">${esc(text)}</textarea>`,
+    [["OK", d => { save(q(d, "#snT").value).then(j => j && !j.ok ? formError(d, j.error) : d.close()); return false; }, true], ["Cancel"]], {width: 480});
+  return d;
+}
+
 // ---- Define: load patterns (SAP2000's Define Load Patterns: the edit row, then the list) ----
 async function hmPatterns() {
+  if (program === "sap2000") return hmSapPatterns();
   const defs = await hmDefs(), sapP = program === "sap2000";
   // The words each program's Define Load Patterns uses: ETABS "Load" and "Add New Load"; SAP2000 "Load Pattern Name" and "Add New Load Pattern".
   const W = sapP ? {name: "Load Pattern Name", auto: "Auto Lateral Load Pattern", add: "Add New Load Pattern", mod: "Modify Load Pattern", lat: "Modify Lateral Load Pattern...", del: "Delete Load Pattern"}
