@@ -684,11 +684,11 @@ public static class ModelerFieldSteps
             "safe" => ("slab", "ACI 318-19", "Concrete Slab Design Preferences - ACI 318-19"),
             _ => ("steel", "AISC 360-16", "Steel Frame Design Preferences - AISC 360-16"),
         };
-        ctx.Tool("set_program_form", $$"""{"design":{{Q(fDesign)}},"code":{{Q(fCode)}},"table":{{Q(fTable)}},"values":{"PatLLF":"0.75"}}""", null, "tool set_program_form, a design code and one of its preferences");
+        ctx.Tool("set_program_form", $$$"""{"design":{{{Q(fDesign)}}},"code":{{{Q(fCode)}}},"table":{{{Q(fTable)}}},"values":{"PatLLF":"0.75"}}""", null, "tool set_program_form, a design code and one of its preferences");
         var dofTable = CsiProMax.Model.ProgramForms.AnalysisForms(modeler.Model.Target).Select(f => f.Table).FirstOrDefault(t => t.Contains("Degrees of Freedom", StringComparison.Ordinal));
         if (dofTable is not null)
-            ctx.Tool("set_program_form", $$"""{"table":{{Q(dofTable)}},"values":{"UX":"Yes","UY":"Yes","UZ":"Yes","RX":"Yes","RY":"Yes","RZ":"Yes"}}""", null, "tool set_program_form, Set Active Degrees of Freedom");
-        ctx.Refused("set_program_form", $$"""{"table":{{Q(fTable)}},"values":{"No Such Item":"1"}}""", "no item", "tool set_program_form says no to an item the form does not have");
+            ctx.Tool("set_program_form", $$$"""{"table":{{{Q(dofTable)}}},"values":{"UX":"Yes","UY":"Yes","UZ":"Yes","RX":"Yes","RY":"Yes","RZ":"Yes"}}""", null, "tool set_program_form, Set Active Degrees of Freedom");
+        ctx.Refused("set_program_form", $$$"""{"table":{{{Q(fTable)}}},"values":{"No Such Item":"1"}}""", "no item", "tool set_program_form says no to an item the form does not have");
         ctx.Tool("define_spring", """{"kind":"point","name":"CPM-PS","values":{"UX":1000,"UY":1000,"UZ":50000}}""", null, "tool define_spring, a point spring");
         ctx.Tool("define_spring", """{"kind":"area","name":"CPM-AS","values":{"U3":20000}}""", null, "tool define_spring, an area spring");
         ctx.Refused("define_spring", """{"kind":"line","name":"CPM-BAD","values":{"UX":5}}""", "not 'UX'", "tool define_spring says no to a value the kind does not have");
