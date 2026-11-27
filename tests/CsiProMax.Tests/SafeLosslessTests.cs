@@ -12,7 +12,24 @@ static class SafeLosslessTests
 {
     static void Check(bool condition, string what) { if (!condition) throw new Exception(what); }
 
-    static readonly string[] Files = ["safe-PT-SL-v20.f2k", "safe-PT-SL-v23.f2k", "safe-RC-PN-v20.f2k", "safe-RC-PN-v23.f2k", "safe22-tester-cpm-field-test.f2k"];
+    static readonly string[] Files = ["safe-PT-SL-v20.f2k", "safe-PT-SL-v23.f2k", "safe-RC-PN-v20.f2k", "safe-RC-PN-v23.f2k"];
+
+    /// <summary>A .f2k an older CSI ProMax wrote on a tester's SAFE 22 (its model carried inside): saved again it may
+    /// gain rows (every material and section now goes in) but loses none.</summary>
+    const string Tester = "safe22-tester-cpm-field-test.f2k";
+
+    /// <summary>Rows or fields of <paramref name="a"/> that <paramref name="b"/> does not have.</summary>
+    static List<string> Lost(Dictionary<string, List<Dictionary<string, string>>> a, Dictionary<string, List<Dictionary<string, string>>> b)
+    {
+        var lost = new List<string>();
+        foreach (var (t, rows) in a)
+        {
+            if (!b.TryGetValue(t, out var w)) { lost.Add(t + " LOST"); continue; }
+            foreach (var r in rows)
+                if (!w.Exists(x => r.All(kv => x.TryGetValue(kv.Key, out var v) && v == kv.Value))) { lost.Add(t + ": " + string.Join(" ", r.Take(4).Select(kv => kv.Key + "=" + kv.Value))); break; }
+        }
+        return lost;
+    }
 
     static string Sample(string name) => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", name));
 
@@ -64,6 +81,10 @@ static class SafeLosslessTests
                 var floor = F2kWriter.WriteEveryFloor(m).First(f => !F2kSource.Has(m) || f.Story == F2kSource.Story(m));
                 Check(Differences(before, CsiTableText.Parse(floor.Text)).Count == 0, file + ": SAFE's floor among the files of every floor");
             }
+            var tester = CsiTableText.Parse(Sample(Tester));
+            var tm = F2kReader.Read(Sample(Tester), Tester).Model;
+            var lost = Lost(tester, CsiTableText.Parse(F2kWriter.WriteEveryFloor(tm)[0].Text));
+            Check(lost.Count == 0, Tester + ": saved again loses nothing: " + string.Join(" | ", lost.Take(6)));
         });
 
         yield return ("SAFE lossless: a field the engineer changes is the only field that changes; every other one stays SAFE's", () =>
@@ -127,7 +148,7 @@ static class SafeLosslessTests
 
         yield return ("SAFE lossless: a slab given another section changes that slab's section only; a slab taken away goes with its points, loads and summaries", () =>
         {
-            foreach (var file in Files.Where(f => !f.StartsWith("safe22", StringComparison.Ordinal)))
+            foreach (var file in Files)
             {
                 var text = Sample(file);
                 var before = CsiTableText.Parse(text);

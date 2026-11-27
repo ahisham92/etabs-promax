@@ -40,6 +40,14 @@ public static class F2kWriter
 
     private static string I(int v) => v.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>A cardinal point (1 to 11, the .e2k's CARDINALPT) by SAFE's name for it, "10 (Centroid)".</summary>
+    internal static string CardinalName(string? point)
+    {
+        string[] names = ["Bottom Left", "Bottom Center", "Bottom Right", "Middle Left", "Middle Center", "Middle Right", "Top Left", "Top Center", "Top Right", "Centroid", "Shear Center"];
+        var n = int.TryParse(E2kText.Unquote(point ?? "10"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) && v is >= 1 and <= 11 ? v : 10;
+        return $"{n} ({names[n - 1]})";
+    }
+
     /// <summary>A point's place, as the writer tells points apart.</summary>
     internal static string PointKey(double x, double y, double z) => string.Create(CultureInfo.InvariantCulture, $"{Math.Round(x, 6)},{Math.Round(y, 6)},{Math.Round(z, 6)}");
 
@@ -192,7 +200,8 @@ public static class F2kWriter
         var usedBeam = lineRows.Where(r => r.Type == "Beam").Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var usedColumn = lineRows.Where(r => r.Type == "Column").Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var usedWall = wallRows.Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var tendonSections = SlabDefs.TendonSectionList(m).Where(s => tendons.Exists(t => string.Equals(t.Section, s.Name, StringComparison.OrdinalIgnoreCase))).ToList();
+        // Every tendon section, used or not, as SAFE's own files list them.
+        var tendonSections = SlabDefs.TendonSectionList(m);
 
         var tables = new List<string>();
         var units = $"{m.Units.Force}, {m.Units.Length.ToLowerInvariant()}, {m.Units.Temperature}";
@@ -218,11 +227,29 @@ public static class F2kWriter
             .Concat(m.ShellSections.Where(s => usedSlab.Contains(s.Name) || usedWall.Contains(s.Name)).Select(s => s.Material))
             .Concat(tendonSections.Select(s => s.Material)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         bool Is(Material x, string type) => x.Type.Equals(type, StringComparison.OrdinalIgnoreCase);
-        var materials = m.Materials.Where(x => x.IsConcrete || sectionMaterials.Contains(x.Name) || Is(x, "Rebar")).ToList();
-        tables.Add(CsiTableText.Table("MATERIAL PROPERTIES - GENERAL", materials.Select(x => (IReadOnlyList<(string, string)>)ProgramTables.With(Row(("Material", x.Name), ("Type", x.Type.Length > 0 ? x.Type : "Concrete"),
-            ("SymType", x.Get("SYMTYPE") ?? (Is(x, "Rebar") || Is(x, "Tendon") ? "Uniaxial" : "Isotropic"))), ProgramTables.Row(x, "General").Where(kv => kv.Key is "Color" or "Notes").ToDictionary()))));
-        tables.Add(CsiTableText.Table("MATERIAL PROPERTIES - BASIC MECHANICAL PROPERTIES", materials.Select(x => (IReadOnlyList<(string, string)>)Row(("Material", x.Name), ("DensityType", "Weight"),
-            ("UnitWeight", N(x.Number("WEIGHTPERVOLUME") ?? 0)), ("E1", N(x.Number("E") ?? 0)), ("U12", N(x.Number("U") ?? (x.IsConcrete ? 0.2 : 0.3))), ("A1", N(x.Number("A") ?? 1e-5))))));
+        // Every material of the model, used or not, as SAFE's own files list them (an ETABS model's steel and tendon
+        // materials are SAFE's too, and a section that comes later needs its material there).
+        _ = sectionMaterials;
+        var materials = m.Materials.ToList();
+        static string SymType(Material x) => x.Get("SYMTYPE") ?? (x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase) || x.Type.Equals("Tendon", StringComparison.OrdinalIgnoreCase) ? "Uniaxial" : "Isotropic");
+        tables.Add(CsiTableText.Table("MATERIAL PROPERTIES - GENERAL", materials.Select(x =>
+        {
+            var row = Row(("Material", x.Name), ("Type", x.Type.Length > 0 ? x.Type : "Concrete"), ("SymType", SymType(x)));
+            if (x.Get("GRADE") is { Length: > 0 } grade) row.Add(("Grade", grade));
+            return (IReadOnlyList<(string, string)>)ProgramTables.With(row, ProgramTables.Row(x, "General").Where(kv => kv.Key is "Color" or "Notes").ToDictionary());
+        })));
+        tables.Add(CsiTableText.Table("MATERIAL PROPERTIES - BASIC MECHANICAL PROPERTIES", materials.Select(x =>
+        {
+            double e = x.Number("E") ?? 0, u = x.Number("U") ?? (x.IsConcrete ? 0.2 : 0.3);
+            var row = Row(("Material", x.Name), ("DensityType", "Weight"), ("UnitWeight", N(x.Number("WEIGHTPERVOLUME") ?? 0)));
+            if (x.Number("MASSPERVOLUME") is { } mass) row.Add(("UnitMass", N(mass)));
+            row.Add(("E1", N(e)));
+            // The shear modulus of an isotropic material, as SAFE gives it: E / 2(1 + U).
+            if (SymType(x) == "Isotropic") row.Add(("G12", N(e / (2 * (1 + u)))));
+            row.Add(("U12", N(u)));
+            row.Add(("A1", N(x.Number("A") ?? 1e-5)));
+            return (IReadOnlyList<(string, string)>)row;
+        })));
         void MaterialData(string table, Func<Material, bool> which, Func<Material, List<(string, string)>> row)
         {
             var list = materials.Where(which).ToList();
@@ -230,15 +257,44 @@ public static class F2kWriter
         }
         // What each material's forms hold beyond its .e2k keywords goes into SAFE's tables of the same names as ETABS's.
         Dictionary<string, string>? Of(Material x, string table) => ProgramTables.MaterialData(x).TryGetValue(table, out var r) && r.Count > 0 ? r[0] : null;
-        MaterialData("MATERIAL PROPERTIES - STEEL DATA", x => Is(x, "Steel"), x => ProgramTables.With(Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))), Of(x, "Steel Data")));
+        // Expected strengths and the stress-strain curve, as the .e2k gives them (FYE, FUE, SSTYPE, HYSTYPE, strains).
+        List<(string, string)> Strengths(Material x, bool curve)
+        {
+            var row = Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0)));
+            if (x.Number("FYE") is { } fye) row.Add(("Fye", N(fye)));
+            if (x.Number("FUE") is { } fue) row.Add(("Fue", N(fue)));
+            if (!curve) return row;
+            if (x.Get("SSTYPE") is { Length: > 0 } ss) row.Add(("SSCurveOpt", ss));
+            if (x.Get("HYSTYPE") is { Length: > 0 } hys) row.Add(("SSHysType", hys));
+            foreach (var (key, field) in new[] { ("STRAINATHARDENING", "SHard"), ("STRAINATMAXSTRESS", "SMax"), ("STRAINATRUPTURE", "SRup"), ("FINALSLOPE", "FinalSlope") })
+                if (x.Number(key) is { } v) row.Add((field, N(v)));
+            return row;
+        }
+        MaterialData("MATERIAL PROPERTIES - STEEL DATA", x => Is(x, "Steel"), x => ProgramTables.With(Strengths(x, true), Of(x, "Steel Data")));
         MaterialData("MATERIAL PROPERTIES - CONCRETE DATA", x => x.IsConcrete, x => ProgramTables.With(Row(("Material", x.Name), ("Fc", N(x.Number("FC") ?? 0)), ("LtWtConc", "No")), Of(x, "Concrete Data")));
-        MaterialData("MATERIAL PROPERTIES - REBAR DATA", x => Is(x, "Rebar"), x => ProgramTables.With(Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))), Of(x, "Rebar Data")));
+        MaterialData("MATERIAL PROPERTIES - REBAR DATA", x => Is(x, "Rebar"), x => ProgramTables.With(Strengths(x, true), Of(x, "Rebar Data")));
         MaterialData("MATERIAL PROPERTIES - TENDON DATA", x => Is(x, "Tendon"), x => ProgramTables.With(Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))), Of(x, "Tendon Data")));
         // SAFE's material tables are those six (its own .f2k files): the material's other forms (damping, time dependence,
         // nonlinear hysteresis parameters) stay in the .cpm for ETABS and SAP2000.
 
         // Frame sections, by their shape.
-        var frameProps = m.FrameSections.Where(s => usedBeam.Contains(s.Name) || usedColumn.Contains(s.Name)).ToList();
+        // Every frame section of the model, used or not (SAFE's own files list them all, steel library sections too).
+        var frameProps = m.FrameSections.ToList();
+        // ETABS names a section's library file once, on the first section from it; the ones after it are from it too.
+        var fileOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var lastFile = "";
+        foreach (var s in frameProps)
+        {
+            if (s.Get("FILE") is { Length: > 0 } f) lastFile = f;
+            else if (lastFile.Length > 0 && PropertyDefs.Shape(s.Shape) is null && !s.Shape.Contains("Rectangular", StringComparison.OrdinalIgnoreCase) && !s.Shape.Contains("Circle", StringComparison.OrdinalIgnoreCase)) { fileOf[s.Name] = lastFile; continue; }
+            if (s.Get("FILE") is { Length: > 0 } ownFile) fileOf[s.Name] = ownFile;
+        }
+        List<(string, string)> FrameMods(FrameSection s)
+        {
+            var fm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers);
+            return [("Area Modifier", N(fm["AMOD"])), ("As2 Modifier", N(fm["A2MOD"])), ("As3 Modifier", N(fm["A3MOD"])), ("J Modifier", N(fm["JMOD"])),
+                ("I22 Modifier", N(fm["I2MOD"])), ("I33 Modifier", N(fm["I3MOD"])), ("Mass Modifier", N(fm["MMOD"])), ("Weight Modifier", N(fm["WMOD"]))];
+        }
         var shapeOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (frameProps.Count > 0)
         {
@@ -247,30 +303,30 @@ public static class F2kWriter
             var steel = new List<IReadOnlyList<(string, string)>>();
             foreach (var s in frameProps)
             {
-                var design = usedColumn.Contains(s.Name) ? "Column" : "Beam";
+                var design = usedColumn.Contains(s.Name) || (!usedBeam.Contains(s.Name) && string.Equals(s.Get("DESIGNTYPE") ?? s.Get("CONCRETETYPE"), "Column", StringComparison.OrdinalIgnoreCase)) ? "Column" : "Beam";
                 if (s.Shape.Contains("Circle", StringComparison.OrdinalIgnoreCase))
                 {
                     shapeOf[s.Name] = "Concrete Circle";
-                    circle.Add(Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Diameter", N(s.Number("D") ?? 0)), ("Design Type", design)));
+                    circle.Add([.. Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Diameter", N(s.Number("D") ?? 0)), ("Design Type", design)), .. FrameMods(s)]);
                 }
-                else if (s.Get("FILE") is { Length: > 0 } file)
+                else if (fileOf.TryGetValue(s.Name, out var file))
                 {
                     shapeOf[s.Name] = "Steel I/Wide Flange";
-                    steel.Add(Row(("Name", s.Name), ("Material", s.Material), ("From File?", "Yes"), ("File Name", file), ("Section in File", s.Shape)));
+                    steel.Add([.. Row(("Name", s.Name), ("Material", s.Material), ("From File?", "Yes"), ("File Name", file), ("Section in File", s.Shape)), .. FrameMods(s)]);
                 }
                 else if (s.Shape.Contains("Steel I", StringComparison.OrdinalIgnoreCase))
                 {
                     shapeOf[s.Name] = "Steel I/Wide Flange";
                     double b = s.Number("B") ?? 0, tf = s.Number("TF") ?? 0;
-                    steel.Add(Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Total Depth", N(s.Number("D") ?? 0)), ("Top Flange Width", N(b)), ("Top Flange Thickness", N(tf)),
-                        ("Web Thickness", N(s.Number("TW") ?? 0)), ("Bottom Flange Width", N(s.Number("BBOTTOM") ?? b)), ("Bottom Flange Thickness", N(s.Number("TFBOTTOM") ?? tf))));
+                    steel.Add([.. Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Total Depth", N(s.Number("D") ?? 0)), ("Top Flange Width", N(b)), ("Top Flange Thickness", N(tf)),
+                        ("Web Thickness", N(s.Number("TW") ?? 0)), ("Bottom Flange Width", N(s.Number("BBOTTOM") ?? b)), ("Bottom Flange Thickness", N(s.Number("TFBOTTOM") ?? tf))), .. FrameMods(s)]);
                 }
                 else
                 {
                     if (!s.Shape.Contains("Rectangular", StringComparison.OrdinalIgnoreCase))
                         notes.Add($"The frame section {s.Name} ({s.Shape}) went in as a concrete rectangle of its depth and width; give it its own shape in SAFE.");
                     shapeOf[s.Name] = "Concrete Rectangular";
-                    rect.Add(Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Depth", N(s.Number("D") ?? 0)), ("Width", N(s.Number("B") ?? s.Number("D") ?? 0)), ("Design Type", design)));
+                    rect.Add([.. Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Depth", N(s.Number("D") ?? 0)), ("Width", N(s.Number("B") ?? s.Number("D") ?? 0)), ("Design Type", design)), .. FrameMods(s)]);
                 }
             }
             tables.Add(CsiTableText.Table("FRAME SECTION PROPERTY DEFINITIONS - SUMMARY", frameProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Shape", shapeOf[s.Name])))));
@@ -283,16 +339,23 @@ public static class F2kWriter
 
         // Slab and wall properties: slabs, drops, mats and footings by the slab type ETABS gives them.
         static bool IsDeck(ShellSection s) => string.Equals(s.Get("PROPTYPE"), "Deck", StringComparison.OrdinalIgnoreCase);
-        var deckProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name) && IsDeck(s)).ToList();
-        var slabProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name) && !IsDeck(s)).ToList();
+        // Every slab, deck and wall property of the model, used or not, as SAFE's own files list them.
+        var deckProps = m.ShellSections.Where(s => IsDeck(s) && !s.IsWall).ToList();
+        var slabProps = m.ShellSections.Where(s => !IsDeck(s) && (!s.IsWall || usedSlab.Contains(s.Name))).ToList();
+        List<(string, string)> ShellMods(ShellSection s)
+        {
+            var sm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers);
+            return [("f11 Modifier", N(sm["F11MOD"])), ("f22 Modifier", N(sm["F22MOD"])), ("f12 Modifier", N(sm["F12MOD"])), ("m11 Modifier", N(sm["M11MOD"])), ("m22 Modifier", N(sm["M22MOD"])),
+                ("m12 Modifier", N(sm["M12MOD"])), ("v13 Modifier", N(sm["V13MOD"])), ("v23 Modifier", N(sm["V23MOD"])), ("Mass Modifier", N(sm["MMOD"])), ("Weight Modifier", N(sm["WMOD"]))];
+        }
         // Decks, by SAFE's own fields (the .e2k's DECK keywords).
         if (deckProps.Count > 0)
             tables.Add(CsiTableText.Table("DECK PROPERTY DEFINITIONS", deckProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Deck Type", s.Get("DECKTYPE") ?? "Filled"),
                 ("Slab Material", s.Get("CONCMATERIAL") ?? ""), ("Deck Material", s.Get("DECKMATERIAL") ?? ""), ("Slab Depth", N(s.Number("DECKSLABDEPTH") ?? 0)), ("Rib Depth", N(s.Number("DECKRIBDEPTH") ?? 0)),
                 ("Rib Width Top", N(s.Number("DECKRIBWIDTHTOP") ?? 0)), ("Rib Width Bottom", N(s.Number("DECKRIBWIDTHBOTTOM") ?? 0)), ("Rib Spacing", N(s.Number("DECKRIBSPACING") ?? 0)),
                 ("Deck Shear Thickness", N(s.Number("DECKSHEARTHICKNESS") ?? 0)), ("Deck Unit Weight", N(s.Number("DECKUNITWEIGHT") ?? 0)), ("Shear Stud Diameter", N(s.Number("SHEARSTUDDIAM") ?? 0)),
-                ("Shear Stud Height", N(s.Number("SHEARSTUDHEIGHT") ?? 0)), ("Shear Stud Tensile Strength", N(s.Number("SHEARSTUDFU") ?? 0))))));
-        var wallProps = m.ShellSections.Where(s => usedWall.Contains(s.Name)).ToList();
+                ("Shear Stud Height", N(s.Number("SHEARSTUDHEIGHT") ?? 0)), ("Shear Stud Tensile Strength", N(s.Number("SHEARSTUDFU") ?? 0))).Concat(ShellMods(s)).ToList())));
+        var wallProps = m.ShellSections.Where(s => (s.IsWall || usedWall.Contains(s.Name)) && !usedSlab.Contains(s.Name)).ToList();
         if (slabProps.Count + wallProps.Count > 0)
             tables.Add(CsiTableText.Table("AREA SECTION PROPERTY DEFINITIONS - SUMMARY", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Slab"), ("Element Type", ElementType(s, "Shell-Thick")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0))))
                 .Concat(wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Wall"), ("Element Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0)))))));
@@ -308,11 +371,13 @@ public static class F2kWriter
                     row.Add(("Rib Width at Bottom", N(s.Number("SLABRIBWIDTHBOTTOM") ?? 0)));
                     row.Add((s.Number("SLABRIBPARALLELTOAXIS") == 2 ? "Rib Spacing 2" : "Rib Spacing 1", N(spacing)));
                 }
+                if (s.Get("ONEWAYLOADDIST") is { Length: > 0 } oneWay) row.Add(("One Way Load Distribution?", oneWay.Equals("Yes", StringComparison.OrdinalIgnoreCase) ? "Yes" : "No"));
+                row.AddRange(ShellMods(s));
                 return (IReadOnlyList<(string, string)>)row;
             })));
         if (wallProps.Count > 0)
             tables.Add(CsiTableText.Table("WALL PROPERTY DEFINITIONS - SPECIFIED", wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(
-                ("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Wall Thickness", N(s.Thickness ?? 0)), ("Include Auto Rigid Zone?", "No")))));
+                ("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Wall Thickness", N(s.Thickness ?? s.Number("WALLTHICKNESS") ?? 0)), ("Include Auto Rigid Zone?", "No")).Concat(ShellMods(s)).ToList())));
 
         // Soil: one subgrade modulus under every slab when asked for, else each slab's own area spring (Assign > Shell >
         // Area Springs, its U3 as the modulus). SAFE 20 keeps soil as area springs.
@@ -459,6 +524,25 @@ public static class F2kWriter
         if (lineRows.Count > 0)
             tables.Add(CsiTableText.Table("FRAME ASSIGNMENTS - SECTION PROPERTIES", lineRows.Where(l => l.Section.Length > 0).Select(l => (IReadOnlyList<(string, string)>)Row(
                 ("UniqueName", l.Label), ("Shape", shapeOf.GetValueOrDefault(l.Section, "Concrete Rectangular")), ("Auto Select List", "N.A."), ("Section Property", l.Section)))));
+        // Each beam's and column's end offsets and insertion point, as SAFE writes them for every frame.
+        LineAssign? AssignOf(PhysicalFrame f) => m.LineAssigns.Find(x => x.Label == f.Label && string.Equals(x.Story, f.Story, StringComparison.OrdinalIgnoreCase));
+        if (lineRows.Count > 0)
+        {
+            tables.Add(CsiTableText.Table("FRAME ASSIGNMENTS - END LENGTH OFFSETS", lineRows.Select(l =>
+            {
+                var x = AssignOf(l.Source)?.Extra ?? [];
+                string? oi = PropertyDefs.Value(x, "LENGTHOFFI"), oj = PropertyDefs.Value(x, "LENGTHOFFJ"), rz = PropertyDefs.Value(x, "RIGIDZONE");
+                return (IReadOnlyList<(string, string)>)Row(("UniqueName", l.Label), ("Offset Option", oi is null && oj is null && rz is null ? "Auto" : "User"),
+                    ("Offset I", oi ?? "0"), ("Offset J", oj ?? "0"), ("Rigid Factor", rz ?? "0"), ("Self Weight Option", "Auto"));
+            })));
+            tables.Add(CsiTableText.Table("FRAME ASSIGNMENTS - INSERTION POINT", lineRows.Select(l =>
+            {
+                var a = AssignOf(l.Source);
+                var ip = a is null ? new Dictionary<string, string>() : AssignTables.Row(a, AssignTables.Insertion);
+                return (IReadOnlyList<(string, string)>)Row(("UniqueName", l.Label), ("Cardinal Point", CardinalName(a is null ? null : PropertyDefs.Value(a.Extra, "CARDINALPT"))),
+                    ("Mirror2", ip.GetValueOrDefault("Mirror2") ?? "No"), ("Mirror3", ip.GetValueOrDefault("Mirror3") ?? "No"), ("No Transform Stiffness", ip.GetValueOrDefault("NoTransform") ?? "Yes"));
+            })));
+        }
         if (areaRows.Count + wallRows.Count + openings.Count > 0)
             tables.Add(CsiTableText.Table("AREA ASSIGNMENTS - SECTION PROPERTIES", areaRows.Where(a => a.Section.Length > 0).Select(a => (IReadOnlyList<(string, string)>)Row(("UniqueName", a.Label), ("Section Property", a.Section), ("Property Type", "Slab")))
                 .Concat(wallRows.Where(w => w.Section.Length > 0).Select(w => (IReadOnlyList<(string, string)>)Row(("UniqueName", w.Label), ("Section Property", w.Section), ("Property Type", "Wall"))))
@@ -548,6 +632,27 @@ public static class F2kWriter
             var corners = punching.Where(x => x.P.Perimeter is not null).SelectMany(x => x.P.Perimeter!.Select((c, i) => (IReadOnlyList<(string, string)>)Row(("Unique Name", x.Point), ("Point Number", I(i + 1)),
                 ("X Coord", N(c[0])), ("Y Coord", N(c[1])), ("Radius", N(c[2])), ("Is Null?", "No")))).ToList();
             if (corners.Count > 0) tables.Add(CsiTableText.Table("CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - PERIMETER", corners));
+        }
+
+        // Groups, with the members that are in this floor's file (Define > Groups).
+        var groups = GroupDefs.Groups(m);
+        if (groups.Count > 0)
+        {
+            // SAFE's own group of everything comes first in its files.
+            if (!groups.Exists(g => g.Name.Equals("All", StringComparison.OrdinalIgnoreCase))) groups.Insert(0, new Group("All", "Yellow", []));
+            tables.Add(CsiTableText.Table("GROUP DEFINITIONS", groups.Select(g => (IReadOnlyList<(string, string)>)Row(("Name", g.Name), ("Color", g.Color),
+                ("Steel Design?", "No"), ("Concrete Design?", "No"), ("Composite Design?", "No")))));
+            var members = new List<IReadOnlyList<(string, string)>>();
+            foreach (var g in groups)
+                foreach (var (type, label, at) in g.Members)
+                {
+                    string? name = null, kind = null;
+                    if (type == "AREA" && areaRows.Find(r => r.Source.Label == label && string.Equals(r.Source.Story, at, StringComparison.OrdinalIgnoreCase)) is { Label: { } an }) (name, kind) = (an, "Area");
+                    else if (type == "LINE" && lineRows.Find(r => r.Source.Label == label && string.Equals(r.Source.Story, at, StringComparison.OrdinalIgnoreCase)) is { Label: { } ln } lr) (name, kind) = (ln, lr.Type);
+                    else if (type == "POINT" && string.Equals(at, story, StringComparison.OrdinalIgnoreCase) && m.Point(label) is { } gp && index.TryGetValue(PointKey(gp.X, gp.Y, z - gp.Below), out var pn)) (name, kind) = (pn, "Point");
+                    if (name is not null) members.Add(Row(("Group Name", g.Name), ("Object Type", kind!), ("Object Unique Name", name)));
+                }
+            if (members.Count > 0) tables.Add(CsiTableText.Table("GROUP ASSIGNMENTS", members));
         }
 
         // The tables of a SAFE file the Modeler opened that it has no form for, as the file had them.
