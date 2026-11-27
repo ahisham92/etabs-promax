@@ -67,7 +67,9 @@ static class StabilityTests
             Check(clock.Elapsed.TotalSeconds < 20, $"took {clock.Elapsed.TotalSeconds:0.0} s");
         });
 
-        foreach (var file in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "samples"), "*.e2k"))
+        // etabs23-forms-scratch.e2k is ETABS's export of a model made only to hold every Define form: it has no support
+        // at all, so ETABS cannot analyse it either, and the check is right to say so (it is a lossless sample only).
+        foreach (var file in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "samples"), "*.e2k").Where(f => !f.EndsWith("forms-scratch.e2k", StringComparison.Ordinal)))
             yield return ($"stability: ETABS's own file {Path.GetFileName(file)} has no errors", () =>
             {
                 var r = StabilityCheck.Run(FromStructural.Read(CsiProMax.E2k.E2kReader.Read(File.ReadAllText(file)), "etabs"));

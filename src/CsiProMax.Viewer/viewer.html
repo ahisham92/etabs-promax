@@ -314,6 +314,11 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg .itabs button{white-space:nowrap;border:1px solid transparent;border-bottom:0;border-radius:2px 2px 0 0;background:none;padding:3px 12px;margin-bottom:-1px}
 .dlg .itabs button.on{background:var(--field);border-color:var(--line);font-weight:600}
 .dlg .ipage{display:none}.dlg .ipage.on{display:block}
+.dlg .sdw{position:relative}.dlg .sdm{display:flex;gap:2px;border-bottom:1px solid var(--line)}.dlg .sdm button{background:none;border:0;padding:3px 9px}.dlg .sdm button:hover{background:var(--sel)}
+.dlg .sdt{display:flex;gap:2px;padding:2px 0}.dlg .sdt button,.dlg .sds button{background:none;border:1px solid transparent;padding:1px;width:26px;height:24px}.dlg .sdt button:hover,.dlg .sds button:hover{border-color:var(--line)}
+.dlg .sds{display:flex;flex-direction:column;gap:1px;margin-right:4px}.dlg .sds hr{width:20px;margin:2px 0}
+.dlg .sdpop{position:absolute;z-index:50;background:var(--form);border:1px solid #999;box-shadow:2px 2px 6px rgba(0,0,0,.25);min-width:210px;padding:2px 0}.dlg .sdpop .sdi{padding:3px 22px 3px 26px;white-space:nowrap;cursor:default}
+.dlg .sdpop .sdi:hover{background:var(--sel)}.dlg .sdpop .sdi.off{color:#999}.dlg .sdpop hr{margin:2px 4px}
 .dlg .nmr{display:flex;justify-content:space-between;align-items:center;margin:3px 0}
 .dlg .nmi{display:inline-flex;width:15px;height:15px;border-radius:50%;background:#2b5fb4;color:#fff;font:italic bold 11px serif;align-items:center;justify-content:center;cursor:help}
 .dlg .nmgrid{display:grid;grid-template-columns:1fr 170px 18px;gap:5px 8px;align-items:center;margin:4px 0 0 34px}
@@ -11964,6 +11969,7 @@ async function hmFrameSection(s, after, copy, newShape) {
   if (/Section Designer/i.test(shape)) shape = "SD Section";
   const known = fsShapes.some(x => x[0] === shape);
   if (!known) shape = "General";
+  if (program === "etabs" && shape === "SD Section") return hmEtabsSdSection(s, cur, was, copy, pd, after);
   const spec = () => fsShape(shape);
   let mods = cur ? {...cur.modifiers} : null, kind = s && s.kind === "beam" ? "beam" : "column";
   const extras = {...((cur && cur.extras) || {})}, old = (cur && cur.dims) || {};
@@ -12339,6 +12345,405 @@ function hmBrbInelastic(now, done, u, name, user) {
   d.querySelectorAll("input[name=bPv]").forEach(x => x.onchange = plot);
   q(d, "#bChk").onclick = () => { read(); const bad = ["InitStiff", "TensFu0", "TensDx"].filter(k => !(n(k) > 0)); if (bad.length) return formError(d, "The stiffness, strength and deformation values must be greater than zero."); formError(d, ""); const r2 = d.querySelector("input[name=bPv][value=data]"); r2.disabled = false; r2.checked = true; plot(); };
   paint();
+  return d;
+}
+// ---- ETABS 23.2's Section Designer (pictured Frame Sections/Section Designer SD 01-71; its .e2k read from ETABS 23.2) ----
+// The section's shapes are kept as ETABS's own .e2k lines (SDSECTION "SD1" ...): a header (TYPE, DESIGNTYPE OTHER/CONCRETE/
+// STEEL/COMPOSITECOLUMN, DESIGNCHECK CHECK/DESIGN for a concrete column, NUMSHAPES, ANGLE) and each shape's lines:
+// CONCRETE RECTANGULAR (D B XC YC ROT, EDGE i size/spacing/cover, CORNER i size, TIEBARSIZE), CONCRETE CIRCLE (D XC YC,
+// EDGE 1 size/cover/NBARS/STARTANGLE, TIEBARSIZE), STEEL I/WIDE FLANGE (D B TF TW XC YC), POLYGON (NUMCORNERPTS and
+// POLYCORNER i X Y), REBAR (BARSIZE XC YC) and LINE REBAR (BARSIZE SPACING ENDBAR X1 Y1 X2 Y2).
+// A shape of a kind the Engine does not draw yet keeps its lines as read.
+const sdTok = l => (String(l).match(/"[^"]*"|\S+/g) || []), sdUnq = t => String(t ?? "").replace(/^"|"$/g, ""), sdQ = s => `"${String(s).replace(/"/g, "'")}"`;
+const sdKinds = {"CONCRETE RECTANGULAR": "Rectangle", "CONCRETE CIRCLE": "Circle", "STEEL I/WIDE FLANGE": "I Section", "POLYGON": "Polygon", "REBAR": "Bar", "LINE REBAR": "LineBar"};
+const sdDesign = {"No Check/Design": "OTHER", "Concrete Column": "CONCRETE", "General Steel Section": "STEEL", "Composite Column": "COMPOSITECOLUMN"};
+const sdN = v => String(+(+v || 0).toPrecision(8));
+function sdParse(lines) {
+  const head = [], shapes = new Map();
+  for (const l of lines || []) {
+    const t = sdTok(l);
+    if (t[0] !== "SHAPE") { for (let i = 0; i + 1 < t.length; i += 2) head.push([t[i], t[i + 1]]); continue; }
+    const n = +t[1], r = t.slice(2), kv = {}; for (let i = 0; i + 1 < r.length; i += 2) kv[r[i]] = r[i + 1];
+    if (!shapes.has(n)) shapes.set(n, {raw: [], edges: [], corners: [], poly: []});
+    const s = shapes.get(n);
+    if (r[0] === "EDGE") s.edges[+r[1] - 1] = Object.assign({size: sdUnq(kv.EDGEBARSIZE), spacing: +kv.EDGEBARSPACING || 0, cover: +kv.EDGEBARCOVER || 0}, kv.NBARS != null ? {nbars: +kv.NBARS, start: +kv.STARTANGLE || 0} : {});
+    else if (r[0] === "CORNER") s.corners[+r[1] - 1] = sdUnq(kv.CORNERBARSIZE);
+    else if (r[0] === "TIEBARSIZE") s.tie = sdUnq(r[1]);
+    else if (r[0] === "POLYCORNER") s.poly[+r[1] - 1] = [+kv.X || 0, +kv.Y || 0];
+    else if (kv.SHAPETYPE) Object.assign(s, {type: sdUnq(kv.SHAPETYPE), material: sdUnq(kv.MATERIAL), rebarMat: sdUnq(kv.REBARMATERIAL), D: +kv.D || 0, B: +kv.B || 0, TF: +kv.TF || 0, TW: +kv.TW || 0,
+      BB: kv.BBOTTOM != null ? +kv.BBOTTOM : null, TFB: kv.TFBOTTOM != null ? +kv.TFBOTTOM : null, FR: +kv.FILLETRADIUS || 0, XC: +kv.XC || 0, YC: +kv.YC || 0, ROT: +kv.ROT || 0,
+      barSize: sdUnq(kv.BARSIZE), spacing: +kv.SPACING || 0, endBar: sdUnq(kv.ENDBAR).toUpperCase() === "YES", X1: +kv.X1 || 0, Y1: +kv.Y1 || 0, X2: +kv.X2 || 0, Y2: +kv.Y2 || 0, main: r});
+    s.raw.push(l);
+  }
+  const count = {};
+  const list = [...shapes.values()].map(s => { const k = sdKinds[s.type] || sdUnq(s.type) || "Shape"; count[k] = (count[k] || 0) + 1;
+    return Object.assign(s, {known: !!sdKinds[s.type], reinf: s.corners.length > 0 || s.edges.length > 0, name: k.replace(/\s/g, "") + count[k]}); });
+  return {head, shapes: list};
+}
+// The design type the file's header names (DESIGNTYPE, DESIGNCHECK).
+function sdDesignOf(lines) {
+  const h = new Map(sdParse(lines).head), t = sdUnq(h.get("DESIGNTYPE") || "");
+  return {type: Object.keys(sdDesign).find(k => sdDesign[k] === t) || "", designed: sdUnq(h.get("DESIGNCHECK") || "") === "DESIGN"};
+}
+function sdCompose(sd, designType, designed) {
+  const h = new Map(sd.head), dt = sdDesign[designType] || "OTHER";
+  const head = [["TYPE", sdQ("FRAME")], ["DESIGNTYPE", sdQ(dt)]].concat(dt === "CONCRETE" ? [["DESIGNCHECK", sdQ(designed ? "DESIGN" : "CHECK")]] : [], [["NUMSHAPES", String(sd.shapes.length)], ["ANGLE", h.get("ANGLE") || "90"]]);
+  for (const [k, v] of h) if (!["TYPE", "DESIGNTYPE", "DESIGNCHECK", "NUMSHAPES", "ANGLE"].includes(k)) head.push([k, v]);
+  const out = [head.map(([k, v]) => k + " " + v).join(" ")];
+  sd.shapes.forEach((s, i) => {
+    const n = i + 1, P = `SHAPE ${n} `;
+    if (!s.known) { s.raw.forEach(l => { const t = sdTok(l); t[1] = String(n); out.push(t.join(" ")); }); return; }
+    if (s.type === "CONCRETE RECTANGULAR") {
+      out.push(P + `MATERIAL ${sdQ(s.material)} REBARMATERIAL ${sdQ(s.rebarMat)} SHAPETYPE ${sdQ(s.type)} D ${s.D} B ${s.B} XC ${s.XC} YC ${s.YC}` + (s.ROT ? ` ROT ${sdN(s.ROT)}` : ""));
+      if (s.reinf) {
+        for (let e = 0; e < 4; e++) { const g = s.edges[e] || s.edges[0]; out.push(P + `EDGE ${e + 1} EDGEBARSIZE ${sdQ(g.size)} EDGEBARSPACING ${g.spacing} EDGEBARCOVER ${g.cover}`); }
+        for (let c = 0; c < 4; c++) out.push(P + `CORNER ${c + 1} CORNERBARSIZE ${sdQ(s.corners[c] || s.corners[0])}`);
+        out.push(P + `TIEBARSIZE ${sdQ(s.tie || "")}`);
+      }
+    } else if (s.type === "CONCRETE CIRCLE") {
+      out.push(P + `MATERIAL ${sdQ(s.material)} REBARMATERIAL ${sdQ(s.rebarMat)} SHAPETYPE ${sdQ(s.type)} D ${sdN(s.D)} XC ${sdN(s.XC)} YC ${sdN(s.YC)}`);
+      if (s.reinf) { const g = s.edges[0]; out.push(P + `EDGE 1 EDGEBARSIZE ${sdQ(g.size)} EDGEBARCOVER ${sdN(g.cover)} NBARS ${g.nbars || 0} STARTANGLE ${sdN(g.start)}`); out.push(P + `TIEBARSIZE ${sdQ(s.tie || "")}`); }
+    } else if (s.type === "STEEL I/WIDE FLANGE") {
+      // A bottom flange unlike the top, a fillet and a rotation are written with the words ETABS's frame sections use for them.
+      out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} D ${sdN(s.D)} B ${sdN(s.B)} TF ${sdN(s.TF)} TW ${sdN(s.TW)}` + (s.BB != null && s.BB !== s.B ? ` BBOTTOM ${sdN(s.BB)}` : "") + (s.TFB != null && s.TFB !== s.TF ? ` TFBOTTOM ${sdN(s.TFB)}` : "")
+        + (s.FR ? ` FILLETRADIUS ${sdN(s.FR)}` : "") + ` XC ${sdN(s.XC)} YC ${sdN(s.YC)}` + (s.ROT ? ` ROT ${sdN(s.ROT)}` : ""));
+    } else if (s.type === "POLYGON") {
+      out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} NUMCORNERPTS ${s.poly.length}`);
+      s.poly.forEach(([x, y], k) => out.push(P + `POLYCORNER ${k + 1} X ${sdN(x)} Y ${sdN(y)}`));
+    } else if (s.type === "REBAR") out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} BARSIZE ${sdQ(s.barSize)} XC ${sdN(s.XC)} YC ${sdN(s.YC)}`);
+    else if (s.type === "LINE REBAR") out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} BARSIZE ${sdQ(s.barSize)} SPACING ${sdN(s.spacing)} ENDBAR ${sdQ(s.endBar ? "YES" : "NO")} X1 ${sdN(s.X1)} Y1 ${sdN(s.Y1)} X2 ${sdN(s.X2)} Y2 ${sdN(s.Y2)}`);
+  });
+  return sd.shapes.length ? out : [];
+}
+// A point of a shape turned by its rotation about its centre.
+const sdRot = (s, x, y) => { const a = (s.ROT || 0) * Math.PI / 180, c = Math.cos(a), n = Math.sin(a); return [s.XC + x * c - y * n, s.YC + x * n + y * c]; };
+// A line bar's bars: as many as the spacing leaves between its ends, and the end bars when it has them.
+function sdLineBars(s) { const L = Math.hypot(s.X2 - s.X1, s.Y2 - s.Y1), k = s.spacing > 0 ? Math.max(0, Math.ceil(L / s.spacing - 1e-9) - 1) : 0, out = [];
+  for (let j = s.endBar ? 0 : 1; j <= (s.endBar ? k + 1 : k); j++) out.push([s.X1 + (s.X2 - s.X1) * j / (k + 1), s.Y1 + (s.Y2 - s.Y1) * j / (k + 1)]);
+  return {L, n: out.length, actual: L / (k + 1), pts: out}; }
+// A shape's bars: a rectangle's corners at the cover and on each edge as many as the spacing leaves between them; a circle's
+// bars evenly round it from its start angle; a single bar; a line bar's bars.
+function sdBars(s, bars) {
+  const dia = n => ((bars.find(b => b.name === n) || {}).diameter) || 0, area = n => ((bars.find(b => b.name === n) || {}).area) || 0;
+  if (s.type === "REBAR") return [{x: s.XC, y: s.YC, d: dia(s.barSize), a: area(s.barSize)}];
+  if (s.type === "LINE REBAR") return sdLineBars(s).pts.map(([x, y]) => ({x, y, d: dia(s.barSize), a: area(s.barSize)}));
+  if (!s.known || !s.reinf) return [];
+  if (s.type === "CONCRETE CIRCLE") { const g = s.edges[0] || {}, r = s.D / 2 - (g.cover || 0), out = [];
+    for (let k = 0; k < (g.nbars || 0); k++) { const a = ((g.start || 0) + 360 * k / g.nbars) * Math.PI / 180; out.push({x: s.XC + r * Math.cos(a), y: s.YC + r * Math.sin(a), d: dia(g.size), a: area(g.size)}); }
+    return out; }
+  if (s.type !== "CONCRETE RECTANGULAR") return [];
+  const cv = s.edges[0] ? s.edges[0].cover : 0, w = s.B / 2 - cv, h = s.D / 2 - cv, out = [];
+  const cs = [[w, h], [-w, h], [-w, -h], [w, -h]], at = (x, y) => sdRot(s, x, y);
+  cs.forEach(([x, y], i) => { const [px, py] = at(x, y); out.push({x: px, y: py, d: dia(s.corners[i] || s.corners[0]), a: area(s.corners[i] || s.corners[0])}); });
+  cs.forEach((p, i) => { const q2 = cs[(i + 1) % 4], g = s.edges[i] || s.edges[0], L = Math.hypot(q2[0] - p[0], q2[1] - p[1]), k = g.spacing > 0 ? Math.max(0, Math.ceil(L / g.spacing - 1e-9) - 1) : 0;
+    for (let j = 1; j <= k; j++) { const [px, py] = at(p[0] + (q2[0] - p[0]) * j / (k + 1), p[1] + (q2[1] - p[1]) * j / (k + 1)); out.push({x: px, y: py, d: dia(g.size), a: area(g.size)}); } });
+  return out;
+}
+function sdEdgeCount(s, i) { const cv = s.edges[0] ? s.edges[0].cover : 0, L = (i % 2 ? s.D : s.B) - 2 * cv, g = s.edges[i] || s.edges[0]; return g && g.spacing > 0 ? Math.max(0, Math.ceil(L / g.spacing - 1e-9) - 1) : 0; }
+// A shape's outline as polygons (a circle cut into the Drawing Options' arc increment, an I as its two flanges and web).
+function sdOutline(s) {
+  if (s.type === "CONCRETE RECTANGULAR") return [[[1, 1], [-1, 1], [-1, -1], [1, -1]].map(([a, b]) => sdRot(s, a * s.B / 2, b * s.D / 2))];
+  if (s.type === "CONCRETE CIRCLE") { const st = +sdOpt.disc || 11.25, out = []; for (let a = 0; a < 360 - 1e-9; a += st) out.push([s.XC + s.D / 2 * Math.cos(a * Math.PI / 180), s.YC + s.D / 2 * Math.sin(a * Math.PI / 180)]); return [out]; }
+  if (s.type === "POLYGON") return s.poly.length > 2 ? [s.poly.map(p => [...p])] : [];
+  if (s.type === "STEEL I/WIDE FLANGE") { const bb = s.BB ?? s.B, tb = s.TFB ?? s.TF, h = s.D / 2, r = (x0, y0, x1, y1) => [[x1, y1], [x0, y1], [x0, y0], [x1, y0]].map(([x, y]) => sdRot(s, x, y));
+    return [r(-s.B / 2, h - s.TF, s.B / 2, h), r(-s.TW / 2, -h + tb, s.TW / 2, h - s.TF), r(-bb / 2, -h, bb / 2, -h + tb)]; }
+  return [];
+}
+function sdBox(s) { const pts = sdOutline(s).flat(); if (s.type === "REBAR") pts.push([s.XC, s.YC]); if (s.type === "LINE REBAR") pts.push([s.X1, s.Y1], [s.X2, s.Y2]);
+  return pts.length ? pts.reduce((b, [x, y]) => [Math.min(b[0], x), Math.max(b[1], x), Math.min(b[2], y), Math.max(b[3], y)], [Infinity, -Infinity, Infinity, -Infinity]) : null; }
+// Section Properties (SD 26, 27): the gross section of the area shapes about their centre of gravity.
+function sdProps(sd, angle) {
+  const polys = sd.shapes.filter(s => s.known).flatMap(s => sdOutline(s).map(p => ({p, s})));
+  let A = 0, Sx = 0, Sy = 0, Ix0 = 0, Iy0 = 0, Ixy0 = 0, J = 0, xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+  polys.forEach(({p}) => { let a = 0, cx = 0, cy = 0, ix = 0, iy = 0, ixy = 0;
+    for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], c = x0 * y1 - x1 * y0; a += c / 2; cx += (x0 + x1) * c / 6; cy += (y0 + y1) * c / 6;
+      ix += (y0 * y0 + y0 * y1 + y1 * y1) * c / 12; iy += (x0 * x0 + x0 * x1 + x1 * x1) * c / 12; ixy += (x0 * y1 + 2 * x0 * y0 + 2 * x1 * y1 + x1 * y0) * c / 24;
+      xmin = Math.min(xmin, x0); xmax = Math.max(xmax, x0); ymin = Math.min(ymin, y0); ymax = Math.max(ymax, y0); }
+    const sg = a < 0 ? -1 : 1; A += a * sg; Sx += cx * sg; Sy += cy * sg; Ix0 += ix * sg; Iy0 += iy * sg; Ixy0 += ixy * sg; });
+  if (!A) return null;
+  const xc = Sx / A, yc = Sy / A, Ixx = Ix0 - A * yc * yc, Iyy = Iy0 - A * xc * xc, Ixy = Ixy0 - A * xc * yc;
+  sd.shapes.filter(s => s.known).forEach(s => {
+    if (s.type === "CONCRETE RECTANGULAR") { const l = Math.max(s.B, s.D), t = Math.min(s.B, s.D); J += l * t ** 3 * (1 / 3 - 0.21 * t / l * (1 - t ** 4 / (12 * l ** 4))); }
+    else if (s.type === "CONCRETE CIRCLE") J += Math.PI * s.D ** 4 / 32;
+    else if (s.type === "STEEL I/WIDE FLANGE") J += (s.B * s.TF ** 3 + (s.BB ?? s.B) * (s.TFB ?? s.TF) ** 3 + (s.D - s.TF - (s.TFB ?? s.TF)) * s.TW ** 3) / 3;
+    else if (s.type === "POLYGON" && s.poly.length > 2) { const p = s.poly; let a = 0, cx = 0, cy = 0, ix = 0, iy = 0;
+      for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], c = x0 * y1 - x1 * y0; a += c / 2; cx += (x0 + x1) * c / 6; cy += (y0 + y1) * c / 6; ix += (y0 * y0 + y0 * y1 + y1 * y1) * c / 12; iy += (x0 * x0 + x0 * x1 + x1 * x1) * c / 12; }
+      if (a) { const ip = Math.abs(ix + iy - (cx * cx + cy * cy) / a); J += a ** 4 / (40 * ip); } }
+  });
+  // The plastic moduli from strips of the section about its plastic neutral axes.
+  const strips = (horiz) => { const n = 400, lo = horiz ? ymin : xmin, hi = horiz ? ymax : xmax, w = (hi - lo) / n, out = [];
+    for (let k = 0; k < n; k++) { const c = lo + (k + 0.5) * w; let len = 0;
+      polys.forEach(({p}) => { const xs = []; for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], a0 = horiz ? y0 : x0, a1 = horiz ? y1 : x1, b0 = horiz ? x0 : y0, b1 = horiz ? x1 : y1;
+        if ((a0 <= c) !== (a1 <= c)) xs.push(b0 + (c - a0) / (a1 - a0) * (b1 - b0)); } xs.sort((a, b) => a - b); for (let i = 0; i + 1 < xs.length; i += 2) len += xs[i + 1] - xs[i]; });
+      out.push([c, len * w]); } return out; };
+  const plastic = horiz => { const st = strips(horiz), half = st.reduce((t, [, a]) => t + a, 0) / 2; let acc = 0, pna = st[0][0];
+    for (const [c, a] of st) { if (acc + a >= half) { pna = c; break; } acc += a; } return st.reduce((t, [c, a]) => t + a * Math.abs(c - pna), 0); };
+  const Zx = plastic(true), Zy = plastic(false);
+  // With the 2-axis at 90 degrees from X (the default), axis 3 is X and axis 2 is Y.
+  const I33 = Ixx, I22 = Iyy, avg = (Ixx + Iyy) / 2, rad = Math.hypot((Ixx - Iyy) / 2, Ixy);
+  return {xc, yc, A, AS2: A * 5 / 6, AS3: A * 5 / 6, I22, I23: Ixy, I33, J, R22: Math.sqrt(I22 / A), R33: Math.sqrt(I33 / A), S22n: I22 / (xc - xmin), S22p: I22 / (xmax - xc), S33n: I33 / (yc - ymin), S33p: I33 / (ymax - yc),
+    Z22: Zy, Z33: Zx, Imaj: avg + rad, Imin: avg - rad, pa: Math.abs(Ixy) < 1e-12 ? 0 : 0.5 * Math.atan2(-2 * Ixy, Ixx - Iyy) * 180 / Math.PI, angle};
+}
+function sdPropsForm(sd, base, u) {
+  const p = sdProps(sd, 90); if (!p) return;
+  const L = u.l, f = v => String(+(+v).toPrecision(6));
+  const rows = [pr("Center of Gravity", "", [pr("Xcg", f(p.xc), null, null, {unit: L}), pr("Ycg", f(p.yc), null, null, {unit: L})], null, {head: true}),
+    pr("Analysis Properties", "", [["Area", p.A, "²"], ["AS2", p.AS2, "²"], ["AS3", p.AS3, "²"], ["I22", p.I22, "⁴"], ["I23", p.I23, "⁴"], ["I33", p.I33, "⁴"], ["J", p.J, "⁴"]].map(([n, v, e]) => pr(n, f(v), null, null, {unit: L + e})), null, {head: true}),
+    pr("Design Properties", "", [["R22", p.R22, ""], ["R33", p.R33, ""], ["S22 Negative", p.S22n, "³"], ["S22 Positive", p.S22p, "³"], ["S33 Negative", p.S33n, "³"], ["S33 Positive", p.S33p, "³"], ["Z22", p.Z22, "³"], ["Z33", p.Z33, "³"]].map(([n, v, e]) => pr(n, f(v), null, null, {unit: L + e})), null, {head: true}),
+    pr("Principal Axes", "", [pr("I Major", f(p.Imaj), null, null, {unit: L + "⁴"}), pr("I Minor", f(p.Imin), null, null, {unit: L + "⁴"}), pr("Principal Axes Angle", f(p.pa), null, null, {unit: "deg"})], null, {head: true}),
+    pr("Other", "", [pr("PNA Offset 2", "0", null, null, {unit: L}), pr("PNA Offset 3", "0", null, null, {unit: L})], null, {head: true})];
+  const d = dialog("Section Properties", `<fieldset><legend>Base Material</legend><input class="grey" readonly value="${esc(base)}" style="width:230px"></fieldset>
+    <fieldset><legend>Orientation of 2-Axis for these Properties</legend><div style="display:flex;gap:16px"><label><input type="radio" name="sdO" checked> Default</label><label><input type="radio" name="sdO"> Principal Axis</label><label><input type="radio" name="sdO"> User</label></div>
+      <div style="margin-top:6px">Angle from X-&nbsp; to 2-Axis &nbsp;<input id="sdOA" class="grey" readonly value="90" style="width:90px"> deg</div></fieldset>
+    <fieldset><legend>Properties</legend><div class="pgwrap" style="height:340px">${gridHtml(rows, false)}</div><div class="pgdesc"><b></b></div></fieldset>`, [], {width: 320});
+  wireGrid(d, {p: rows}, {Area: "The cross-sectional area.", Xcg: "The X coordinate of the center of gravity.", Ycg: "The Y coordinate of the center of gravity."});
+  d.querySelectorAll("input[name=sdO]").forEach((r, i) => r.onchange = () => { q(d, "#sdOA").value = i === 1 ? String(90 + p.pa) : "90"; q(d, "#sdOA").readOnly = i !== 2; q(d, "#sdOA").classList.toggle("grey", i !== 2); });
+  return d;
+}
+// Section Object Data (SD 20-24, 39-47, 53, 64-67): each shape's own rows as ETABS lists them. Rectangle: Name, General
+// (Color, Material), Location (X/Y Center, Rotation), Geometry (Height, Width), Rebar (Reinforcing, Reinforcing Shape, Rebar
+// Data with Material, Tie Bar, Corner Bars 1-4, Edge Bars 1-4). Circle: Diameter, and Rebar Data with X/Y Center, Material,
+// Number of Bars, Tie Bar, Bar Size, Clear Cover to Tie, then Rebar Rotation. I Section: Height, Top Width/Thickness, Web
+// Thickness, Bottom Width/Thickness, Fillet Radius. Bar: Material, Shape Type, X/Y Center, Bar Size. LineBar: X1 Y1 X2 Y2,
+// X/Y Center, Rotation, Length, Bar Size, Has End Bars, Max Bar Spacing, Number of Bars, Actual Bar Spacing, Misc
+// BarLayoutType. Polygon: Name, Color, Material, Reinforcing.
+function sdObjectForm(s, mats, rmats, bars, u, done, smats) {
+  const L = u.l, o = JSON.parse(JSON.stringify(s)), num = (n, k) => pr(n, sdN(o[k] ?? 0), null, {key: k, type: "num"}, {unit: L}), deg = (n, k) => pr(n, sdN(o[k] || 0), null, {key: k, type: "num"}, {unit: "deg"});
+  const kind = sdKinds[o.type], ro = (n, v, unit) => pr(n, v, null, null, {grey: true, unit});
+  const bar = (n, k, size) => { const b = bars.find(x => x.name === size) || {}; return pr(n, size, [pr("Rebar Size", size, null, {key: k, type: "select", options: bars.map(x => x.name)}), pr("Diameter", b.diameter ?? "", null, null, {unit: L, grey: true}), pr("Area", b.area ?? "", null, null, {unit: L + "²", grey: true})]); };
+  const nameRow = (noName) => pr("Name", "", (noName ? [] : [pr("Shape Name", o.name, null, {key: "name", type: "text"})]).concat([ro("Shape Type", kind)]), null, {head: true});
+  const general = list => pr("General", "", [pr("Color", o.color || "DimGray"), pr("Material", o.material, null, {key: "material", type: "select", options: list})], null, {head: true});
+  const rows = () => {
+    if (kind === "Bar") return [nameRow(), pr("General", "", [pr("Material", o.material, null, {key: "material", type: "select", options: rmats}), ro("Shape Type", "Bar")], null, {head: true}),
+      pr("Location", "", [num("X Center", "XC"), num("Y Center", "YC")], null, {head: true}), pr("Rebar", "", [bar("Bar Size", "barSize", o.barSize)], null, {head: true})];
+    if (kind === "LineBar") { const lb = sdLineBars(o), ang = Math.atan2(o.Y2 - o.Y1, o.X2 - o.X1) * 180 / Math.PI;
+      return [pr("Name", "", [ro("Shape Type", "LineBar")], null, {head: true}), pr("General", "", [pr("Material", o.material, null, {key: "material", type: "select", options: rmats})], null, {head: true}),
+        pr("Location", "", [num("X1", "X1"), num("Y1", "Y1"), num("X2", "X2"), num("Y2", "Y2"), pr("X Center", sdN((o.X1 + o.X2) / 2), null, {key: "lxc", type: "num"}, {unit: L}), pr("Y Center", sdN((o.Y1 + o.Y2) / 2), null, {key: "lyc", type: "num"}, {unit: L}),
+          pr("Rotation", sdN(Math.abs(ang) < 1e-9 ? 0 : ang), null, {key: "lrot", type: "num"}, {unit: "deg"}), pr("Length", sdN(lb.L), null, {key: "llen", type: "num"}, {unit: L})], null, {head: true}),
+        pr("Rebar", "", [bar("Bar Size", "barSize", o.barSize), pr("Has End Bars", o.endBar ? "Yes" : "No", null, {key: "endBar", type: "select", options: ["Yes", "No"]}), num("Max Bar Spacing", "spacing"),
+          pr("Number of Bars", String(lb.n), null, {key: "lnum", type: "num"}), ro("Actual Bar Spacing", sdN(lb.actual), L)], null, {head: true}),
+        pr("Misc", "", [ro("BarLayoutType", "BarSpacing")], null, {head: true})]; }
+    if (kind === "Polygon") return [nameRow(), general(mats), pr("Rebar", "", [pr("Reinforcing", "No")], null, {head: true})];
+    if (kind === "I Section") return [nameRow(), general(smats || mats), pr("Location", "", [num("X Center", "XC"), num("Y Center", "YC"), deg("Rotation", "ROT")], null, {head: true}),
+      pr("Geometry", "", [num("Height", "D"), num("Top Width", "B"), num("Top Thickness", "TF"), num("Web Thickness", "TW"), pr("Bottom Width", sdN(o.BB ?? o.B), null, {key: "BB", type: "num"}, {unit: L}),
+        pr("Bottom Thickness", sdN(o.TFB ?? o.TF), null, {key: "TFB", type: "num"}, {unit: L}), num("Fillet Radius", "FR")], null, {head: true})];
+    if (kind === "Circle") { const g = o.edges[0] || {}, tieD = (bars.find(b => b.name === o.tie) || {}).diameter || 0;
+      return [nameRow(), general(mats), pr("Location", "", [num("X Center", "XC"), num("Y Center", "YC")], null, {head: true}), pr("Geometry", "", [num("Diameter", "D")], null, {head: true}),
+        pr("Rebar", "", [pr("Reinforcing", o.reinf ? "Yes" : "No", null, {key: "reinf", type: "select", options: ["Yes", "No"]})].concat(o.reinf ? [pr("Reinforcing Shape", "Circle", null, {key: "rshape", type: "select", options: ["Circle", "Rectangle"]}),
+          pr("Rebar Data", (g.nbars || 0) + " bars", [ro("X Center", sdN(o.XC), L), ro("Y Center", sdN(o.YC), L), pr("Material", o.rebarMat, null, {key: "rebarMat", type: "select", options: rmats}), pr("Number of Bars", String(g.nbars || 0), null, {key: "nbars", type: "num"}),
+            bar("Tie Bar", "tie", o.tie), bar("Bar Size", "csize", g.size), pr("Clear Cover to Tie", sdN((g.cover || 0) - tieD), null, {key: "ccover", type: "num"}, {unit: L})], {open: false}), deg("Rebar Rotation", "cstart")] : []), null, {head: true})]; }
+    return [nameRow(), general(mats), pr("Location", "", [num("X Center", "XC"), num("Y Center", "YC"), deg("Rotation", "ROT")], null, {head: true}),
+      pr("Geometry", "", [num("Height", "D"), num("Width", "B")], null, {head: true}),
+      pr("Rebar", "", [pr("Reinforcing", o.reinf ? "Yes" : "No", null, {key: "reinf", type: "select", options: ["Yes", "No"]})].concat(o.reinf ? [pr("Reinforcing Shape", "Rectangle", null, {key: "rshape", type: "select", options: ["Circle", "Rectangle"]}),
+        pr("Rebar Data", (sdBars(o, bars).length) + " bars", [pr("Material", o.rebarMat, null, {key: "rebarMat", type: "select", options: rmats}), bar("Tie Bar", "tie", o.tie),
+          ...[0, 1, 2, 3].map(i => bar("Corner Bar " + (i + 1), "c" + i, o.corners[i])),
+          ...[0, 1, 2, 3].map(i => pr("Edge Bar " + (i + 1), `${sdEdgeCount(o, i)} ${o.edges[i].size} bars`, [bar("Bar Size", "es" + i, o.edges[i].size), pr("Bar Spacing", o.edges[i].spacing, null, {key: "ep" + i, type: "num"}, {unit: L}), pr("Clear Cover", o.edges[i].cover, null, {key: "ec" + i, type: "num"}, {unit: L})]))], {open: false})] : []), null, {head: true})];
+  };
+  const d = dialog("Section Object Data - " + kind, `<fieldset><legend>Properties</legend><div class="pgwrap" id="soG" style="height:320px"></div><div class="pgdesc"><b></b></div></fieldset>`,
+    [["OK", () => { read(); done(o); }], ["Cancel"]], {width: 300});
+  const b8 = () => bars.find(x2 => x2.name === "#8") ? "#8" : (bars[0] || {}).name || "", b4 = () => bars.find(x2 => x2.name === "#4") ? "#4" : b8();
+  const read = () => d.querySelectorAll("[data-ed]").forEach(x => { const k = x.dataset.ed, v = x.value, n = parseFloat(v), fin = isFinite(n);
+    if (k === "reinf") { o.reinf = v === "Yes"; if (o.reinf && kind === "Circle" && !o.edges.length) { const tie = b4(), td = (bars.find(b => b.name === tie) || {}).diameter || 0; o.edges = [{size: b8(), spacing: 0, cover: inTo(1.5, u) + td, nbars: 8, start: 0}]; o.tie = tie; o.rebarMat = o.rebarMat || rmats[0] || ""; }
+      else if (o.reinf && !o.corners.length && kind === "Rectangle") { const b = b8(); o.corners = [b, b, b, b]; o.edges = [0, 1, 2, 3].map(() => ({size: b, spacing: inTo(6, u), cover: inTo(2, u)})); o.tie = b4(); o.rebarMat = o.rebarMat || rmats[0] || ""; }
+      if (!o.reinf) { o.edges = []; o.corners = []; } }
+    else if (k === "name" || k === "material" || k === "rebarMat" || k === "tie" || k === "barSize") o[k] = v;
+    else if (k === "endBar") o.endBar = v === "Yes";
+    else if (k === "csize") o.edges[0].size = v; else if (k === "nbars") { if (fin) o.edges[0].nbars = Math.max(1, Math.round(n)); } else if (k === "cstart") { if (fin) o.edges[0].start = n; }
+    else if (k === "ccover") { if (fin) o.edges[0].cover = n + ((bars.find(b => b.name === o.tie) || {}).diameter || 0); }
+    else if (k === "lxc" || k === "lyc" || k === "lrot" || k === "llen") { if (!fin) return; const cx = (o.X1 + o.X2) / 2, cy = (o.Y1 + o.Y2) / 2, len = Math.hypot(o.X2 - o.X1, o.Y2 - o.Y1), a = Math.atan2(o.Y2 - o.Y1, o.X2 - o.X1) * 180 / Math.PI;
+      const nc = {lxc: [n, cy, len, a], lyc: [cx, n, len, a], lrot: [cx, cy, len, n], llen: [cx, cy, n, a]}[k]; if (nc[0] === cx && nc[1] === cy && Math.abs(nc[2] - len) < 1e-9 && Math.abs(nc[3] - a) < 1e-9) return;
+      const r = nc[3] * Math.PI / 180, hx = nc[2] / 2 * Math.cos(r), hy = nc[2] / 2 * Math.sin(r); Object.assign(o, {X1: nc[0] - hx, Y1: nc[1] - hy, X2: nc[0] + hx, Y2: nc[1] + hy}); }
+    else if (k === "lnum") { if (fin && n >= 1) { const L2 = Math.hypot(o.X2 - o.X1, o.Y2 - o.Y1), gaps = o.endBar ? Math.max(1, n - 1) : n + 1; if (Math.round(n) !== sdLineBars(o).n) o.spacing = L2 / gaps; } }
+    else if (/^c\d$/.test(k)) o.corners[+k[1]] = v; else if (/^es\d$/.test(k)) o.edges[+k[2]].size = v; else if (/^ep\d$/.test(k)) o.edges[+k[2]].spacing = parseFloat(v) || 0;
+    else if (/^ec\d$/.test(k)) o.edges.forEach(e => e.cover = parseFloat(v) || 0); else if (k !== "rshape") { if (fin) o[k] = n; } });
+  const paint = () => { const r = rows(); q(d, "#soG").innerHTML = gridHtml(r, true); wireGrid(d, {r}, {"Shape Name": "The shape name.", "Tie Bar": "Tie bar size data.", "Reinforcing": "Indicates if the shape is reinforced.", "Material": kind === "Bar" || kind === "LineBar" ? "The material property for the rebar." : "The material property for the shape.", "Rebar Data": kind === "Circle" ? "The rebar size and number data." : "The rebar size and spacing data."});
+    d.querySelectorAll("[data-ed]").forEach(x => x.addEventListener("change", () => { read(); paint(); })); };
+  paint();
+  return d;
+}
+// Drawing Options (SD 15, 16).
+const sdOpt = {guide: 20, fine: 9, snapAng: 15, conAng: 45, transp: true, disc: "11.25"};
+function sdDrawingOptions(u, after) {
+  const sw = c => `<span style="display:inline-block;width:86px;height:16px;border:1px solid #888;background:${c}"></span>`;
+  dialog("Drawing Options", `<fieldset><legend>Guide Line Spacing</legend><div class="g2"><span>Guide Line Spacing</span><span><input id="doG" type="number" step="any" value="${inTo(sdOpt.guide, u)}"> ${u.l}</span><span>Number of Fine Grids Between Guide Lines</span><input id="doF" type="number" value="${sdOpt.fine}"></div></fieldset>
+    <fieldset><legend>Angle Snap and Constraint Values</legend><div class="g2"><span>Rotational Snap Angle Increment <span class="info">i</span></span><span><input id="doS" type="number" value="${sdOpt.snapAng}"> deg</span><span>Current Drawing Constraint Angle <span class="info">i</span></span><span><input id="doC" type="number" value="${sdOpt.conAng}"> deg</span></div></fieldset>
+    <fieldset><legend>Colors</legend><div class="g2">${[["Guide Lines", "#7f7f7f"], ["Fine Grids", "#d3d3d3"], ["XY Axes", "#008000"], ["Local Axes", "#ff0000"], ["Reference Lines", "#ff0000"], ["Rebar", "#000"], ["Default for Steel Type Shapes", "#d3d3d3"], ["Default for Concrete Type Shapes", "#696969"]].map(([n, c]) => `<span>${n}</span>${sw(c)}`).join("")}</div>
+      <label style="display:block;margin-top:6px"><input type="checkbox" id="doT" ${sdOpt.transp ? "checked" : ""}> Concrete Type Shape Fill Is Transparent</label></fieldset>
+    <fieldset><legend>Circular Arc Discretization</legend><div class="g2"><span>Discretization Angle Increment <span class="info">i</span></span><span><select id="doD">${opts(["5", "6", "7.5", "10", "11.25", "15", "22.5"], sdOpt.disc)}</select> deg</span></div></fieldset>`,
+    [["OK", x => { sdOpt.guide = (parseFloat(q(x, "#doG").value) || 20) / inTo(1, u); sdOpt.fine = parseInt(q(x, "#doF").value) || 9; sdOpt.snapAng = +q(x, "#doS").value || 15; sdOpt.conAng = +q(x, "#doC").value || 45; sdOpt.transp = q(x, "#doT").checked; sdOpt.disc = q(x, "#doD").value; after(); }], ["Cancel"]], {width: 400});
+}
+// The Section Designer window (SD 05-25): File, Edit, View, Draw, Select and Display menus as ETABS has them, its
+// toolbars, the grid with the X/Y and 2/3 axes, the shapes with their bars, the pointer's X and Y, OK and Cancel.
+function hmSdWindow(lines, base, mats, rmats, bars, u, done, smats) {
+  let sd = sdParse(lines), sel = new Set(), prevSel = [], undo = [], redo = [], view = {s: 6, x: 0, y: 0}, prevView = [], show = {guides: true, axes: true}, mode = "select", pending = null;
+  const snap = () => JSON.stringify(sd.shapes.map(s => ({...s}))), push = () => { undo.push(snap()); redo = []; };
+  const menu = {
+    File: [["Print Setup..."], ["Print Graphics..."], 0, ["Exit - Close Form", () => d.close()]],
+    Edit: [["Undo", () => step(undo, redo)], ["Redo", () => step(redo, undo)], 0, ["Delete", () => del(), "Del"], 0, ["Align", null, "", true], 0, ["Send to Back", () => order(-2)], ["Send Backward", () => order(-1), "Ctrl-B"], ["Bring Forward", () => order(1), "Ctrl-F"], ["Bring to Front", () => order(2)], 0,
+      ["Change Shape to Poly", () => toPoly(), "", () => ![...sel].some(i => ["CONCRETE RECTANGULAR", "CONCRETE CIRCLE"].includes(sd.shapes[i].type))], ["Change Bar Shape to Single Bar", null, "", true], 0, ["Edit Two Polys", null, "", true], 0, ["Check Section for Overlaps", () => overlaps()], ["Replicate", null, "", () => !sel.size]],
+    View: [["Rubberband Zoom", () => { mode = "zoom"; }], ["Restore Full View", () => { prevView.push({...view}); fit(); draw(); }], ["Previous Zoom", () => { if (prevView.length) { view = prevView.pop(); draw(); } }], ["Zoom In One Step", () => zoom(1.25)], ["Zoom Out One Step", () => zoom(0.8)], 0,
+      ["Pan", () => { mode = "pan"; }], 0, ["Show Guidelines", () => { show.guides = !show.guides; draw(); }, "", false, () => show.guides], ["Show Axes", () => { show.axes = !show.axes; draw(); }, "", false, () => show.axes], 0, ["Refresh Window", () => draw()]],
+    Draw: [["Select Mode", () => { mode = "select"; }], ["Reshape Mode", () => { mode = "select"; }], 0,
+      ["Steel", [["I/Wide Flange", () => setMode("isec", "Click where the I section's center goes")], "Channel", "Tee", 0, "Angle", 0, "Tube", "Pipe", 0, "Plate", "Arc", 0, "Rod", 0, "Defined Section"].map(n => Array.isArray(n) ? n : n && [n, () => notYet(n)])],
+      ["Concrete Shape", [["Rectangle", () => { mode = "rect"; status("Click where the rectangle's center goes"); }], ["Circle", () => setMode("circle", "Click where the circle's center goes")], ["Polygon", () => setMode("poly", "Click the polygon's corners; click the first corner again or press Enter to close it")], 0, ...["Tee", "L Shape", "Box", "Pipe", "Cross", 0, "Straight Wall", "Flanged Wall", "Curved Wall", 0, "Pie Arc", "Pie"].map(n => n && [n, () => notYet(n)])]],
+      ["Rebar Shape", [["Single Bar", () => setMode("bar", "Click where the bar goes")], 0, ["Line Bar", () => setMode("line", "Click the line bar's start, then its end")], ...["Rectangle Bar", "Circle Bar", "Circular Arc Bar"].map(n => [n, () => notYet(n)])]], 0,
+      ["Reference Line", ["Point", "Line", "Circle"].map(n => [n, () => notYet("Reference " + n)])], 0,
+      ["Snap To", ["Points and Guideline Intersections", "Line Ends and Midpoints", "Line Intersections", "Perpendicular Projections", "Lines and Edges", "Fine Grids"].map(n => [n, () => { snapTo = n; }, "", false, () => snapTo === n])], 0, ["Settings...", () => sdDrawingOptions(u, draw)]],
+    Select: [["Pointer/Window", () => { mode = "select"; }], ["Intersecting Line", () => { mode = "select"; }], ["All", () => { sel = new Set(sd.shapes.map((_, i) => i)); draw(); }, "Ctrl+A"], 0, ["Deselect Intersecting Line"], ["Deselect Window"], ["Clear Selection", () => { prevSel = [...sel]; sel.clear(); draw(); }], 0, ["Get Previous Selection", () => { sel = new Set(prevSel); draw(); }, "Ctrl+J"]],
+    Display: [["Section Properties...", () => sdPropsForm(sd, base, u), "", () => !hasArea()], 0, ["Interaction Surface...", () => notYet("Interaction Surface"), "", () => !hasArea()], ["Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve"), "", () => !hasArea()]]};
+  let snapTo = "Points and Guideline Intersections";
+  const tools = [["undo", "Undo", () => step(undo, redo)], ["redo", "Redo", () => step(redo, undo)], ["pen", "Refresh Window", () => draw()], ["zr", "Rubberband Zoom", () => { mode = "zoom"; }], ["zf", "Restore Full View", () => { fit(); draw(); }], ["zp", "Previous Zoom", () => { if (prevView.length) { view = prevView.pop(); draw(); } }], ["zi", "Zoom In One Step", () => zoom(1.25)], ["zo", "Zoom Out One Step", () => zoom(0.8)], ["pan", "Pan", () => { mode = "pan"; }], ["sp", "Section Properties...", () => sdPropsForm(sd, base, u)], ["is", "Interaction Surface...", () => notYet("Interaction Surface")], ["mc", "Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve")]];
+  const side = [["Select Mode", () => { mode = "select"; }], ["Reshape Mode", () => { mode = "select"; }], 0, ["Draw Steel Shape ▾", () => setMode("isec", "Click where the I section's center goes")], ["Draw Concrete Shape ▾", () => { mode = "rect"; status("Click where the rectangle's center goes"); }], ["Draw Rebar Shape ▾", () => setMode("bar", "Click where the bar goes")], ["Draw Reference Line ▾", () => notYet("reference lines")], 0,
+    ["all", () => { sel = new Set(sd.shapes.map((_, i) => i)); draw(); }], ["ps", () => { sel = new Set(prevSel); draw(); }], ["clr", () => { prevSel = [...sel]; sel.clear(); draw(); }], 0, ...["Points and Guideline Intersections", "Line Ends and Midpoints", "Line Intersections", "Perpendicular Projections", "Lines and Edges", "Fine Grids"].map(n => [n, () => { snapTo = n; }])];
+  const d = dialog("Section Designer", `<div class="sdw"><div class="sdm">${Object.keys(menu).map(k => `<button data-m="${k}">${k}</button>`).join("")}</div>
+    <div class="sdt">${tools.map(([k, t]) => `<button data-t="${k}" title="${esc(t)}">${sdIcon(k)}</button>`).join("")}</div>
+    <div style="display:flex"><div class="sds">${side.map((x, i) => x ? `<button data-s="${i}" title="${esc(x[0])}">${sdIcon("s" + i)}</button>` : "<hr>").join("")}</div><svg id="sdC" width="740" height="430" style="background:#fff;border:1px solid #bbb;cursor:crosshair;flex:none"></svg></div>
+    <div style="display:flex;justify-content:space-between;margin-top:4px"><span id="sdSt">Ready</span><span id="sdXY"></span></div></div>`,
+    [["OK", () => done(sd)], ["Cancel"]], {width: 820});
+  const svg = q(d, "#sdC"), W = 740, H = 430, X = x => W / 2 + (x - view.x) * view.s, Y = y => H / 2 - (y - view.y) * view.s, ux = px => (px - W / 2) / view.s + view.x, uy = py => -(py - H / 2) / view.s + view.y;
+  const status = t => q(d, "#sdSt").textContent = t;
+  const notYet = n => status(`${n}: the Engine draws rectangles, circles, polygons, I sections, single bars and line bars for now; this shape comes once its .e2k form is read from the program.`);
+  const setMode = (m, t) => { mode = m; poly = []; status(t); };
+  const hasArea = () => sd.shapes.some(s => s.known && sdOutline(s).length);
+  const fit = () => { const bx = sd.shapes.filter(s => s.known).map(sdBox).filter(Boolean); if (!bx.length) { view = {s: 6 / inTo(1, u), x: 0, y: 0}; return; } const a = Math.min(...bx.map(b => b[0])), b = Math.max(...bx.map(b => b[1])), c = Math.min(...bx.map(b => b[2])), e = Math.max(...bx.map(b => b[3])); view = {s: Math.min(W / Math.max(b - a, 1e-6), H / Math.max(e - c, 1e-6)) * 0.45, x: (a + b) / 2, y: (c + e) / 2}; };
+  let poly = [];
+  const zoom = k => { prevView.push({...view}); view.s *= k; draw(); };
+  const draw = () => {
+    const g = sdOpt.guide * inTo(1, u), fineN = sdOpt.fine + 1; let h = "";
+    if (show.guides) { const x0 = ux(0), x1 = ux(W), y0 = uy(H), y1 = uy(0), fine = g / fineN;
+      if (fine * view.s > 3) for (let x = Math.floor(x0 / fine) * fine; x <= x1; x += fine) h += `<path d="M${X(x)} 0V${H}" stroke="#e2e2e2"/>`;
+      if (fine * view.s > 3) for (let y = Math.floor(y0 / fine) * fine; y <= y1; y += fine) h += `<path d="M0 ${Y(y)}H${W}" stroke="#e2e2e2"/>`;
+      for (let x = Math.floor(x0 / g) * g; x <= x1; x += g) h += `<path d="M${X(x)} 0V${H}" stroke="#8a8a8a"/>`;
+      for (let y = Math.floor(y0 / g) * g; y <= y1; y += g) h += `<path d="M0 ${Y(y)}H${W}" stroke="#8a8a8a"/>`; }
+    sd.shapes.forEach((s, i) => { if (!s.known) return; const on = sel.has(i), steel = s.type === "STEEL I/WIDE FLANGE", st = `stroke="${on ? "#d00" : "#222"}" stroke-width="${on ? 2 : 1}" ${on ? 'stroke-dasharray="6 3"' : ""}`;
+      const fill = steel ? "#d3d3d3" : sdOpt.transp ? "rgba(105,105,105,.25)" : "#696969";
+      if (steel) h += `<path data-i="${i}" d="${sdOutline(s).map(p => "M" + p.map(([x, y]) => X(x) + " " + Y(y)).join("L") + "Z").join("")}" fill="${fill}" ${st}/>`;
+      else sdOutline(s).forEach(p => h += `<polygon data-i="${i}" points="${p.map(([x, y]) => X(x) + "," + Y(y)).join(" ")}" fill="${fill}" ${st}/>`);
+      if (s.type === "LINE REBAR") h += `<path d="M${X(s.X1)} ${Y(s.Y1)}L${X(s.X2)} ${Y(s.Y2)}" stroke="${on ? "#d00" : "#555"}" stroke-dasharray="4 3"/>`;
+      sdBars(s, bars).forEach(b => h += `<circle cx="${X(b.x)}" cy="${Y(b.y)}" r="${Math.max(2.5, b.d / 2 * view.s)}" fill="#c00010" stroke="${on && !sdOutline(s).length ? "#d00" : "#000"}" stroke-width="${on && !sdOutline(s).length ? 2 : .6}"/>`); });
+    if (poly.length) h += `<path d="M${poly.map(([x, y]) => X(x) + " " + Y(y)).join("L")}" fill="none" stroke="#d00" stroke-dasharray="4 3"/>` + poly.map(([x, y]) => `<circle cx="${X(x)}" cy="${Y(y)}" r="3" fill="#d00"/>`).join("");
+    if (show.axes) h += `<g stroke-width="1.4" font-family="Arial" font-size="13"><path d="M${X(0)} ${Y(0)}h70" stroke="#080"/><path d="M${X(0) + 62} ${Y(0) - 5}l9 5-9 5" stroke="#080" fill="none"/><text x="${X(0) + 76}" y="${Y(0) + 5}" fill="#080">X</text>
+      <path d="M${X(0)} ${Y(0)}v-75" stroke="#080"/><path d="M${X(0) - 5} ${Y(0) - 67}l5-9 5 9" stroke="#080" fill="none"/><text x="${X(0) - 4}" y="${Y(0) - 82}" fill="#080">Y</text>
+      <path d="M${X(0)} ${Y(0)}h-55" stroke="#e00"/><path d="M${X(0) - 47} ${Y(0) - 4}l-8 4 8 4" stroke="#e00" fill="none"/><text x="${X(0) - 70}" y="${Y(0) + 5}" fill="#e00">3</text>
+      <path d="M${X(0)} ${Y(0)}v-50" stroke="#e00"/><path d="M${X(0) - 4} ${Y(0) - 42}l4-8 4 8" stroke="#e00" fill="none"/><text x="${X(0) - 4}" y="${Y(0) - 56}" fill="#e00" font-size="11">2</text></g>`;
+    svg.innerHTML = h;
+  };
+  const step = (from, to) => { if (!from.length) return; to.push(snap()); sd.shapes = JSON.parse(from.pop()); sel.clear(); draw(); };
+  const del = () => { if (!sel.size) return; push(); sd.shapes = sd.shapes.filter((_, i) => !sel.has(i)); sel.clear(); draw(); };
+  const order = k => { if (!sel.size) return; push(); const pick = sd.shapes.filter((_, i) => sel.has(i)), rest = sd.shapes.filter((_, i) => !sel.has(i)); sd.shapes = k === 2 ? rest.concat(pick) : k === -2 ? pick.concat(rest) : sd.shapes; sel.clear(); draw(); };
+  // Shapes of the same kind of material that overlap (a steel shape inside concrete, as a composite column has it, is not an overlap).
+  const overlaps = () => { const k = sd.shapes.filter(s => s.known && sdOutline(s).length); let n = 0; for (let i = 0; i < k.length; i++) for (let j = i + 1; j < k.length; j++) { const a = sdBox(k[i]), b = sdBox(k[j]);
+    if ((k[i].type === "STEEL I/WIDE FLANGE") === (k[j].type === "STEEL I/WIDE FLANGE") && a[0] < b[1] - 1e-9 && b[0] < a[1] - 1e-9 && a[2] < b[3] - 1e-9 && b[2] < a[3] - 1e-9) n++; } status(n ? `${n} pair${n > 1 ? "s" : ""} of shapes overlap.` : "No shapes overlap."); };
+  // Edit > Change Shape to Poly: a rectangle or circle becomes a polygon with its corners (its bars go, as a polygon has none).
+  const toPoly = () => { const pick = [...sel].filter(i => ["CONCRETE RECTANGULAR", "CONCRETE CIRCLE"].includes(sd.shapes[i].type)); if (!pick.length) return; push();
+    pick.forEach(i => { const s = sd.shapes[i]; sd.shapes[i] = {known: true, type: "POLYGON", name: "Polygon" + (i + 1), material: s.material, poly: sdOutline(s)[0].map(([x, y]) => [+x.toPrecision(8), +y.toPrecision(8)]), edges: [], corners: [], reinf: false, raw: []}; }); draw(); };
+  const snapPt = (x, y) => { const g = sdOpt.guide * inTo(1, u) / (snapTo === "Fine Grids" ? sdOpt.fine + 1 : 1); return [Math.round(x / g) * g, Math.round(y / g) * g]; };
+  // Menus: a click opens one, a submenu opens beside its item.
+  const closeMenus = () => d.querySelectorAll(".sdpop").forEach(x => x.remove());
+  const pop = (items, x, y) => { const p = document.createElement("div"); p.className = "sdpop"; p.style.left = x + "px"; p.style.top = y + "px";
+    p.innerHTML = items.map((it, i) => !it ? "<hr>" : `<div class="sdi${(it[3] === true || typeof it[3] === "function" && it[3]()) ? " off" : ""}" data-i="${i}">${it[4] && it[4]() ? "✓ " : ""}${esc(it[0])}${Array.isArray(it[1]) ? '<span style="float:right">▸</span>' : `<span style="float:right;color:#777">${esc(it[2] || "")}</span>`}</div>`).join("");
+    d.querySelector(".sdw").appendChild(p);
+    p.querySelectorAll(".sdi").forEach(el => { const it = items[+el.dataset.i];
+      el.onmouseenter = () => { p.querySelectorAll(".sdpop").forEach(x => x.remove()); if (Array.isArray(it[1])) { const sub = pop(it[1], el.offsetWidth - 2, el.offsetTop); p.appendChild(sub); sub.style.left = (el.offsetWidth - 2) + "px"; sub.style.top = el.offsetTop + "px"; } };
+      el.onclick = e => { e.stopPropagation(); if (el.classList.contains("off") || Array.isArray(it[1])) return; closeMenus(); if (typeof it[1] === "function") it[1](); }; });
+    return p; };
+  d.querySelectorAll(".sdm button").forEach(b => b.onclick = e => { e.stopPropagation(); closeMenus(); const r = b.getBoundingClientRect(), base0 = d.querySelector(".sdw").getBoundingClientRect(); pop(menu[b.dataset.m], r.left - base0.left, r.bottom - base0.top); });
+  d.addEventListener("click", closeMenus);
+  d.querySelectorAll(".sdt button").forEach(b => b.onclick = () => tools.find(t => t[0] === b.dataset.t)[2]());
+  d.querySelectorAll(".sds button").forEach(b => b.onclick = () => side[+b.dataset.s][1]());
+  // The canvas: the pointer's place, a click to draw or select, a double click opens the shape's Section Object Data.
+  const xyIn = e => { const r = svg.getBoundingClientRect(); return [ux(e.clientX - r.left), uy(e.clientY - r.top)]; };
+  svg.onmousemove = e => { const [x, y] = xyIn(e); q(d, "#sdXY").textContent = `X = ${+x.toPrecision(6)}   Y = ${+y.toPrecision(6)} ${u.l}`; if (pending) { view.x = pending.vx - (e.clientX - pending.cx) / view.s; view.y = pending.vy + (e.clientY - pending.cy) / view.s; draw(); } };
+  svg.onmousedown = e => { if (mode === "pan") pending = {cx: e.clientX, cy: e.clientY, vx: view.x, vy: view.y}; };
+  svg.onmouseup = () => { pending = null; };
+  svg.onclick = e => { const [x, y] = xyIn(e);
+    const conc = mats.includes(base) && !(smats || []).includes(base) ? base : (mats.find(m => !(smats || []).includes(m)) || mats[0]), b8 = bars.find(b => b.name === "#8") ? "#8" : (bars[0] || {}).name || "";
+    const add = o => { push(); const k = sdKinds[o.type].replace(/\s/g, ""); let n = 1; while (sd.shapes.some(s => s.name === k + n)) n++; sd.shapes.push(Object.assign({known: true, name: k + n, XC: 0, YC: 0, ROT: 0, reinf: false, edges: [], corners: [], poly: [], raw: []}, o)); mode = "select"; status("Ready"); draw(); };
+    if (mode === "rect") { const [sx, sy] = snapPt(x, y); return add({type: "CONCRETE RECTANGULAR", material: conc, rebarMat: rmats[0] || "", D: inTo(24, u), B: inTo(24, u), XC: sx, YC: sy}); }
+    if (mode === "circle") { const [sx, sy] = snapPt(x, y); return add({type: "CONCRETE CIRCLE", material: conc, rebarMat: rmats[0] || "", D: inTo(24, u), XC: sx, YC: sy}); }
+    if (mode === "isec") { const [sx, sy] = snapPt(x, y), st = (smats || []).includes(base) ? base : (smats || [])[0] || mats[0]; return add({type: "STEEL I/WIDE FLANGE", material: st, D: inTo(24, u), B: inTo(12, u), TF: inTo(1, u), TW: inTo(0.5, u), BB: null, TFB: null, FR: 0, XC: sx, YC: sy}); }
+    if (mode === "bar") { const [sx, sy] = snapPt(x, y); return add({type: "REBAR", material: rmats[0] || "", barSize: b8, XC: sx, YC: sy}); }
+    if (mode === "line") { const p = snapPt(x, y); if (!poly.length) { poly = [p]; status("Click the line bar's end"); draw(); return; } const [a0] = poly; poly = []; return add({type: "LINE REBAR", material: rmats[0] || "", barSize: b8, spacing: inTo(6, u), endBar: false, X1: a0[0], Y1: a0[1], X2: p[0], Y2: p[1]}); }
+    if (mode === "poly") { const p = snapPt(x, y); if (poly.length > 2 && Math.hypot(p[0] - poly[0][0], p[1] - poly[0][1]) * view.s < 6) return closePoly(); poly.push(p); draw(); return; }
+    if (mode === "zoom") { prevView.push({...view}); view.x = x; view.y = y; view.s *= 2; mode = "select"; draw(); return; }
+    const hit = hitAt(x, y);
+    // A second click on the same shape soon after is a double click (the drawing is redrawn between the two clicks).
+    if (hit != null && lastClick && lastClick.i === hit && Date.now() - lastClick.t < 450) { lastClick = null; sel.add(hit); draw(); return openShape(hit); }
+    lastClick = {i: hit, t: Date.now()};
+    if (hit == null) { if (!e.shiftKey) { prevSel = [...sel]; sel.clear(); } } else { const i = +hit; sel.has(i) ? sel.delete(i) : sel.add(i); } draw(); };
+  const closePoly = () => { const p = poly; poly = []; if (p.length < 3) { mode = "select"; status("Ready"); draw(); return; } const c = mats.includes(base) && !(smats || []).includes(base) ? base : mats[0]; push(); let n = 1; while (sd.shapes.some(s => s.name === "Polygon" + n)) n++;
+    sd.shapes.push({known: true, type: "POLYGON", name: "Polygon" + n, material: c, poly: p, edges: [], corners: [], reinf: false, raw: []}); mode = "select"; status("Ready"); draw(); };
+  // A point is on a shape inside its outline, or near its bar or line; bars and the shapes drawn last come first.
+  const inPoly = (p, x, y) => { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > y) !== (p[j][1] > y) && x < (p[j][0] - p[i][0]) * (y - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) c = !c; return c; };
+  const hitAt = (x, y) => { const tol = 5 / view.s;
+    for (let i = sd.shapes.length - 1; i >= 0; i--) { const s = sd.shapes[i]; if (!s.known) continue;
+      if (s.type === "REBAR" && Math.hypot(x - s.XC, y - s.YC) <= tol * 1.5) return i;
+      if (s.type === "LINE REBAR") { const dx = s.X2 - s.X1, dy = s.Y2 - s.Y1, t = Math.max(0, Math.min(1, ((x - s.X1) * dx + (y - s.Y1) * dy) / (dx * dx + dy * dy || 1))); if (Math.hypot(x - s.X1 - t * dx, y - s.Y1 - t * dy) <= tol) return i; } }
+    for (let i = sd.shapes.length - 1; i >= 0; i--) { const s = sd.shapes[i]; if (s.known && sdOutline(s).some(p => inPoly(p, x, y))) return i; } return null; };
+  let lastClick = null;
+  const openShape = i => sdObjectForm(sd.shapes[i], mats, rmats, bars, u, o => { push(); sd.shapes[i] = o; draw(); }, smats);
+  // Enter closes the polygon being drawn and Escape drops it, before the window's own Enter (OK) and Escape (Cancel).
+  const drawKeys = e => { if (!d.isConnected) return document.removeEventListener("keydown", drawKeys, true); if (d.nextElementSibling && d.nextElementSibling.classList.contains("dlg")) return;
+    if (e.key === "Enter" && mode === "poly") { e.preventDefault(); e.stopImmediatePropagation(); closePoly(); }
+    else if (e.key === "Escape" && (poly.length || mode !== "select")) { e.preventDefault(); e.stopImmediatePropagation(); poly = []; mode = "select"; status("Ready"); draw(); } };
+  document.addEventListener("keydown", drawKeys, true);
+  d.addEventListener("keydown", e => { if (e.key === "Delete") del(); if (e.ctrlKey && e.key.toLowerCase() === "a") { e.preventDefault(); sel = new Set(sd.shapes.map((_, i) => i)); draw(); } });
+  fit(); draw();
+  return d;
+}
+function sdIcon(k) {
+  const p = {undo: "M5 9a6 6 0 1 1 2 6M5 4v5h5", redo: "M15 9a6 6 0 1 0-2 6M15 4v5h-5", pen: "M4 16l9-9 3 3-9 9H4z", zr: "M8 3a5 5 0 1 0 .01 0zM12 12l5 5M6 8h4", zf: "M8 3a5 5 0 1 0 .01 0zM12 12l5 5M6 6h4v4H6z", zp: "M8 3a5 5 0 1 0 .01 0zM12 12l5 5M6 8l3-2v4z", zi: "M8 3a5 5 0 1 0 .01 0zM12 12l5 5M6 8h4M8 6v4", zo: "M8 3a5 5 0 1 0 .01 0zM12 12l5 5M6 8h4",
+    pan: "M10 2v16M2 10h16M10 2l-2 2M10 2l2 2", sp: "M3 4h14v12H3zM3 8h14M3 12h14M8 4v12", is: "M10 3a7 7 0 1 0 .01 0zM3 10h14M10 3v14", mc: "M3 17V3M3 17h14M3 17q4-12 14-10", s0: "M5 3l8 8-4 1 3 5-2 1-3-5-2 3z", s1: "M5 3l8 8-4 1M14 14h4M16 12v4", s3: "M5 4h10M5 16h10M10 4v12", s4: "M4 9a6 6 0 0 1 12 0v7H4z", s5: "M3 17L17 3", s6: "M4 16L16 4M4 4v3",
+    s8: "", s9: "", s10: "", s12: "M3 17L10 10M10 10l7-7M8 3h4v4", s13: "M3 15l4-4 4 4 4-8", s14: "M3 3l14 14M17 3L3 17", s15: "M10 3v14M3 10h14", s16: "M3 3l14 14M3 17h6", s17: "M3 3h14v14H3z"}[k];
+  const txt = {s8: "all", s9: "ps", s10: "clr"}[k];
+  return `<svg width="18" height="18" viewBox="0 0 20 20">${txt ? `<text x="1" y="14" font-size="9" font-family="Arial">${txt}</text>` : `<path d="${p || "M4 4h12v12H4z"}" fill="none" stroke="#333" stroke-width="1.4"/>`}</svg>`;
+}
+// Section Designer Section Property Data (SD 01-04, 33, 36): General Data (Property Name, Base Material with ..., Notional
+// Size, Display Color, Notes), Design Type (No Check/Design, Concrete Column, General Steel Section for a steel base,
+// Composite Column), Concrete Column Check/Design, Section Designer..., Properties... and Set Modifiers... OK once the section has a shape.
+async function hmEtabsSdSection(s, cur, was, copy, pd, after) {
+  const u = hmU(), dd = (await hmRun("definition_data", {}, true)).result || {}, bars = dd.rebar_sizes || [];
+  const mats = (pd.materials || []).filter(m => !/rebar|tendon/i.test(m.type)).map(m => m.name), rmats = (pd.materials || []).filter(m => /rebar/i.test(m.type)).map(m => m.name), conc = (pd.materials || []).filter(m => /concrete/i.test(m.type)).map(m => m.name), smats = (pd.materials || []).filter(m => /steel/i.test(m.type)).map(m => m.name);
+  const extras = {...((cur && cur.extras) || {})}; let mods = cur ? {...cur.modifiers} : null, lines = (cur && cur.sd_lines) || [];
+  if (!extras.Color) extras.Color = "Green";
+  const name0 = s ? (copy ? s.name + " copy" : s.name) : (() => { let n = 1; while ((pd.frame_sections || []).some(x => x.name === "FSec" + n)) n++; return "FSec" + n; })();
+  const fromFile = sdDesignOf(lines); if (!extras.DesignType && fromFile.type) { extras.DesignType = fromFile.type; extras.IsDesigned = fromFile.designed ? "Yes" : "No"; }
+  const dt = extras.DesignType || "No Check/Design", radio = (n, v, now, dis) => `<label${dis ? ' style="color:#999"' : ""}><input type="radio" name="${n}" value="${v}" ${v === now ? "checked" : ""} ${dis ? "disabled" : ""}> ${v}</label>`;
+  const d = dialog("Section Designer Section Property Data", `<fieldset><legend>General Data</legend><div class="ex fsx">
+      <span>Property Name</span><input id="sdN" value="${esc(name0)}"><span></span>
+      <span>Base Material</span><select id="sdM">${opts(mats, cur && cur.material || (mats.includes("4000Psi") ? "4000Psi" : conc[0] || mats[0]))}</select><button id="sdMb" class="dots">...</button>
+      <span>Notional Size Data</span><button id="sdNot">Modify/Show Notional Size...</button><span></span>
+      <span>Display Color</span><span class="rowb"><span id="sdSw" class="sw"></span><button id="sdCol">Change...</button></span><span></span>
+      <span>Notes</span><button id="sdNotes">Modify/Show Notes...</button><span></span></div></fieldset>
+    <fieldset><legend>Design Type</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px" id="sdDT"></div></fieldset>
+    <fieldset id="sdCC"><legend>Concrete Column Check/Design</legend>${radio("sdC", "Reinforcement to be Checked", extras.IsDesigned === "Yes" ? "" : "Reinforcement to be Checked")}<br>${radio("sdC", "Reinforcement to be Designed", extras.IsDesigned === "Yes" ? "Reinforcement to be Designed" : "")}</fieldset>
+    <fieldset><legend>Define/Edit/Show Section</legend><div class="cbtn"><button id="sdOpen" style="width:240px">Section Designer...</button></div></fieldset>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><fieldset><legend>Section Properties</legend><div class="cbtn"><button id="sdProps" style="width:120px">Properties...</button></div></fieldset>
+      <fieldset><legend>Property Modifiers</legend><div class="cbtn"><button id="sdMod" style="width:120px">Set Modifiers...</button></div></fieldset></div>`,
+    [["OK", x => {
+      const name = q(x, "#sdN").value.trim(), designType = (x.querySelector("input[name=sdD]:checked") || {}).value || "No Check/Design", designed = (x.querySelector("input[name=sdC]:checked") || {}).value === "Reinforcement to be Designed";
+      const ex = {DesignType: designType, IsDesigned: designed ? "Yes" : "No"}; for (const k of ["Color", "Notes", "NotSizeType", "NotAutoFact", "NotUserSize"]) if (extras[k] != null && extras[k] !== "") ex[k] = String(extras[k]);
+      hmRun("define_frame_shape", {name, was: was || undefined, shape: "SD Section", material: q(x, "#sdM").value, modifiers: mods || {}, extras: ex, sd_lines: sdCompose(sdParse(lines), designType, designed)}, true)
+        .then(j => { if (!j.ok) return formError(x, j.error); hm.sec.column = name; x.close(); hmSay("Done. Edit > Undo steps back."); if (after) after(j); });
+      return false;
+    }, true], ["Cancel"]], {width: 430});
+  const paintDT = () => { const now = (d.querySelector("input[name=sdD]:checked") || {}).value || dt, steel = !conc.includes(q(d, "#sdM").value);
+    // A steel base material greys Concrete Column and the notional size (SD 50); a concrete one greys General Steel Section (SD 56).
+    const pick = (now === "Concrete Column" && steel) || (now === "General Steel Section" && !steel) ? "No Check/Design" : now;
+    q(d, "#sdDT").innerHTML = radio("sdD", "No Check/Design", pick) + radio("sdD", "General Steel Section", pick, !steel) + radio("sdD", "Concrete Column", pick, steel) + radio("sdD", "Composite Column", pick);
+    q(d, "#sdNot").disabled = steel; q(d, "#sdNot").previousElementSibling.style.color = steel ? "#999" : "";
+    d.querySelectorAll("input[name=sdD]").forEach(r => r.onchange = paintDT);
+    const cc = pick === "Concrete Column" || pick === "Composite Column"; q(d, "#sdCC").style.color = cc ? "" : "#999"; d.querySelectorAll("input[name=sdC]").forEach(r => r.disabled = !cc);
+    const has = sdParse(lines).shapes.length > 0; q(d, "#sdProps").disabled = !sdParse(lines).shapes.some(s => s.known && sdOutline(s).length); d.querySelector(".df button").disabled = !has; };
+  q(d, "#sdM").onchange = paintDT; paintDT();
+  const sw = () => q(d, "#sdSw").style.background = matColorCss(extras.Color); sw();
+  q(d, "#sdCol").onclick = () => hmColor(extras.Color, c => { extras.Color = c; sw(); });
+  q(d, "#sdNot").onclick = () => hmNotional(extras, u);
+  q(d, "#sdNotes").onclick = () => dialog("Notes", `<textarea id="nT" rows="6" style="width:100%;box-sizing:border-box">${esc(extras.Notes || "")}</textarea>`, [["OK", n => { extras.Notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420});
+  q(d, "#sdMb").onclick = () => hmMaterials();
+  q(d, "#sdMod").onclick = () => hmModifiers(pd.frame_modifiers || ["AMOD", "A2MOD", "A3MOD", "JMOD", "I2MOD", "I3MOD", "MMOD", "WMOD"], mods || (cur && cur.modifiers), o => mods = o);
+  q(d, "#sdProps").onclick = () => sdPropsForm(sdParse(lines), q(d, "#sdM").value, u);
+  q(d, "#sdOpen").onclick = () => hmSdWindow(lines, q(d, "#sdM").value, mats, rmats, bars, u, sd => { const dtNow = (d.querySelector("input[name=sdD]:checked") || {}).value || dt; lines = sdCompose(sd, dtNow, (d.querySelector("input[name=sdC]:checked") || {}).value === "Reinforcement to be Designed"); paintDT(); }, smats);
   return d;
 }
 // Section Designer...: ETABS draws the section in its Section Designer window; here its base material and design
@@ -13998,9 +14403,398 @@ function hmSapLinkDir(st, name, type, dk, fields) {
   return d;
 }
 
+// ---- ETABS 23.2 Define > Section Properties > Link/Support Properties ----
+// Pictured field/reference-forms/etabs/Define/Links 0-32 and Define/Tables Link*: Define Link Properties, Link Property Data,
+// Linear Link/Support Directional Properties (uncoupled / coupled), Link/Support Directional Properties for each nonlinear
+// type, Advanced Link P-Delta Parameters and Link Acceptance Criteria Definition. Every link is kept as rows of ETABS's own
+// table for its type (Core EtabsLinkTables): Linear one row per link, the others one row per direction (a multilinear
+// direction one row per point), the link's own fields on its first row.
+const etaLinkTypes = ["Linear", "Damper - Exponential", "Damper - Bilinear", "Damper - Friction Spring", "Damper - Sumitomo Rubber GR4", "Gap", "Hook", "MultiLinear Elastic", "MultiLinear Plastic", "Plastic (Wen)", "Rubber Isolator", "Friction Isolator", "T/C Friction Isolator", "Triple Pendulum Isolator", "High Damping Rubber Isolator"];
+const etaLinkTables = {"Linear": "Linear", "Damper - Exponential": "Damper - Exponential", "Damper - Bilinear": "Damper - Bilinear", "Damper - Friction Spring": "Damper - Friction Spring", "Damper - Sumitomo Rubber GR4": "Damper - Sumitomo Viscoelastic", "Gap": "Gap", "Hook": "Hook",
+  "MultiLinear Elastic": "Multilinear - Elastic", "MultiLinear Plastic": "Multilinear - Plastic", "Plastic (Wen)": "Plastic Wen", "Rubber Isolator": "Isolator - Rubber", "Friction Isolator": "Isolator - Friction", "T/C Friction Isolator": "Isolator - TC Friction",
+  "Triple Pendulum Isolator": "Isolator - Triple Pendulum", "High Damping Rubber Isolator": "Isolator - High Damping Rubber"};
+const etaLinkTable = t => "Link Property Definitions - " + (etaLinkTables[t] || "Linear");
+const etaLinkAccept = k => "Link Property Definitions - Acceptance Criteria - " + k;
+const etaLinkFromEngine = {LINEAR: "Linear", DAMPER: "Damper - Exponential", GAP: "Gap", HOOK: "Hook", "PLASTIC (WEN)": "Plastic (Wen)", "RUBBER ISOLATOR": "Rubber Isolator", "FRICTION ISOLATOR": "Friction Isolator", "MULTILINEAR ELASTIC": "MultiLinear Elastic", "MULTILINEAR PLASTIC": "MultiLinear Plastic"};
+const etaLinkDofs = ["U1", "U2", "U3", "R1", "R2", "R3"];
+// The link's own fields (first row): Total Mass and Weight, line/area spring factors, P-Delta, stiffness options, notes.
+const etaLinkGen = ["Mass", "Weight", "RotInert1", "RotInert2", "RotInert3", "DefLength", "DefArea", "PDM2I", "PDM2J", "PDM3I", "PDM3J", "StiffLOpt", "StiffDOpt", "StiffDFact", "GUID", "Notes"];
+// Stiffness Options as the lists show them (pictured Links 13, 14) and the words ETABS's table holds (Damper - Exponential 2).
+const etaLinkStiffL = [["Effective", "Effective Stiffness"], ["Effective from Zero", "Effective Stiffness from Zero, Else Nonlinear"], ["Nonlinear", "Nonlinear Stiffness"]];
+const etaLinkStiffD = [["Initial", "Initial Stiffness (K0)"], ["Tangent", "Tangent Stiffness (KT)"], ["Effective", "Effective Stiffness (KE)"]];
+const etaLinkHys = ["Isotropic", "Kinematic", "Takeda", "Pivot", "Concrete", "BRB Hardening", "Degrading"];
+// A unit by kind: k stiffness, c damping, ce damping with exponent, l length (rad for a rotation), f force (moment), r rate, E modulus, A area.
+function etaLinkUnit(kind, rot) {
+  const u = hmU();
+  return ({k: rot ? `${u.f}-${u.l}/rad` : `${u.f}/${u.l}`, c: rot ? `${u.f}-${u.l}-s/rad` : `${u.f}-s/${u.l}`, ce: rot ? `${u.f}-${u.l}*(s/rad)^Cexp` : `${u.f}*(s/${u.l})^Cexp`,
+    l: rot ? "rad" : u.l, L: u.l, f: rot ? `${u.f}-${u.l}` : u.f, r: `sec/${u.l}`, E: `${u.f}/${u.l}²`, A: `${u.l}²`})[kind] || "";
+}
+// Each type's Nonlinear Properties for one direction (pictured Links 15-30; the types not pictured from ETABS's own table
+// fields): [field, label, unit kind, default, control]. An empty list: that direction cannot be nonlinear (Rubber Isolator
+// U1 and an isolator's rotations, greyed in Links 26 and 31).
+function etaLinkNl(type, dk) {
+  const r = dk[0] === "R", T = (t, x) => r ? x : t, u1 = dk === "U1";
+  const fl = u1 ? [["FLDamper", "Fixed Length Damper", "", "No", "check"], ["FLDLength", "Damper Length", "L", 0, "fl"], ["", "Extender Properties", "", "", "head"], ["FDLModulus", "Modulus of Elasticity", "E", 0, "fl"], ["FDLArea", "Cross Sectional Area", "A", 0, "fl"]] : [];
+  switch (type) {
+    case "Damper - Exponential": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Damping", "ce", 0], [T("TransCExp", "RotCExp"), "Damping Exponent", "", 1], ...fl];
+    case "Damper - Bilinear": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Initial Damping", "c", 0], [T("TransCy", "RotCy"), "Yielded Damping", "c", 0], [T("ForceLimit", "MomentLimit"), r ? "Moment Limit" : "Force Limit", "f", 0], ...fl];
+    case "Damper - Friction Spring": return [[T("TransK", "RotK"), "Initial Stiffness", "k", 0], [T("TransK1", "RotK1"), "Slipping Stiffness for Loading", "k", 0], [T("TransK2", "RotK2"), "Slipping Stiffness for Unloading", "k", 0],
+      [T("TransU0", "RotU0"), "Precompression Displacement", "l", 0], [T("TransUs", "RotUs"), "Stop Displacement", "l", 0], ["ActiveDir", "Active Direction", "", "", "text"]];
+    case "Damper - Sumitomo Rubber GR4": return r ? [] : [["ProdModel", "Product Model", "", "", "text"], ["ShearArea", "Shear Area", "A", 0], ["Thickness", "Thickness", "L", 0], ["Temp", "Temperature", "", 20], ["ExcitFreq", "Excitation Frequency", "", 0],
+      ["RigidFluctCoeff", "Rigidity Fluctuation Coefficient", "", 0], ["DampFluctCoeff", "Damping Fluctuation Coefficient", "", 0]];
+    case "Gap": case "Hook": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransOpen", "RotOpen"), "Open", "l", 0]];
+    case "Plastic (Wen)": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransYield", "RotYield"), "Yield Strength", "f", 0], [T("TransRatio", "RotRatio"), "Post Yield Stiffness Ratio", "", 0], [T("TransExp", "RotExp"), "Yielding Exponent", "", 2]];
+    case "Rubber Isolator": return r || u1 ? [] : [["TransK", "Stiffness", "k", 0], ["TransYield", "Yield Strength", "f", 0], ["TransRatio", "Post Yield Stiffness Ratio", "", 0]];
+    case "Friction Isolator": return r ? [] : u1 ? [["TransK", "Stiffness", "k", 0], ["TransC", "Damping Coefficient", "c", 0]]
+      : [["TransK", "Stiffness", "k", 0], ["Slow", "Friction Coefficient, Slow", "", 0], ["Fast", "Friction Coefficient, Fast", "", 0], ["Rate", "Rate Parameter", "r", 0], ["Radius", "Net Pendulum Radius", "L", "1in"]];
+    case "T/C Friction Isolator": return r ? [] : u1 ? [["U1TransKComp", "Stiffness, Compression", "k", 0], ["U1TransTens", "Stiffness, Tension", "k", 0], ["U1GapComp", "Gap, Compression", "L", 0], ["U1GapTens", "Gap, Tension", "L", 0], ["U1TransC", "Damping Coefficient", "c", 0]]
+      : [["TransK", "Stiffness", "k", 0], ["SlowComp", "Friction Coefficient, Slow, Compression", "", 0], ["FastComp", "Friction Coefficient, Fast, Compression", "", 0], ["RateComp", "Rate Parameter, Compression", "r", 0], ["Radius", "Net Pendulum Radius", "L", "1in"],
+        ["SlowTens", "Friction Coefficient, Slow, Tension", "", 0], ["FastTens", "Friction Coefficient, Fast, Tension", "", 0], ["RateTens", "Rate Parameter, Tension", "r", 0]];
+    case "Triple Pendulum Isolator": {
+      if (r) return [];
+      if (u1) return [["U1TransK", "Stiffness", "k", 0], ["U1TransC", "Damping Coefficient", "c", 0]];
+      const s = (p, w) => [[p + "Stiff", w + " Stiffness", "k", 0], [p + "Slow", w + " Slow Friction Coefficient", "", 0], [p + "Fast", w + " Fast Friction Coefficient", "", 0], [p + "Rate", w + " Rate Parameter", "r", 0], [p + "Rad", w + " Sliding Surface Radius", "L", 0], [p + "Stop", w + " Stop Distance", "L", 0]];
+      return [["TransK", "Stiffness", "k", 0], ["OuterSym", "Outer Surface Symmetric", "", "No", "check"], ["OutSurfHt", "Outer Surface Height", "L", 0], ["InSurfHt", "Inner Surface Height", "L", 0], ...s("OutTop", "Outer Top"), ...s("OutBot", "Outer Bottom"), ...s("InTop", "Inner Top")];
+    }
+    case "High Damping Rubber Isolator": return r || u1 ? [] : [["IsoArea", "Isolator Area", "A", 0], ["IsoEffHt", "Isolator Effective Height", "L", 0], ["AddStiff", "Added Elastic Stiffness", "k", 0], ["NumHysTerms", "Number of Hysteretic Terms", "", 3],
+      ...[1, 2, 3].flatMap(i => [["ContStrain" + i, "Control Strain #" + i, "", 0], ["ContStrgth" + i, "Control Strength #" + i, "", 0]]), ["DamResRatio", "Damage Resistance Ratio", "", 0], ["DamContStr", "Damage Control Strain", "", 0], ["StiffIter", "Stiffness for Iteration", "", "", "text"]];
+    case "MultiLinear Elastic": case "MultiLinear Plastic": return [[T("TransPoint", "RotPoint"), "points", "", 0, "points"]];
+  }
+  return [];
+}
+// The types whose rows say Nonlinear? themselves (the others are nonlinear where their nonlinear fields are filled in).
+const etaLinkFlagged = t => ["Damper - Sumitomo Rubber GR4", "Triple Pendulum Isolator", "High Damping Rubber Isolator"].includes(t);
+const etaLinkMulti = t => /^MultiLinear/.test(t);
+const etaLinkHysFields = {Pivot: [["PivotAlpha1", "Alpha 1"], ["PivotAlpha2", "Alpha 2"], ["PivotBeta1", "Beta 1"], ["PivotBeta2", "Beta 2"], ["PivotEta", "Eta"]], Concrete: [["ConcreteFact", "Energy Degradation Factor"]],
+  "BRB Hardening": [["BRBSym", "Symmetric", "check"], ["BRBTensHF", "Tension Hardening Factor"], ["BRBTensMPD", "Tension Max Plastic Deformation Ratio"], ["BRBTensAPD", "Tension Accumulated Plastic Deformation Ratio"], ["BRBTensPro", "Tension Proportion"],
+    ["BRBCompHF", "Compression Hardening Factor"], ["BRBCompMPD", "Compression Max Plastic Deformation Ratio"], ["BRBCompAPD", "Compression Accumulated Plastic Deformation Ratio"], ["BRBCompPro", "Compression Proportion"]],
+  Degrading: [["DegSym", "Symmetric", "check"], ...["Tens", "Comp"].flatMap(s => ["f0", "f1", "f2", "x1", "x2"].map(x => [`Deg${s}${x}`, `${s === "Tens" ? "Tension" : "Compression"} ${x}`]).concat([[`Deg${s}ADWF`, `${s === "Tens" ? "Tension" : "Compression"} Accumulation Deformation Factor`]])),
+    ["DegStiff", "Stiffness Weighting Factor"], ["DegLargeSml", "Larger-Smaller Weighting Factor"]]};
+const etaLinkDefault = v => v === "1in" ? String(sapConv(1, {f: "kip", l: "in"}, hmU(), 0, 1, 0)) : String(v);
+
+async function etaLinks() {
+  const [pd, dd] = [(await hmRun("property_definitions", {}, true)).result, (await hmRun("definition_data", {}, true)).result || {tables: {}}]; if (!pd) return;
+  const T = t => (dd.tables[t] || {}).rows || [];
+  const names = [...new Set([...pd.links.map(l => l.name), ...etaLinkTypes.flatMap(t => T(etaLinkTable(t)).map(r => r.Name))])].sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); etaLinks(); };
+  // One link's state: its type, its own fields, each direction (on, fixed, nonlinear, its row, multilinear points) and the
+  // Linear table's matrix, and its acceptance criteria.
+  const load = n => {
+    const st = {type: "Linear", gen: {}, dofs: {}, lin: {}, acc: null}, l = pd.links.find(x => x.name === n);
+    const own = etaLinkTypes.map(t => [t, T(etaLinkTable(t)).filter(r => r.Name === n)]).find(x => x[1].length);
+    if (own) {
+      st.type = own[0]; const rows = own[1];
+      etaLinkGen.forEach(k => { if (rows[0][k] != null) st.gen[k] = rows[0][k]; });
+      if (st.type === "Linear") {
+        st.lin = Object.assign({}, rows[0]);
+        etaLinkDofs.forEach(k => { const s = rows[0][k + "Status"] || ""; if (s && !/^inactive/i.test(s)) st.dofs[k] = {on: true, fixed: /^fixed/i.test(s), nl: false, row: {}, pts: []}; });
+      } else for (const k of etaLinkDofs) {
+        const rs = rows.filter(r => (r.Direction || "").toUpperCase() === k); if (!rs.length) continue;
+        const r0 = Object.assign({}, rs[0]), nlf = etaLinkNl(st.type, k), multi = etaLinkMulti(st.type);
+        const nl = etaLinkFlagged(st.type) ? /^y/i.test(r0.Nonlinear || "") : multi ? rs.some(r => r.Displ != null || r.Rotation != null) : nlf.some(f => f[0] && f[4] !== "check" && r0[f[0]] != null && r0[f[0]] !== "");
+        st.dofs[k] = {on: true, fixed: /^y/i.test(r0.Fixed || ""), nl, row: r0, pts: multi ? rs.filter(r => r.Displ != null || r.Rotation != null).map(r => [+(r.Displ ?? r.Rotation ?? 0), +(r.Force ?? r.Moment ?? 0)]) : []};
+      }
+    } else if (l) {
+      st.type = etaLinkFromEngine[l.type] || "Linear"; const x = l.extras || {};
+      etaLinkGen.forEach(k => { if (x[k] != null) st.gen[k] = String(x[k]); });
+      for (const [k, v] of Object.entries(l.dofs || {})) {
+        st.dofs[k] = {on: true, fixed: false, nl: false, row: {[k[0] === "U" ? "TransKE" : "RotKE"]: String(v.stiffness), [k[0] === "U" ? "TransCE" : "RotCE"]: String(v.damping)}, pts: []};
+        const i = etaLinkDofs.indexOf(k) + 1; st.lin["StiffU" + i] = String(v.stiffness); st.lin["DampU" + i] = String(v.damping);
+      }
+    }
+    for (const kind of ["Force", "Displacement"]) { const r = T(etaLinkAccept(kind)).find(x => x.Name === n); if (r) st.acc = {kind, row: Object.assign({}, r)}; }
+    return st;
+  };
+  const one = (n, copy) => {
+    const st = n ? load(n) : {type: "Linear", gen: {}, dofs: {}, lin: {}, acc: null}, was = n && !copy ? st.type : null, u = hmU(), G = st.gen;
+    let k = 1; while (names.includes("Link" + k)) k++;
+    const name0 = !n ? "Link" + k : copy ? n + " copy" : n;
+    const fs = (legend, body) => `<fieldset style="margin:0 0 6px"><legend>${legend}</legend>${body}</fieldset>`;
+    const num = (id, v, w) => `<input id="${id}" type="number" step="any" style="width:${w || 86}px" value="${esc(v ?? 0)}">`;
+    const un = t => `<span class="un" style="min-width:58px">${t}</span>`;
+    const d = dialog("Link Property Data", fs("General", `<div style="display:grid;grid-template-columns:130px 176px 1fr 136px 148px;gap:5px 8px;align-items:center;padding:2px 6px">
+        <span>Link Property Name</span><input id="lN" value="${esc(name0)}"><span></span><span>P-Delta Parameters</span><button id="lPd">Modify/Show...</button>
+        <span>Link Type</span><select id="lT">${opts(etaLinkTypes, st.type)}</select><span></span><span>Acceptance Criteria</span><button id="lAc">Modify/Show...</button>
+        <span>Link Property Notes</span><button id="lNo">Modify/Show Notes...</button><span></span><span></span><span id="lAcS"></span></div>`)
+      + fs("Total Mass and Weight", `<div style="display:grid;grid-template-columns:110px 86px 1fr 120px 86px auto;gap:5px 8px;align-items:center;padding:2px 6px">
+        <span>Mass</span>${num("lMa", G.Mass)}${un(`${u.f}-s²/${u.l}`)}<span>Rotational Inertia 1</span>${num("lR1", G.RotInert1)}${un(`${u.f}-${u.l}-s²`)}
+        <span>Weight</span>${num("lWe", G.Weight)}${un(u.f)}<span>Rotational Inertia 2</span>${num("lR2", G.RotInert2)}${un(`${u.f}-${u.l}-s²`)}
+        <span></span><span></span><span></span><span>Rotational Inertia 3</span>${num("lR3", G.RotInert3)}${un(`${u.f}-${u.l}-s²`)}</div>`)
+      + fs("Factors for Line and Area Springs", `<div style="display:grid;grid-template-columns:1fr 86px 40px;gap:5px 8px;align-items:center;padding:2px 6px">
+        <span>Link/Support Property is Defined for This Length When Used in a Line Spring Property</span>${num("lDL", G.DefLength ?? 1)}${un(u.l)}
+        <span>Link/Support Property is Defined for This Area When Used in an Area Spring Property</span>${num("lDA", G.DefArea ?? 1)}${un(u.l + "²")}</div>`)
+      + fs("Directional Properties", `<div id="lDir"></div><div style="display:flex;justify-content:center;gap:60px;margin:6px 0 2px"><button id="lFix" style="width:76px;white-space:nowrap">Fix All</button><button id="lClr" style="width:76px;white-space:nowrap">Clear All</button></div>`)
+      + fs("Stiffness Options", `<div style="display:grid;grid-template-columns:1fr 290px;gap:5px 8px;align-items:center;padding:2px 6px"><span>Stiffness Used for Linear and Modal Load Cases</span><select id="lSL"></select>
+        <span>Stiffness Used for Stiffness-proportional Viscous Damping</span><select id="lSD"></select><span style="white-space:nowrap">Stiffness-proportional Viscous Damping Coefficient Modification Factor</span><span style="text-align:right">${num("lSF", G.StiffDFact ?? 1)}</span></div>`),
+      [["OK", async d => {
+        const nm = q(d, "#lN").value.trim(); if (!nm) { formError(d, "Give the link property a name."); return false; }
+        if ((!n || copy || nm !== n) && names.includes(nm)) { formError(d, `There is a link property named ${nm} already.`); return false; }
+        const type = q(d, "#lT").value, lin = type === "Linear", on = etaLinkDofs.filter(x => st.dofs[x] && st.dofs[x].on);
+        if (!lin && !on.length) { formError(d, "Tick at least one direction."); return false; }
+        const nums = [["#lMa", "Mass"], ["#lWe", "Weight"], ["#lR1", "RotInert1"], ["#lR2", "RotInert2"], ["#lR3", "RotInert3"], ["#lDL", "DefLength"], ["#lDA", "DefArea"], ["#lSF", "StiffDFact"]];
+        for (const [s, f] of nums) { const v = fnum(d, s); if (!isFinite(v) || v < 0) { formError(d, "Mass, weight, inertias, factors are numbers, 0 or more."); return false; } G[f] = String(v); }
+        if (!(+G.DefLength > 0) || !(+G.DefArea > 0)) { formError(d, "The length and area the property is defined for are more than 0."); return false; }
+        const anyNl = !lin && on.some(x => !st.dofs[x].fixed && st.dofs[x].nl);
+        if (anyNl) { G.StiffLOpt = q(d, "#lSL").value; G.StiffDOpt = q(d, "#lSD").value; } else { delete G.StiffLOpt; delete G.StiffDOpt; }
+        ["PDM2I", "PDM2J", "PDM3I", "PDM3J"].forEach(x => { if (G[x] == null) G[x] = "0"; });
+        const gen = {}; etaLinkGen.forEach(x => { if (G[x] != null && G[x] !== "" && !(copy && x === "GUID")) gen[x] = G[x]; });
+        const rows = [];
+        if (lin) {
+          const r = Object.assign({}, gen); const L = st.lin;
+          etaLinkDofs.forEach((x, i) => { const s = st.dofs[x]; r[x + "Status"] = !s || !s.on ? "Inactive" : s.fixed ? "Fixed" : "Active"; });
+          const act = i => { const s = st.dofs[etaLinkDofs[i - 1]]; return s && s.on && !s.fixed; };
+          for (let i = 1; i <= 6; i++) for (let j = 1; j <= i; j++) { const key = i === j ? "U" + i : `U${j}U${i}`; if (act(i) && act(j)) { if (L["Stiff" + key] != null) r["Stiff" + key] = String(L["Stiff" + key]); if (L["Damp" + key] != null) r["Damp" + key] = String(L["Damp" + key]); } }
+          for (let i = 1; i <= 6; i++) if (act(i)) { r["StiffU" + i] = String(L["StiffU" + i] ?? 0); r["DampU" + i] = String(L["DampU" + i] ?? 0); }
+          if (act(2)) r.DJ2 = String(L.DJ2 ?? 0); if (act(3)) r.DJ3 = String(L.DJ3 ?? 0);
+          rows.push(r);
+        } else for (const x of on) {
+          const s = st.dofs[x], rot = x[0] === "R", base = {Direction: x, Fixed: s.fixed ? "Yes" : "No"};
+          if (!s.fixed) {
+            base[rot ? "RotKE" : "TransKE"] = String(s.row[rot ? "RotKE" : "TransKE"] ?? 0); base[rot ? "RotCE" : "TransCE"] = String(s.row[rot ? "RotCE" : "TransCE"] ?? 0);
+            const nlf = etaLinkNl(type, x), nl = s.nl && nlf.length;
+            if (etaLinkFlagged(type)) base.Nonlinear = nl ? "Yes" : "No";
+            if (nl && (x === "U2" || x === "U3")) base.DJ = String(s.row.DJ ?? 0);
+            if (nl && !etaLinkMulti(type)) {
+              const flOn = /^y/i.test(s.row.FLDamper || "");
+              for (const [f, , , def, kind] of nlf) { if (!f) continue; if (kind === "fl" && !flOn) continue; base[f] = String(s.row[f] ?? (kind === "check" ? def : etaLinkDefault(def))); }
+            }
+            if (nl && etaLinkMulti(type)) {
+              const pts = s.pts.length ? s.pts : [[-10, -1], [-1, -1], [0, 0], [1, 1], [10, 1]];
+              if (type === "MultiLinear Plastic") { base.HysType = s.row.HysType || "Kinematic"; (etaLinkHysFields[base.HysType] || []).forEach(([f]) => { if (s.row[f] != null) base[f] = String(s.row[f]); }); }
+              pts.forEach(([a, b], i) => rows.push(Object.assign(i ? {Direction: x} : Object.assign({}, gen, base), rot ? {RotPoint: String(i + 1), Rotation: String(a), Moment: String(b)} : {TransPoint: String(i + 1), Displ: String(a), Force: String(b)})));
+              continue;
+            }
+          }
+          rows.push(Object.assign(rows.length ? {} : Object.assign({}, gen), base));
+        }
+        rows.forEach((r, i) => { if (i) etaLinkGen.forEach(x => delete r[x]); });
+        if (rows.length && etaLinkGen.some(x => gen[x] != null)) Object.assign(rows[0], gen);
+        const run = async (table, name, rs) => { const j = await hmRun("define_table_rows", {table, name, rows: rs}, true); if (!j.ok) { formError(d, j.error); return false; } return true; };
+        if (!await run(etaLinkTable(type), nm, rows)) return false;
+        if (was && was !== type && !await run(etaLinkTable(was), nm, [])) return false;
+        // Renamed: the old name's rows and Engine link go.
+        if (n && !copy && nm !== n) { const j = await hmRun("define_link", {name: n, delete: true}, true); if (!j.ok) { formError(d, j.error); return false; } }
+        for (const kind of ["Force", "Displacement"]) {
+          const mine = st.acc && st.acc.kind === kind ? [Object.assign({}, st.acc.row, {Type: type})] : [];
+          mine.forEach(r => delete r.Name);
+          if ((mine.length || T(etaLinkAccept(kind)).some(r => r.Name === nm || r.Name === n)) && !await run(etaLinkAccept(kind), nm, mine)) return false;
+        }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 800});
+    const dofRow = (dk, lin) => `<div style="display:grid;grid-template-columns:${lin ? "66px 48px" : "66px 48px 72px 160px"};align-items:center;height:26px"><label><input type="checkbox" data-on="${dk}"> ${dk}</label><input type="checkbox" data-fx="${dk}" style="justify-self:start">${lin ? "" : `<input type="checkbox" data-nl="${dk}" style="justify-self:center"><button data-ms="${dk}">Modify/Show for ${dk}...</button>`}</div>`;
+    const head = lin => `<div style="display:grid;grid-template-columns:${lin ? "66px 48px" : "66px 48px 72px 160px"};color:#333"><span>Direction</span><span>Fixed</span>${lin ? "" : `<span>NonLinear</span><span style="text-align:center">Properties</span>`}</div>`;
+    const paint = () => {
+      const t = q(d, "#lT").value, lin = t === "Linear";
+      // T/C, rubber and the rest: a direction that cannot be nonlinear has its box greyed (Links 26, 31); a friction
+      // isolator's U1 follows its shear directions (Links 31: ticked and greyed).
+      const can = x => etaLinkNl(t, x).length > 0;
+      const shearNl = ["U2", "U3"].some(x => st.dofs[x] && st.dofs[x].on && !st.dofs[x].fixed && st.dofs[x].nl);
+      if (/Friction Isolator|Pendulum/.test(t) && st.dofs.U1 && shearNl) st.dofs.U1.nl = true;
+      q(d, "#lDir").innerHTML = `<div style="display:grid;grid-template-columns:${lin ? "90px 1fr 90px" : "1fr 1fr"};gap:14px;padding:0 6px">
+        <div>${head(lin)}${["U1", "U2", "U3"].map(x => dofRow(x, lin)).join("")}</div>${lin ? `<div style="text-align:center"><div style="color:#333">Properties</div><button id="lAll" style="margin-top:6px">Modify/Show for All...</button></div>` : ""}<div>${head(lin)}${["R1", "R2", "R3"].map(x => dofRow(x, lin)).join("")}</div></div>`;
+      d.querySelectorAll("#lDir [data-on]").forEach(b => {
+        const dk = b.dataset.on, s = st.dofs[dk], fx = q(d, `[data-fx="${dk}"]`), nl = q(d, `[data-nl="${dk}"]`), ms = q(d, `[data-ms="${dk}"]`);
+        b.checked = !!(s && s.on); fx.checked = !!(s && s.on && s.fixed); fx.disabled = !b.checked;
+        if (nl) { nl.checked = !!(s && s.on && s.nl && can(dk)); nl.disabled = !b.checked || fx.checked || !can(dk) || (dk === "U1" && /Friction Isolator|Pendulum/.test(t) && shearNl); }
+        if (ms) ms.disabled = !b.checked || fx.checked;
+        b.onchange = () => { st.dofs[dk] = Object.assign(st.dofs[dk] || {fixed: false, nl: false, row: {}, pts: []}, {on: b.checked}); paint(); };
+        fx.onchange = () => { st.dofs[dk].fixed = fx.checked; paint(); };
+        if (nl) nl.onchange = () => { st.dofs[dk].nl = nl.checked; paint(); };
+        if (ms) ms.onclick = () => etaLinkDir(st, q(d, "#lN").value, t, dk, paint);
+      });
+      if (lin) { const all = q(d, "#lAll"); all.disabled = !etaLinkDofs.some(x => st.dofs[x] && st.dofs[x].on && !st.dofs[x].fixed); all.onclick = () => etaLinkLinear(st, q(d, "#lN").value, paint); }
+      const anyNl = !lin && etaLinkDofs.some(x => st.dofs[x] && st.dofs[x].on && !st.dofs[x].fixed && st.dofs[x].nl && can(x));
+      q(d, "#lSL").innerHTML = anyNl ? opts(etaLinkStiffL, G.StiffLOpt || "Effective from Zero") : ""; q(d, "#lSD").innerHTML = anyNl ? opts(etaLinkStiffD, G.StiffDOpt || "Initial") : "";
+      q(d, "#lSL").disabled = q(d, "#lSD").disabled = !anyNl;
+      q(d, "#lAcS").textContent = st.acc ? st.acc.kind + " criteria specified" : "None specified";
+    };
+    q(d, "#lT").onchange = paint;
+    q(d, "#lFix").onclick = () => { etaLinkDofs.forEach(x => st.dofs[x] = Object.assign(st.dofs[x] || {nl: false, row: {}, pts: []}, {on: true, fixed: true})); paint(); };
+    q(d, "#lClr").onclick = () => { etaLinkDofs.forEach(x => { if (st.dofs[x]) Object.assign(st.dofs[x], {on: false, fixed: false}); }); paint(); };
+    q(d, "#lNo").onclick = () => dialog("Link Property Notes", `<textarea id="nT" rows="6" maxlength="255" style="width:100%;box-sizing:border-box">${esc(G.Notes || "")}</textarea><p class="kv" style="margin:4px 0 0">Note: Notes are limited to 255 characters maximum.</p>`,
+      [["OK", x => { G.Notes = q(x, "#nT").value; }], ["Cancel"]], {width: 420});
+    q(d, "#lPd").onclick = () => etaLinkPDelta(G);
+    q(d, "#lAc").onclick = () => etaLinkAcceptance(st, q(d, "#lN").value, paint);
+    paint();
+    return d;
+  };
+  const d = listForm("Define Link Properties", "Link Properties", names, [
+    ["Add New Property...", () => one(null)],
+    ["Add Copy of Property...", n => n && one(n, true)],
+    ["Modify/Show Property...", n => n && one(n)],
+    ["Delete Property", n => n && hmRun("define_link", {name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => one(n));
+  // Delete Property is greyed while the model has one link property only (pictured Links 0: Link1 alone).
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !names.length; b[3].disabled = names.length < 2;
+  return d;
+}
+// Linear Link/Support Directional Properties (pictured Links 4, 5, 6): Link/Support Property Name, Directional Control
+// (Direction, Fixed Yes), Shear Distance (U2, U3, from the J-end), and the stiffness and damping uncoupled (one value per
+// direction) or coupled (the upper symmetric matrix).
+function etaLinkLinear(st, name, after) {
+  const u = hmU(), L = Object.assign({}, st.lin), dofs = JSON.parse(JSON.stringify(st.dofs));
+  const coupled = p => etaLinkDofs.some((a, i) => etaLinkDofs.some((b, j) => j > i && +(L[`${p}U${i + 1}U${j + 1}`] || 0) !== 0));
+  const act = i => { const s = dofs[etaLinkDofs[i - 1]]; return !!(s && s.on && !s.fixed); };
+  const legend = (p, c) => p === "Stiff" ? (c ? "Upper Stiffness Matrix (Symmetrical) Used For All Analysis Cases" : "Stiffness Values Used For All Load Cases") : (c ? "Upper Damping Matrix (Symmetrical) Used For All Analysis Cases" : "Damping Values Used For All Load Cases");
+  const box = (p, w) => `<fieldset style="margin:0 0 8px;min-height:190px"><legend id="lg${p}"></legend><div style="display:grid;grid-template-columns:1fr 1fr 24px;padding:2px 30px"><label><input type="radio" name="c${p}" value="0"> ${w} Is Uncoupled</label><label><input type="radio" name="c${p}" value="1"> ${w} Is Coupled</label><span title="${w} values use the model's units" style="color:#1565c0;font-weight:bold">&#9432;</span></div><div id="g${p}"></div></fieldset>`;
+  const d = dialog("Linear Link/Support Directional Properties", `<div style="display:grid;grid-template-columns:170px 1fr;gap:10px"><div>
+      <fieldset style="margin:0 0 8px"><legend>Link/Support Property Name</legend><input class="grey" readonly value="${esc(name)}" style="width:100%;box-sizing:border-box"></fieldset>
+      <fieldset style="margin:0 0 8px"><legend>Directional Control</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 6px;align-items:center"><span>Direction</span><span>Fixed</span>${etaLinkDofs.map(x => `<label><input type="checkbox" data-on="${x}"> ${x}</label><label><input type="checkbox" data-fx="${x}"> Yes</label>`).join("")}</div></fieldset>
+      <fieldset style="margin:0"><legend>Shear Distance</legend><div style="display:grid;grid-template-columns:24px 1fr 20px;gap:8px 6px;align-items:center"><span>U2</span><input id="dj2" type="number" step="any"><span>${u.l}</span><span>U3</span><input id="dj3" type="number" step="any"><span>${u.l}</span></div>
+        <p class="kv" style="margin:8px 0 0">Note: Distance is measured with respect to J-End of the link object</p></fieldset></div>
+    <div>${box("Stiff", "Stiffness")}${box("Damp", "Damping")}</div></div>`,
+    [["OK", d => {
+      read();
+      for (const p of ["Stiff", "Damp"]) for (const k of Object.keys(L).filter(k => k.startsWith(p + "U"))) if (!isFinite(+L[k])) { formError(d, "Each value is a number."); return false; }
+      st.dofs = dofs; st.lin = L; after(); return true;
+    }], ["Cancel"]], {width: 760});
+  const mode = {Stiff: coupled("Stiff"), Damp: coupled("Damp")};
+  const read = () => {
+    d.querySelectorAll("[data-m]").forEach(i => { if (!i.disabled) L[i.dataset.m] = i.value.trim() === "" ? "0" : i.value.trim(); });
+    if (!q(d, "#dj2").disabled) L.DJ2 = q(d, "#dj2").value || "0"; if (!q(d, "#dj3").disabled) L.DJ3 = q(d, "#dj3").value || "0";
+  };
+  const grid = p => {
+    const c = mode[p], cell = (i, j) => { const key = i === j ? `${p}U${i}` : `${p}U${i}U${j}`, on = act(i) && act(j); return `<input data-m="${key}" type="number" step="any" style="width:64px" ${on ? `value="${esc(L[key] ?? 0)}"` : "disabled"}>`; };
+    if (!c) return `<div style="display:grid;grid-template-columns:repeat(6,72px);gap:2px 4px;text-align:center;padding:4px 30px">${etaLinkDofs.map(x => `<span>${x}</span>`).join("")}${[1, 2, 3, 4, 5, 6].map(i => cell(i, i)).join("")}</div>`;
+    return `<table style="border-spacing:3px;margin:2px 10px"><tr><th></th>${etaLinkDofs.map(x => `<th style="font-weight:normal">${x}</th>`).join("")}</tr>${etaLinkDofs.map((a, i) => `<tr><td>${a}</td>${etaLinkDofs.map((b, j) => j < i ? `<td><input disabled style="width:64px;background:#c8c8c8"></td>` : `<td>${cell(i + 1, j + 1)}</td>`).join("")}</tr>`).join("")}</table>`;
+  };
+  const paint = () => {
+    for (const p of ["Stiff", "Damp"]) { q(d, "#lg" + p).textContent = legend(p, mode[p]); d.querySelectorAll(`[name=c${p}]`).forEach(r => r.checked = (r.value === "1") === mode[p]); q(d, "#g" + p).innerHTML = grid(p); }
+    d.querySelectorAll("[data-on]").forEach(b => { const x = b.dataset.on, s = dofs[x]; b.checked = !!(s && s.on); const f = q(d, `[data-fx="${x}"]`); f.checked = !!(s && s.on && s.fixed); f.disabled = !b.checked; });
+    q(d, "#dj2").disabled = !act(2); q(d, "#dj2").value = act(2) ? (L.DJ2 ?? 0) : ""; q(d, "#dj3").disabled = !act(3); q(d, "#dj3").value = act(3) ? (L.DJ3 ?? 0) : "";
+  };
+  d.querySelectorAll("[data-on]").forEach(b => b.onchange = () => { read(); const x = b.dataset.on; dofs[x] = Object.assign(dofs[x] || {fixed: false, nl: false, row: {}, pts: []}, {on: b.checked}); paint(); });
+  d.querySelectorAll("[data-fx]").forEach(b => b.onchange = () => { read(); dofs[b.dataset.fx].fixed = b.checked; paint(); });
+  // Uncoupled again: the values off the diagonal go (the matrix keeps only its diagonal).
+  ["Stiff", "Damp"].forEach(p => d.querySelectorAll(`[name=c${p}]`).forEach(r => r.onchange = () => { read(); mode[p] = r.value === "1"; if (!mode[p]) Object.keys(L).filter(k => new RegExp(`^${p}U\\dU\\d$`).test(k)).forEach(k => delete L[k]); paint(); }));
+  paint();
+  return d;
+}
+// Link/Support Directional Properties for a nonlinear type's direction (pictured Links 12, 15-30): Identification,
+// Linear Properties, Shear Deformation Location (U2 and U3 when nonlinear), and the type's Nonlinear Properties; for
+// MultiLinear the Multilinear Force-Displ Relation with Add Row, Delete Row, Reorder Rows and its graph.
+function etaLinkDir(st, name, type, dk, after) {
+  const s = st.dofs[dk], r = Object.assign({}, s.row), rot = dk[0] === "R", nl = !!(s.nl && etaLinkNl(type, dk).length), multi = etaLinkMulti(type), shear = dk === "U2" || dk === "U3";
+  const ke = rot ? "RotKE" : "TransKE", ce = rot ? "RotCE" : "TransCE", nlf = nl && !multi ? etaLinkNl(type, dk) : [];
+  let pts = (s.pts.length ? s.pts : [[-10, -1], [-1, -1], [0, 0], [1, 1], [10, 1]]).map(p => p.slice()), sel = 0;
+  const g = body => `<div style="display:grid;grid-template-columns:176px 86px auto;gap:5px 8px;align-items:center;padding:2px 10px">${body}</div>`;
+  const fsx = (l, b, grey) => `<fieldset style="margin:0 0 6px${grey ? ";color:#999" : ""}"><legend${grey ? ' style="color:#999"' : ""}>${l}</legend>${b}</fieldset>`;
+  const ro = v => `<input class="grey" readonly value="${esc(v)}" style="width:136px">`;
+  const inp = (f, v, kind) => `<input data-f="${f}" type="number" step="any" value="${esc(v)}" style="width:86px">`;
+  const nlRows = nlf.map(([f, l, uk, def, kind]) => kind === "head" ? `<span style="grid-column:1/4;text-decoration:underline" data-fl>${l}</span>`
+    : kind === "check" ? `<label style="grid-column:1/4"><input type="checkbox" data-f="${f}" ${/^y/i.test(r[f] ?? def) ? "checked" : ""}> ${l}</label>`
+    : kind === "text" ? `<span>${l}</span><input data-f="${f}" data-t="1" value="${esc(r[f] ?? def)}" style="width:86px"><span></span>`
+    : `<span ${kind === "fl" ? "data-fl" : ""} style="${kind === "fl" && f !== "FLDLength" ? "padding-left:10px" : ""}">${l}</span>${inp(f, r[f] ?? etaLinkDefault(def))}<span ${kind === "fl" ? "data-fl" : ""}>${etaLinkUnit(uk, rot)}</span>`).join("");
+  const unitL = rot ? "rad" : hmU().l, unitF = rot ? `${hmU().f}-${hmU().l}` : hmU().f;
+  const hys = type === "MultiLinear Plastic" ? g(`<span>Hysteresis Type</span><select data-f="HysType" data-t="1">${opts(etaLinkHys, r.HysType || "Kinematic")}</select><span></span>`) + `<div id="dHp"></div>` : "";
+  const d = dialog("Link/Support Directional Properties", fsx("Identification", g(`<span>Property Name</span>${ro(name)}<span></span><span>Direction</span>${ro(dk)}<span></span><span>Type</span>${ro(type)}<span></span><span>NonLinear</span>${ro(nl ? "Yes" : "No")}<span></span>`))
+    + fsx("Linear Properties", g(`<span>Effective Stiffness</span>${inp(ke, r[ke] ?? 0)}<span>${etaLinkUnit("k", rot)}</span><span>Effective Damping</span>${inp(ce, r[ce] ?? 0)}<span>${etaLinkUnit("c", rot)}</span>`))
+    + (nl && (shear || multi) ? fsx("Shear Deformation Location", g(`<span>Distance from End-J</span><input data-f="DJ" type="number" step="any" style="width:86px" ${shear ? `value="${esc(r.DJ ?? 0)}"` : "disabled"}><span>${hmU().l}</span>`), !shear) : "")
+    + (nl && multi ? fsx(`Multilinear ${rot ? "Moment-Rotation" : "Force-Displ"} Relation`, hys + `<div style="display:grid;grid-template-columns:170px 160px;gap:8px;padding:4px 6px"><div><div id="dP" style="height:120px;overflow:auto;border:2px solid #333;background:#fff"></div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px"><button id="dPa" style="width:72px">Add Row</button><button id="dPd" style="width:80px">Delete Row</button></div><button id="dPr" style="width:100%;margin-top:4px">Reorder Rows</button></div>
+        <div><svg id="dG" viewBox="0 0 150 120" style="width:150px;height:120px;background:#fff;border:1px solid #bbb"></svg><div id="dM" class="grey" style="font-size:11px;padding:2px 4px;margin-top:4px;border:1px solid #ccc"></div></div></div>`) : "")
+    + (nl && !multi ? fsx("Nonlinear Properties", g(nlRows)) : ""),
+    [["OK", d => {
+      if (multi && nl) savePts();
+      for (const i of d.querySelectorAll("[data-f]")) {
+        if (i.disabled) continue;
+        if (i.type === "checkbox") { r[i.dataset.f] = i.checked ? "Yes" : "No"; continue; }
+        if (i.dataset.t) { r[i.dataset.f] = i.value; continue; }
+        const v = parseFloat(i.value); if (!isFinite(v)) { formError(d, "Each value is a number."); return false; } r[i.dataset.f] = String(v);
+      }
+      if (multi && nl) { if (pts.length < 2) { formError(d, "Give at least two points."); return false; } if (pts.some(p => !p.every(isFinite))) { formError(d, "Each point is two numbers."); return false; } s.pts = pts.map(p => p.slice()); }
+      s.row = r; after(); return true;
+    }], ["Cancel"]], {width: multi && nl ? 440 : 440});
+  const flPaint = () => { const c = d.querySelector('[data-f="FLDamper"]'); if (!c) return; const on = c.checked; d.querySelectorAll('[data-f="FLDLength"],[data-f="FDLModulus"],[data-f="FDLArea"]').forEach(i => { i.disabled = !on; if (!on) i.value = ""; else if (i.value === "") i.value = r[i.dataset.f] ?? 0; }); d.querySelectorAll("[data-fl]").forEach(x => x.style.color = on ? "" : "#999"); };
+  const fl = d.querySelector('[data-f="FLDamper"]'); if (fl) { fl.onchange = flPaint; flPaint(); }
+  const savePts = () => d.querySelectorAll("[data-px]").forEach(i => { const k = +i.dataset.px; pts[k] = [parseFloat(i.value), parseFloat(q(d, `[data-pf="${k}"]`).value)]; });
+  const plot = () => {
+    const ok = pts.filter(p => p.every(isFinite)); if (!ok.length) return;
+    const xs = ok.map(p => p[0]), ys = ok.map(p => p[1]), x0 = Math.min(0, ...xs), x1 = Math.max(0, ...xs), y0 = Math.min(0, ...ys), y1 = Math.max(0, ...ys);
+    const X = x => 4 + (x - x0) / ((x1 - x0) || 1) * 142, Y = y => 116 - (y - y0) / ((y1 - y0) || 1) * 112;
+    let grid = ""; for (let i = 0; i <= 15; i++) grid += `<line x1="${i * 10}" y1="0" x2="${i * 10}" y2="120" stroke="#ddd" stroke-width=".5"/>`; for (let i = 0; i <= 12; i++) grid += `<line x1="0" y1="${i * 10}" x2="150" y2="${i * 10}" stroke="#ddd" stroke-width=".5"/>`;
+    q(d, "#dG").innerHTML = grid + `<line x1="${X(0)}" y1="0" x2="${X(0)}" y2="120" stroke="#c00" stroke-width=".8"/><line x1="0" y1="${Y(0)}" x2="150" y2="${Y(0)}" stroke="#c00" stroke-width=".8"/><polyline fill="none" stroke="#000" stroke-width="1.6" points="${ok.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}"/>`;
+    // Max and Min as ETABS shows them (pictured Links 12): the first point with the largest and with the smallest value.
+    const mx = ok.reduce((a, p) => p[1] > a[1] ? p : a), mn = ok.reduce((a, p) => p[1] < a[1] ? p : a);
+    q(d, "#dM").textContent = `Max: (${mx[0]}, ${mx[1]});  Min: (${mn[0]}, ${mn[1]})`;
+  };
+  const table = () => {
+    q(d, "#dP").innerHTML = `<table class="grid" style="width:100%;border-collapse:collapse"><tr><th>Pt</th><th>${rot ? "Rotation" : "Displ"}<br>(${unitL})</th><th>${rot ? "Moment" : "Force"}<br>(${unitF})</th></tr>${pts.map((p, i) => `<tr><td style="text-align:center;${i === sel ? "background:#0078d7;color:#fff" : ""}">${i + 1}</td><td><input data-px="${i}" type="number" step="any" value="${p[0]}" style="width:56px;text-align:center"></td><td><input data-pf="${i}" type="number" step="any" value="${p[1]}" style="width:56px;text-align:center"></td></tr>`).join("")}</table>`;
+    d.querySelectorAll("[data-px],[data-pf]").forEach(i => { i.onfocus = () => { if (sel !== +(i.dataset.px ?? i.dataset.pf)) { savePts(); sel = +(i.dataset.px ?? i.dataset.pf); table(); q(d, `[data-${i.dataset.px != null ? "px" : "pf"}="${sel}"]`).focus(); } }; i.oninput = () => { savePts(); plot(); }; });
+    plot();
+  };
+  if (multi && nl) {
+    q(d, "#dPa").onclick = () => { savePts(); const p = pts[sel] || pts[pts.length - 1]; pts.splice(sel + 1, 0, [p[0], p[1]]); sel++; table(); };
+    q(d, "#dPd").onclick = () => { savePts(); if (pts.length > 1) { pts.splice(sel, 1); sel = Math.min(sel, pts.length - 1); } table(); };
+    q(d, "#dPr").onclick = () => { savePts(); pts.sort((a, b) => a[0] - b[0]); sel = 0; table(); };
+    table();
+    const hy = d.querySelector('[data-f="HysType"]');
+    if (hy) { const hp = () => { q(d, "#dHp").innerHTML = (etaLinkHysFields[hy.value] || []).length ? `<div style="display:grid;grid-template-columns:1fr 86px;gap:4px 8px;align-items:center;padding:2px 10px">${etaLinkHysFields[hy.value].map(([f, l, k]) => k === "check" ? `<label style="grid-column:1/3"><input type="checkbox" data-f="${f}" ${/^y/i.test(r[f] || "Yes") ? "checked" : ""}> ${l}</label>` : `<span>${l}</span><input data-f="${f}" type="number" step="any" value="${esc(r[f] ?? 0)}">`).join("")}</div>` : `<p class="kv" style="margin:2px 10px">No Parameters Are Required For This Hysteresis Type</p>`; };
+      hy.onchange = hp; hp(); }
+  }
+  return d;
+}
+// Advanced Link P-Delta Parameters (pictured Links 7): Fraction of P-Delta Moment to Each End of Link, M2 and M3 to the
+// I- and J-ends as moments and the rest as a shear couple, worked out by Update Values.
+function etaLinkPDelta(G) {
+  const row = (l, id) => `<span>${l}</span><input id="${id}" type="number" step="any" style="width:52px" value="${+(G[id] || 0)}">`;
+  const d = dialog("Advanced Link P-Delta Parameters", `<fieldset style="margin:0"><legend>Fraction of P-Delta Moment to Each End of Link</legend><div style="display:grid;grid-template-columns:1fr 52px;gap:4px 8px;align-items:center;padding:4px 8px">
+    ${row("M2 P-delta to I-end of link as moment (M2I)", "PDM2I")}${row("M2 P-delta to J-end of link as moment (M2J)", "PDM2J")}<span>M2 P-delta as shear couple</span><span id="p2" style="color:#666"></span>
+    <span style="height:10px"></span><span></span>${row("M3 P-delta to I-end of link as moment (M3I)", "PDM3I")}${row("M3 P-delta to J-end of link as moment (M3J)", "PDM3J")}<span>M3 P-delta as shear couple</span><span id="p3" style="color:#666"></span></div></fieldset>
+    <div style="text-align:center;margin-top:10px"><button id="pU" style="width:130px">Update Values</button></div>`,
+    [["OK", p => {
+      const f = ["PDM2I", "PDM2J", "PDM3I", "PDM3J"].map(x => fnum(p, "#" + x));
+      if (f.some(x => !isFinite(x) || x < 0) || f[0] + f[1] > 1 || f[2] + f[3] > 1) { formError(p, "Each fraction is 0 or more, and each pair adds up to 1 or less."); return false; }
+      ["PDM2I", "PDM2J", "PDM3I", "PDM3J"].forEach((x, i) => G[x] = String(f[i]));
+    }], ["Cancel"]], {width: 360});
+  const sc = () => { q(d, "#p2").textContent = +(1 - (fnum(d, "#PDM2I") || 0) - (fnum(d, "#PDM2J") || 0)).toFixed(6); q(d, "#p3").textContent = +(1 - (fnum(d, "#PDM3I") || 0) - (fnum(d, "#PDM3J") || 0)).toFixed(6); };
+  q(d, "#pU").onclick = sc; sc();
+  return d;
+}
+// Link Acceptance Criteria Definition (pictured Links 8, 9): Acceptance Criteria Type Force or Displacement, the directions
+// the link has active (F1-M3 or U1-R3), Symmetric, and IO, LS and CP for Positive and Negative.
+function etaLinkAcceptance(st, name, after) {
+  const u = hmU(), acc = st.acc ? {kind: st.acc.kind, row: Object.assign({}, st.acc.row)} : {kind: "Force", row: {Symmetric: "Yes"}};
+  const keys = k => k === "Force" ? ["F1", "F2", "F3", "M1", "M2", "M3"] : ["U1", "U2", "U3", "R1", "R2", "R3"];
+  const units = k => k === "Force" ? [u.f, u.f, u.f, `${u.f}-${u.l}`, `${u.f}-${u.l}`, `${u.f}-${u.l}`] : [u.l, u.l, u.l, "rad", "rad", "rad"];
+  const ok = i => { const s = st.dofs[etaLinkDofs[i]]; return !!(s && s.on && !s.fixed); };
+  const d = dialog("Link Acceptance Criteria Definition", `<div style="display:grid;grid-template-columns:260px 1fr;gap:10px"><fieldset style="margin:0"><legend>Link/Support Property Name</legend><input class="grey" readonly value="${esc(name)}" style="width:100%;box-sizing:border-box"></fieldset>
+      <fieldset style="margin:0"><legend>Acceptance Criteria Type</legend><label style="margin:0 120px 0 14px"><input type="radio" name="aK" value="Force"> Force</label><label><input type="radio" name="aK" value="Displacement"> Displacement</label></fieldset></div>
+    <div style="display:grid;grid-template-columns:96px 1fr;gap:10px;margin-top:8px"><fieldset style="margin:0"><legend>Direction Control</legend><div id="aD" style="display:flex;flex-direction:column;gap:9px"></div><label style="display:block;margin-top:40px"><input type="checkbox" id="aS"> Symmetric</label></fieldset>
+      <fieldset style="margin:0"><legend>Acceptance Criteria</legend><div id="aG"></div></fieldset></div>`,
+    [["OK", d => {
+      read();
+      const r = acc.row, k = acc.kind, on = keys(k).filter(x => /^y/i.test(r[x] || ""));
+      for (const x of on) for (const s of ["Pos", ...(/^y/i.test(r.Symmetric || "") ? [] : ["Neg"])]) for (const l of ["IO", "LS", "CP"]) if (!isFinite(parseFloat(r[l + s + x]))) { formError(d, "Each criterion is a number."); return false; }
+      const out = {Symmetric: r.Symmetric || "Yes"}; keys(k).forEach(x => out[x] = on.includes(x) ? "Yes" : "No");
+      for (const x of on) for (const s of ["Pos", "Neg"]) for (const l of ["IO", "LS", "CP"]) { const v = /^y/i.test(out.Symmetric) && s === "Neg" ? r[l + "Pos" + x] : r[l + s + x]; out[l + s + x] = String(parseFloat(v)); }
+      st.acc = on.length ? {kind: k, row: out} : null; after(); return true;
+    }], ["Cancel"]], {width: 780});
+  const read = () => {
+    d.querySelectorAll("[data-c]").forEach(i => { if (!i.disabled) acc.row[i.dataset.c] = i.value; });
+    d.querySelectorAll("[data-ad]").forEach(b => acc.row[b.dataset.ad] = b.checked ? "Yes" : "No");
+    acc.row.Symmetric = q(d, "#aS").checked ? "Yes" : "No";
+  };
+  const paint = () => {
+    const k = acc.kind, ks = keys(k), us = units(k), sym = /^y/i.test(acc.row.Symmetric || "");
+    d.querySelectorAll("[name=aK]").forEach(r => r.checked = r.value === k); q(d, "#aS").checked = sym;
+    q(d, "#aD").innerHTML = ks.map((x, i) => `<label><input type="checkbox" data-ad="${x}" ${ok(i) ? "" : "disabled"} ${ok(i) && /^y/i.test(acc.row[x] || "") ? "checked" : ""}> ${x}</label>`).join("");
+    const cell = (l, s, x, i) => { const on = ok(i) && /^y/i.test(acc.row[x] || "") && !(sym && s === "Neg"), key = l + s + x; return `<input data-c="${key}" type="number" step="any" style="width:84px" ${on ? `value="${esc(acc.row[key] ?? 0.001)}"` : "disabled"}>`; };
+    q(d, "#aG").innerHTML = `<div style="display:grid;grid-template-columns:60px repeat(6,90px);gap:6px 4px;align-items:center;text-align:center"><span></span>${ks.map((x, i) => `<span>${x}<br>${us[i]}</span>`).join("")}
+      <span style="grid-column:1/8;text-align:left">Positive:</span>${["IO", "LS", "CP"].map(l => `<span>${l}</span>${ks.map((x, i) => cell(l, "Pos", x, i)).join("")}`).join("")}
+      <span style="grid-column:1/8;text-align:left">Negative:</span>${["IO", "LS", "CP"].map(l => `<span>${l}</span>${ks.map((x, i) => cell(l, "Neg", x, i)).join("")}`).join("")}</div>`;
+    d.querySelectorAll("[data-ad]").forEach(b => b.onchange = () => { read(); paint(); });
+  };
+  d.querySelectorAll("[name=aK]").forEach(r => r.onchange = () => { read(); if (acc.kind !== r.value) acc.row = {Symmetric: acc.row.Symmetric}; acc.kind = r.value; paint(); });
+  q(d, "#aS").onchange = () => { read(); paint(); };
+  paint();
+  return d;
+}
+
 // ---- Define: link/support properties ----
 async function hmLinks() {
   if (program === "sap2000") return hmSapLinks();
+  if (program === "etabs") return etaLinks();
   const pd = (await hmRun("property_definitions", {}, true)).result; if (!pd) return;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmLinks(); };
   const find = n => pd.links.find(x => x.name === n);

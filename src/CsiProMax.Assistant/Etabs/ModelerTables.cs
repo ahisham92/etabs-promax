@@ -62,7 +62,8 @@ public static class ModelerTables
                 if (table.Equals("Spring Property Definitions - Point Springs", StringComparison.OrdinalIgnoreCase)) put = put.SelectMany(SpringLinkRows).ToList();
                 // A nonlinear link's table has a row per direction: the same fields on each of the link's directions.
                 if (StructureExtras.PerDirection(table))
-                    put = put.SelectMany(r => (PropertyDefs.Links(model).Find(l => l.Name == r.GetValueOrDefault("Name"))?.Dofs.Keys.ToList() ?? []).Select(dof => new Dictionary<string, string>(r) { ["Direction"] = dof })).ToList();
+                    // A row the Link/Support Property Data form wrote already names its direction (and a multilinear point).
+                    put = put.SelectMany(r => r.ContainsKey("Direction") ? [r] : (PropertyDefs.Links(model).Find(l => l.Name == r.GetValueOrDefault("Name"))?.Dofs.Keys.ToList() ?? []).Select(dof => new Dictionary<string, string>(r) { ["Direction"] = dof })).ToList();
                 EditableTables.Put(e, table, KeyOf(table), put.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
@@ -70,14 +71,14 @@ public static class ModelerTables
         }
         // A frame section's other fields (colour, notes, notional size, fillet radius, ...), in its shape's table by name.
         // The shapes the .e2k has no line for go in whole (FrameTableShapes): every row with its name, material and modifiers.
-        foreach (var g in model.FrameSections.Where(x => PropertyDefs.FrameExtras(x).Count > 0 || FrameTableShapes.Is(x.Shape)).GroupBy(x => x.Shape))
+        foreach (var g in model.FrameSections.Where(x => PropertyDefs.FrameExtras(x).Count > 0 || (FrameTableShapes.Is(x.Shape) && !FrameTableShapes.AsRead(x))).GroupBy(x => x.Shape))
         {
             if (FrameTableShapes.Table(g.Key) is not { } table) continue;
             // A section made a Section Designer section here goes to ETABS as the section it was (its shapes are drawn there).
             if (g.Key == "SD Section" && g.All(x => FrameTableShapes.SdSource(x) is not null)) continue;
             try
             {
-                var rows = g.SelectMany(x => FrameTableShapes.Is(x.Shape) ? FrameTableShapes.Rows(x) : [new Dictionary<string, string>(PropertyDefs.FrameExtras(x)) { ["Name"] = x.Name }]).ToList();
+                var rows = g.SelectMany(x => FrameTableShapes.Is(x.Shape) && !FrameTableShapes.AsRead(x) ? FrameTableShapes.Rows(x) : [new Dictionary<string, string>(PropertyDefs.FrameExtras(x)) { ["Name"] = x.Name }]).ToList();
                 EditableTables.Put(e, table, "Name", rows.Select(x => (IReadOnlyDictionary<string, string>)x).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
