@@ -167,9 +167,9 @@ public sealed class SettingsWindow : Window
             };
             AutomationProperties.SetName(item, tab.Name);
             AutomationProperties.SetHelpText(item, tab.Intro);
-            // With the AI chat off (AiMode) only Updates is shown: the other pages are about the chat. They are still
-            // made, so saving keeps what they hold.
-            if (!CsiProMax.AiMode.On && tab.Key != SettingsLayout.Updates) continue;
+            // With the AI chat off (AiMode) only Runs and Updates are shown: the other pages are about the chat. They are
+            // still made, so saving keeps what they hold. (The Engine's Run works without the AI.)
+            if (!CsiProMax.AiMode.On && tab.Key is not (SettingsLayout.Updates or SettingsLayout.Runs)) continue;
             _tabs.Items.Add(item);
         }
         _tabs.SelectedIndex = CsiProMax.AiMode.On ? SettingsLayout.StartIndex(openTab ?? ReadLastTab()) : 0;
