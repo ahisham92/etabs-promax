@@ -2288,7 +2288,7 @@ function auxLines(p) {
     for (const g of along) { seg(G, q(g.at, s.z0 - s.pad * 0.3), q(g.at, s.z1 + s.pad), dash); bub.push({at: q(g.at, s.z1 + s.pad), from: q(g.at, s.z0), label: g.label}); }
   } else if (p.mode === "3d" && grids.X.length && grids.Y.length) {
     // As the program's 3-D view: the grid lies on the ground as a fine light-blue mesh reaching far past the model, its
-    // lines run out to bubbles lying flat on the ground at the near ends.
+    // lines (grey in ETABS, as it draws them) run out to bubbles lying flat on the ground at the near ends.
     const sp = list => { const d = list.slice(1).map((g, i) => g.at - list[i].at).filter(v => v > 1e-6).sort((a, b) => a - b); return d.length ? d[d.length >> 1] : size / 3; };
     const bay = Math.min(sp(grids.X), sp(grids.Y)), cell = bay / 4, ext = Math.max(bay * 3, size), z = s.z0, out = bay * 1.1;
     const X0 = grids.X[0].at, X1 = grids.X[grids.X.length - 1].at, Y0 = grids.Y[0].at, Y1 = grids.Y[grids.Y.length - 1].at;
@@ -2299,6 +2299,17 @@ function auxLines(p) {
     }
     for (const g of grids.X) { seg(G, [g.at, Y0 - out, z], [g.at, Y1 + bay * 0.25, z], dash); bub.push({at: [g.at, Y0 - out, z], from: [g.at, Y1, z], label: g.label, dir: "X", flat: bay * 0.09}); }
     for (const g of grids.Y) { seg(G, [X0 - out, g.at, z], [X1 + bay * 0.25, g.at, z], dash); bub.push({at: [X0 - out, g.at, z], from: [X1, g.at, z], label: g.label, dir: "Y", flat: bay * 0.09}); }
+    // In an ETABS model each grid line stands as a plane from the base to the top story, only its border drawn, as
+    // ETABS's 3-D view shows it: an edge up at both ends of the line (flush with the outer grids) and an edge across at
+    // the top story. The top edges together cap the grid at the top level; the stories between have no lines, and the
+    // bottom edge is the line on the ground above. An end shared by two planes (a corner) rises once. SAP2000 and SAFE
+    // draw their grids their own way, so their models keep the grid on the ground only.
+    const zt = s.z1;
+    if (program === "etabs" && zt - z > 1e-9) {
+      const up = new Set(), rise = (x, y) => { const k = x.toFixed(6) + "," + y.toFixed(6); if (up.has(k)) return; up.add(k); seg(G, [x, y, z], [x, y, zt], dash); };
+      for (const g of grids.X) { seg(G, [g.at, Y0, zt], [g.at, Y1, zt], dash); rise(g.at, Y0); rise(g.at, Y1); }
+      for (const g of grids.Y) { seg(G, [X0, g.at, zt], [X1, g.at, zt], dash); rise(X0, g.at); rise(X1, g.at); }
+    }
   } else if (p.mode === "plan" || p.mode === "3d") {
     const z = p.mode === "plan" ? (elevationOf(p.story) ?? lo[2]) : s.z0;
     for (const g of grids.X) { seg(G, [g.at, s.y0, z], [g.at, s.y1, z], dash); bub.push({at: [g.at, s.y1, z], from: [g.at, s.y0, z], label: g.label, dir: "X"}); }
@@ -2468,7 +2479,7 @@ function drawScene(p, M, R, dpr, mode) {
   if (sTr > 0) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); solids(bufs.solidA, 1 - sTr); gl.depthMask(true); gl.disable(gl.BLEND); }
   else if (!see || contourOn) solids(bufs.solidA, 1);
   // Grid lines after the solids, so members hide them; they do not hide anything themselves.
-  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, p.mode === "3d" && T.ground ? [0.62, 0.8, 0.96] : T.grid, 1, 0); if (opt.levels) thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
+  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, p.mode === "3d" && T.ground ? (program === "etabs" ? [0.72, 0.74, 0.75] : [0.62, 0.8, 0.96]) : T.grid, 1, 0); if (opt.levels) thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
   if (!extrude) thick(bufs.lines, p.mode === "3d" ? (T.dark ? 1.6 : 0.75) : 2, 1); else thick(bufs.bare, 2, 1);
   if (opt.edges) thin(bufs.edges, extrude ? T.edge : 0.75, !extrude && !T.dark ? [1, 1, 1] : undefined);
   if (see && !contourOn && !under) {
