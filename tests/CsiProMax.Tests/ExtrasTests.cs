@@ -395,6 +395,18 @@ static class ExtrasTests
             var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
             Check(program.Contains("WebPages.RemovedPageFor(file)", StringComparison.Ordinal), "a Viewer window on a removed pack does not say it was removed");
         });
+        yield return ("Ahmed 2026-11-27: Run asks Analyze only / Analyze and Design / Design only, opens the design types only for a design, and the job counts as closed only when the program's process has ended", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            var run = html[html.IndexOf("async function engineRun(mode)", StringComparison.Ordinal)..html.IndexOf("async function engineStart(ask)", StringComparison.Ordinal)];
+            foreach (var marker in new[] { "> Analyze only</label>", "> Analyze and Design</label>", "> Design only</label>", "Select All", "Clear All", "x.disabled = m === \"a\"", "analyse: m !== \"d\"", "Tick at least one design to run." })
+                Check(run.Contains(marker, StringComparison.Ordinal), "the Run form has no " + marker);
+            var engine = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "EngineRun.cs"));
+            Check(engine.Contains("var ended = Ended(window);", StringComparison.Ordinal) && engine.Contains("[\"closed\"] = _closed", StringComparison.Ordinal) && engine.Contains("did not end after the job", StringComparison.Ordinal), "the Run does not check that the program's process ended");
+            Check(EngineRun.Status(false)["closed"] is not null, "the Run's status does not say whether the program closed");
+            var field = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "FieldTest.cs"));
+            Check(field.Contains("Run Analysis and Design with one chosen design does both in one job, only that design, and closes the program", StringComparison.Ordinal) && field.Contains("status[\"closed\"]?.GetValue<bool>() == true", StringComparison.Ordinal), "the field test does not check Ahmed's Run and that the program closed");
+        });
         yield return ("extras: CSI ProMax Engine's Run writes the model for its program beside the model, says plainly when the program is not on this PC, and never touches the model's own file (Ahmed 2026-11-26)", () =>
         {
             var link = Frame();

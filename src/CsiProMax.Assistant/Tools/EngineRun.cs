@@ -41,6 +41,8 @@ public static class EngineRun
     private static int _analysedRevision = -1;
     private static string _analysedFile = "", _analysedProgram = "";
     private static int _starts;
+    /// <summary>Whether the last job's program was seen to end (its process gone), so its licence is free.</summary>
+    private static bool _closed;
 
     // The pack written by the last run: of which model, at which revision (removed when the model moves on).
     private static OfflineEtabs? _packModel;
@@ -90,7 +92,7 @@ public static class EngineRun
             if (!current)
                 try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
                 catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
-            Lines.Clear(); _error = ""; _pack = null; _done = false; _running = true;
+            Lines.Clear(); _error = ""; _pack = null; _done = false; _running = true; _closed = false;
             _program = program.Name; _model = model; _startRevision = model.Revision;
             _phase = $"Starting {program.Name} in the background";
             if (file.Length > 0) Lines.Add($"The model was written for {program.Name}: {file}");
@@ -239,11 +241,23 @@ public static class EngineRun
                 var said = "";
                 try { said = window.Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { said = ex.Message; }
                 try { window.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
-                lock (Gate) Lines.Add($"{program.Name} was closed; its licence is free." + (said.Length > 0 ? " " + char.ToUpperInvariant(said[0]) + said[1..] + "." : ""));
+                // Closing is a must (Ahmed 2026-11-27): the licence is free only once the program's process has ended,
+                // so that is checked, never assumed from the window saying yes.
+                var ended = Ended(window);
+                lock (Gate)
+                {
+                    _closed = ended;
+                    var why = said.Length > 0 ? " " + char.ToUpperInvariant(said[0]) + said[1..] + "." : "";
+                    Lines.Add(ended ? $"{program.Name} was closed; its licence is free." + why : $"{program.Name} did not end after the job, so its licence may still be held." + why);
+                    if (!ended && _error.Length == 0) _error = $"{program.Name} did not end after the job.{why}";
+                }
             }
             lock (Gate) { _running = false; _done = true; _phase = _error.Length > 0 ? "Stopped" : "Done"; }
         }
     }
+
+    /// <summary>True when the job's program process has ended (waited for up to a minute after it was told to close).</summary>
+    internal static bool Ended(IScratchWindow window) => window is not ScratchProgram sp || sp.Ended(TimeSpan.FromMinutes(1));
 
     /// <summary>The files of an earlier analysis this one replaces (the program's model and its result files, one name), in the run folder only.</summary>
     private static void Forget(string before, string now)
@@ -321,6 +335,7 @@ public static class EngineRun
                 // Whether the last analysis is of the model as it is now: a design then needs no new analysis.
                 ["analysed"] = _analysedModel is not null && _analysedRevision == _analysedModel.Revision && File.Exists(_analysedFile),
                 ["starts"] = _starts,
+                ["closed"] = _closed,
                 ["kinds"] = new JsonObject(Kinds.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)new JsonArray(p.Value.Select(k => (JsonNode)new JsonObject { ["kind"] = k.Kind, ["name"] = k.Name }).ToArray())))),
             };
             if (take && _done && _pack is not null) { o["pack"] = _pack; _pack = null; }

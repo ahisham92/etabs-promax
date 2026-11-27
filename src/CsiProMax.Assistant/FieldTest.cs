@@ -640,6 +640,7 @@ public static class FieldTest
             FieldContext.Expect(status["done"]?.GetValue<bool>() == true, "the run did not finish within 20 minutes: " + status["phase"]);
             FieldContext.Expect(string.IsNullOrEmpty(status["error"]?.GetValue<string>()), "the run stopped: " + status["error"]);
             FieldContext.Expect(Said(status, "was closed; its licence is free"), $"{program.Name} was not closed after the job: " + Last(status));
+            FieldContext.Expect(status["closed"]?.GetValue<bool>() == true, $"{program.Name}'s process did not end after the job, so its licence is still held: " + Last(status));
             return status;
         }
         static bool Said(JsonObject status, string words) => (status["lines"] as JsonArray ?? []).Any(l => (l?.GetValue<string>() ?? "").Contains(words, StringComparison.Ordinal));
@@ -708,6 +709,25 @@ public static class FieldTest
             FieldContext.Expect(EngineRun.Status(false)["analysed"]?.GetValue<bool>() == false, "the Engine still counts the model as analysed");
             return unlocked["said"]?.GetValue<string>() ?? "";
         });
+
+        // Ahmed's Run (2026-11-27): Run, choose Analyze and Design, pick one design (or some), Run: the program opens,
+        // does the analysis and only those designs in one job, closes (a must, to free the licence) and the results come back.
+        if (kinds.Count > 0)
+            ctx.Step(steps + "Run Analysis and Design with one chosen design does both in one job, only that design, and closes the program", () =>
+            {
+                var one = kinds.Last();
+                var name = EngineRun.Kinds[program.Key].First(k => k.Kind == one).Name;
+                var started = EngineRun.Start(model, analyse: true, kinds: [one]);
+                var status = Wait(started);
+                var lines = (status["lines"] as JsonArray ?? []).Select(l => l?.GetValue<string>() ?? "").ToList();
+                FieldContext.Expect(lines.Any(l => l.StartsWith("Running the analysis", StringComparison.Ordinal)), "the analysis did not run: " + Last(status));
+                var design = lines.FirstOrDefault(l => l.StartsWith("Running the design: ", StringComparison.Ordinal)) ?? "";
+                FieldContext.Expect(design == "Running the design: " + name + "...", "not only the chosen design ran: " + (design.Length > 0 ? design : Last(status)));
+                FieldContext.Expect(lines.Count(l => l.StartsWith("Starting ", StringComparison.Ordinal)) == 1, "the job did not run in one start of the program: " + string.Join(" | ", lines));
+                FieldContext.Expect(status["pack"] is JsonObject, "the results did not come back");
+                FieldContext.Expect(File.Exists(pack), "no review pack beside the model: " + pack);
+                return $"{name}; {Last(status)}";
+            });
     }
 
     /// <summary>The first calls of where an exception came from, for the report: enough to find the step.</summary>

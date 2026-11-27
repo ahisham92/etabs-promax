@@ -468,21 +468,36 @@ async function engineRun(mode) {
   // model's program hidden and closes it as soon as it is done (Ahmed 2026-11-26): its licence is used only meanwhile.
   let st; try { st = await enginePost({status: true}); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
   const kinds = (st.kinds || {})[program] || [], picked = engineSelected(), name = {etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program] || "the program";
-  const analysed = !!st.analysed, wantDesign = mode !== "analysis";
-  const body = `<fieldset><legend>Analysis</legend>
-      <label class="kv"><input type="checkbox" id="rA" ${mode === "design" ? "" : "checked"}> Run the analysis</label>
-      <p class="kv" style="margin:4px 0 0;max-width:460px">${analysed ? "The model is analysed as it is now, so it is not analysed again: a design runs on that analysis." : "A design needs the analysis: a model not analysed as it is now is analysed first."}</p></fieldset>
-    <fieldset><legend>Design</legend>
-      ${kinds.length ? kinds.map(k => `<label class="kv" style="display:block"><input type="checkbox" data-kind="${esc(k.kind)}" ${wantDesign ? "checked" : ""}> ${esc(k.name)}</label>`).join("") : `<p class="kv">${esc(name)} has no design to run from here.</p>`}
+  const analysed = !!st.analysed, start = mode === "analysis" ? "a" : mode === "design" ? "d" : "ad";
+  // Ahmed 2026-11-27: Run asks first what to do (Analyze only, or Analyze and Design, or Design only on the analysis
+  // there is); only a design choice opens the design types to pick (one, some or all), then Run Now.
+  const body = `<fieldset><legend>Run</legend>
+      <label class="kv" style="display:block"><input type="radio" name="rM" value="a" ${start === "a" ? "checked" : ""}> Analyze only</label>
+      <label class="kv" style="display:block"><input type="radio" name="rM" value="ad" ${start === "ad" ? "checked" : ""} ${kinds.length ? "" : "disabled"}> Analyze and Design</label>
+      <label class="kv" style="display:block"><input type="radio" name="rM" value="d" ${start === "d" ? "checked" : ""} ${kinds.length ? "" : "disabled"}> Design only</label>
+      <p class="kv" id="rNote" style="margin:4px 0 0;max-width:460px"></p></fieldset>
+    <fieldset id="rD"><legend>Design</legend>
+      ${kinds.length ? kinds.map(k => `<label class="kv" style="display:block"><input type="checkbox" data-kind="${esc(k.kind)}" checked> ${esc(k.name)}</label>`).join("") + `<div style="margin:4px 0"><button type="button" id="rAll">Select All</button> <button type="button" id="rNone">Clear All</button></div>` : `<p class="kv">${esc(name)} has no design to run from here.</p>`}
       <div style="margin-top:6px"><label class="kv"><input type="radio" name="rS" value="all" checked> All objects</label>
       <label class="kv" style="margin-left:12px"><input type="radio" name="rS" value="sel" ${picked.length ? "" : "disabled"}> Selected objects only (${picked.length})</label></div></fieldset>
-    <p class="kv" style="margin:6px 0 0;max-width:460px">${esc(name)} starts hidden in a window of its own (yours, if open, is not touched), runs the job, and is closed as soon as it is done; its licence is used only while it runs.</p>`;
-  dialog("Run Options", body, [["Run Now", d => {
-    const analyse = q(d, "#rA").checked, ks = [...d.querySelectorAll("[data-kind]")].filter(x => x.checked).map(x => x.dataset.kind);
-    if (!analyse && !ks.length) { hmSay("Tick the analysis or a design to run.", true); return false; }
+    <p class="kv" style="margin:6px 0 0;max-width:460px">${esc(name)} starts hidden in a window of its own (yours, if open, is not touched), runs only what is asked, and is closed as soon as it is done, so its licence is free again; the results come back here.</p>`;
+  const d = dialog("Run Options", body, [["Run Now", d => {
+    const m = (d.querySelector("input[name=rM]:checked") || {}).value || "a";
+    const ks = m === "a" ? [] : [...d.querySelectorAll("[data-kind]")].filter(x => x.checked).map(x => x.dataset.kind);
+    if (m !== "a" && !ks.length) { hmSay("Tick at least one design to run.", true); return false; }
     const only = ks.length && (d.querySelector("input[name=rS]:checked") || {}).value === "sel" ? picked : [];
-    engineStart({analyse, kinds: ks, selected: only});
+    engineStart({analyse: m !== "d", kinds: ks, selected: only});
   }], ["Cancel"]], {width: 520});
+  const sync = () => {
+    const m = (d.querySelector("input[name=rM]:checked") || {}).value || "a";
+    d.querySelectorAll("#rD input, #rD button").forEach(x => { x.disabled = m === "a" || (x.value === "sel" && !picked.length); });
+    q(d, "#rD").style.opacity = m === "a" ? 0.5 : 1;
+    q(d, "#rNote").textContent = m === "a" ? "The analysis runs; no design." : m === "d" ? (analysed ? "The design runs on the analysis the model has now." : "The model is not analysed as it is now, so it is analysed first, then designed.") : "The analysis runs, then the designs ticked below, in one job.";
+  };
+  d.querySelectorAll("input[name=rM]").forEach(x => x.addEventListener("change", sync));
+  const all = v => d.querySelectorAll("[data-kind]").forEach(x => { x.checked = v; });
+  const ba = d.querySelector("#rAll"), bn = d.querySelector("#rNone"); if (ba) ba.onclick = () => all(true); if (bn) bn.onclick = () => all(false);
+  sync();
 }
 async function engineStart(ask) {
   let j; try { j = await enginePost(ask); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }

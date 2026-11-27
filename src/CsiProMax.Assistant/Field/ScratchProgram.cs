@@ -843,6 +843,9 @@ public sealed class ScratchProgram : IScratchWindow
         return $"the scratch {_program.Name} window stopped answering" + after;
     }
 
+    /// <summary>True when the program this object started has ended, waiting up to <paramref name="wait"/>; false when it was never started.</summary>
+    public bool Ended(TimeSpan wait) => _app is not null && Gone(wait);
+
     /// <summary>True when the scratch process has ended (or could not be told apart, so nothing is known of it).</summary>
     private bool Gone(TimeSpan wait)
     {
