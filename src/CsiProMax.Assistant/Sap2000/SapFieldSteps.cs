@@ -16,6 +16,7 @@ public static class SapFieldSteps
     /// <summary>In the Modeler's part: the model saved as a SAP2000 text file, for the scratch window to open.</summary>
     public static void Modeler(FieldContext ctx)
     {
+        SapFormRoundTrip.Define(ctx);
         var answer = ctx.Tool("save_model_s2k", $$"""{"name":"{{ModelerFieldSteps.ModelName}}","folder":{{Q(ctx.Folder)}}}""", a =>
         {
             var file = a["saved"]!.GetValue<string>();
@@ -127,6 +128,9 @@ public static class SapFieldSteps
             FieldContext.Expect(missing.Count == 0, "not in SAP2000 after the import: " + string.Join(", ", missing));
             return "all there";
         });
+
+        // ---- each SAP2000 form of the Engine, read back from SAP2000 field by field ----
+        SapFormRoundTrip.Check(ctx);
 
         // ---- every read of the link ----
         LinkReads(ctx, stories: false);
