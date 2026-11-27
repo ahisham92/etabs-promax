@@ -134,17 +134,27 @@ public static class RealModelField
             try
             {
                 var link = window.Link;
+                // Each part and each table read is written down as it starts: the 0.4.70 full test sat 18 minutes in this
+                // step on a 25 KB Verification model with ETABS busy and no word of which call it was in.
+                Progress = Path.Combine(sub.Folder, "progress.txt");
+                Mark("read every model table");
                 var model = ModelTables(link);
+                Mark("the live instability check");
                 // The check as the chat's find_instabilities makes it, read live from the program before it analyses.
                 try { live = CsiProMax.Checks.Stability.StabilityCheck.Run(StabilityTools.Live.Read(link)); }
                 catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { liveWhy = ex.Message; }
+                Mark("export the text file");
                 if (!TextKinds(program).Contains(Path.GetExtension(copy), StringComparer.OrdinalIgnoreCase)) text = TextFor(program, link, copy, folder);
+                Mark("run the analysis");
                 link.RunAnalysis();
+                Mark("run the design");
                 try { DesignResults.RunDesign(link, kinds); } catch (Exception ex) when (ex is EtabsException or ToolInputException) { }
+                Mark("read every result and design table");
                 a = new Snapshot(model, ResultTables(link, null));
+                Mark("done");
                 return $"{a.Model.Count} model tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows; {a.Results.Count} result and design tables";
             }
-            finally { window.Close(); }
+            finally { Progress = null; window.Close(); }
         });
         if (a is null) return;
 
@@ -243,12 +253,22 @@ public static class RealModelField
 
     public sealed record Snapshot(Dictionary<string, TableData> Model, Dictionary<string, TableData> Results);
 
+    /// <summary>The file each part and table read of the program's own run is noted in as it starts (null: none).</summary>
+    [ThreadStatic] private static string? Progress;
+
+    private static void Mark(string what)
+    {
+        if (Progress is not { } file) return;
+        try { File.AppendAllText(file, $"{DateTime.Now:HH:mm:ss} {what}{Environment.NewLine}"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the note is only a help */ }
+    }
+
     /// <summary>Every model table (the ones the program can import), as the program gives it.</summary>
     public static Dictionary<string, TableData> ModelTables(ICsiLink link)
     {
         var all = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in link.Tables().Where(t => t.Import > 0 || t.Import < 0 && !IsResult(t.Key)))
-            try { var d = link.ReadTable(t.Key, null, null); if (d.Rows.Count > 0) all[t.Key] = d; }
+            try { Mark("  model table " + t.Key); var d = link.ReadTable(t.Key, null, null); if (d.Rows.Count > 0) all[t.Key] = d; }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { }
         return all;
     }
@@ -259,7 +279,7 @@ public static class RealModelField
         var all = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase);
         var cases = link.LoadCases(); var combos = link.Combos();
         foreach (var t in link.Tables().Where(t => (t.Import == 0 || t.Import < 0 && IsResult(t.Key)) && (only is null || only.Contains(t.Key))))
-            try { var d = link.ReadTable(t.Key, cases, combos); if (d.Rows.Count > 0) all[t.Key] = d; }
+            try { Mark("  result table " + t.Key); var d = link.ReadTable(t.Key, cases, combos); if (d.Rows.Count > 0) all[t.Key] = d; }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { }
         return all;
     }
