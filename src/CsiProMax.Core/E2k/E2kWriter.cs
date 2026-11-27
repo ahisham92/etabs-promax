@@ -189,7 +189,9 @@ public static class E2kWriter
                     foreach (var line in c.Lines) yield return Line(["LOADCASE", Quote(c.Name)], line);
                 break;
             case S.Combos:
-                foreach (var c in m.Combos)
+                // ETABS 23.2 writes its user combinations only: a default design combination (Auto) is not a COMBO line
+                // (field/reference-forms/etabs/Define/Combos/notes.md); it goes in through ETABS's table instead.
+                foreach (var c in m.Combos.Where(c => !c.Auto))
                     foreach (var line in c.Lines) yield return Line(["COMBO", Quote(c.Name)], line);
                 break;
         }
