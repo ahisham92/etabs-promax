@@ -5433,27 +5433,15 @@ async function hmSapFrameTemperature() {
   const d = dialog("Assign Frame Temperature Loads", `${sapFormCss}<div class="sapF">
     <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "ftP")]])}</fieldset>
     <fieldset><legend>Type</legend><label><input type="radio" name="ftT" value="Temperature" checked> Temperature</label><label><input type="radio" name="ftT" value="Gradient2"> Temperature Gradient 2-2</label><label><input type="radio" name="ftT" value="Gradient3"> Temperature Gradient 3-3</label></fieldset>
-    <fieldset><legend>Temperature</legend><label><input type="radio" name="ftB" value="el" checked> By Element</label>
-      <div style="display:grid;grid-template-columns:200px 110px 40px;gap:6px 8px;align-items:center;margin-left:22px"><span>Temperature</span><input id="ftV" value="0"><span class="u ftU">${T}</span></div>
-      <label><input type="radio" name="ftB" value="jp"> By Joint Pattern</label>
-      <div style="display:grid;grid-template-columns:100px 225px 40px;gap:6px 8px;align-items:center;margin-left:22px"><span>Joint Pattern</span><select id="ftJ">${opts(jp, "Default")}</select><span></span>
-        <span>Multiplier</span><span style="text-align:right"><input id="ftM" value="0" style="width:90px"></span><span class="u ftU">${T}</span></div></fieldset>
+    <fieldset><legend>Temperature</legend>${sapJpBlock("ft", "Temperature", T, jp)}</fieldset>
     ${sapLdOpts("ftO")}<button id="ftR" class="reset">Reset Form to Default Values</button></div>`,
     sapOkCloseApply(async d => {
-      const type = q(d, "[name=ftT]:checked").value, jpOn = q(d, "[name=ftB]:checked").value === "jp", field = {Temperature: "Temp", Gradient2: "TempGrad2", Gradient3: "TempGrad3"}[type];
-      const row = {Type: type, [field]: sapLdNum(d, jpOn ? "#ftM" : "#ftV"), ...(jpOn ? {JtPattern: q(d, "#ftJ").value} : {})};
-      return sapLdSet(d, "Frame Loads - Temperature", names, q(d, "#ftP").value, q(d, "[name=ftO]:checked").value, [row]);
+      const type = q(d, "[name=ftT]:checked").value, {v, jp} = w.value(), field = {Temperature: "Temp", Gradient2: "TempGrad2", Gradient3: "TempGrad3"}[type];
+      return sapLdSet(d, "Frame Loads - Temperature", names, q(d, "#ftP").value, q(d, "[name=ftO]:checked").value, [{Type: type, [field]: v, ...(jp ? {JtPattern: jp} : {})}]);
     }), {width: 470});
-  const sync = () => {
-    const jpOn = q(d, "[name=ftB]:checked").value === "jp", grad = q(d, "[name=ftT]:checked").value !== "Temperature";
-    q(d, "#ftV").disabled = jpOn; q(d, "#ftJ").disabled = q(d, "#ftM").disabled = !jpOn;
-    if (jpOn) q(d, "#ftV").value = ""; else if (q(d, "#ftV").value === "") q(d, "#ftV").value = "0";
-    if (!jpOn) { q(d, "#ftM").value = ""; } else if (q(d, "#ftM").value === "") q(d, "#ftM").value = "0";
-    d.querySelectorAll(".ftU").forEach((x, i) => x.textContent = (i === 0 && jpOn) ? "" : grad ? `${T}/${u.l}` : T);
-  };
-  d.querySelectorAll("[name=ftT],[name=ftB]").forEach(r => r.onchange = sync);
-  q(d, "#ftR").onclick = () => { q(d, "[name=ftT][value=Temperature]").checked = q(d, "[name=ftB][value=el]").checked = q(d, "[name=ftO][value=replace]").checked = true; q(d, "#ftV").value = "0"; q(d, "#ftJ").value = "Default"; sync(); };
-  sync();
+  const w = sapJpWire(d, "ft", () => q(d, "[name=ftT]:checked").value === "Temperature" ? T : `${T}/${u.l}`);
+  d.querySelectorAll("[name=ftT]").forEach(r => r.onchange = w.sync);
+  q(d, "#ftR").onclick = () => { q(d, "[name=ftT][value=Temperature]").checked = q(d, "[name=ftO][value=replace]").checked = true; w.reset(); };
   return d;
 }
 
@@ -5586,6 +5574,174 @@ Object.assign(hmSapAssignForms, {
   flGravity: () => hmSapFrameGravity(), flPoint: () => hmSapFramePoint(), flDistributed: () => hmSapFrameDistributed(), flTemperature: () => hmSapFrameTemperature(),
   flStrain: () => hmSapFrameStrain(), flDeformation: () => hmSapFrameDeformation(), flTarget: () => hmSapFrameTargetForce(), flWave: () => hmSapFrameWave(), flWind: () => hmSapFrameWind(),
   flFireproofing: () => hmSapFrameFireproofing(),
+});
+
+// SAP2000's "By Element / By Joint Pattern" block (Temperature, Pressure): the value, or a joint pattern and its
+// multiplier; the boxes of the other choice are empty and greyed, and the unit stands by the box in use.
+function sapJpBlock(p, label, unit, jp) {
+  return `<label><input type="radio" name="${p}B" value="el" checked> By Element</label>
+    <div style="display:grid;grid-template-columns:120px 150px 110px 60px;gap:6px 8px;align-items:center;margin-left:22px">
+      <span>${label}</span><span></span><input id="${p}V" value="0"><span class="u" id="${p}UV">${esc(unit)}</span></div>
+    <label><input type="radio" name="${p}B" value="jp"> By Joint Pattern</label>
+    <div style="display:grid;grid-template-columns:120px 150px 110px 60px;gap:6px 8px;align-items:center;margin-left:22px">
+      <span>Joint Pattern</span><select id="${p}J" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
+      <span>Multiplier</span><span></span><input id="${p}M" value=""><span class="u" id="${p}UM"></span></div>`;
+}
+// Wires the block: sync(unit) after a change; value(d) gives the row's value and joint pattern.
+function sapJpWire(d, p, unitOf) {
+  const sync = () => {
+    const jp = q(d, `[name=${p}B]:checked`).value === "jp", u = unitOf();
+    q(d, `#${p}V`).disabled = jp; q(d, `#${p}J`).disabled = q(d, `#${p}M`).disabled = !jp;
+    if (jp) { q(d, `#${p}V`).value = ""; if (q(d, `#${p}M`).value === "") q(d, `#${p}M`).value = "0"; if (q(d, `#${p}J`).selectedIndex < 0) q(d, `#${p}J`).value = "Default"; }
+    else { q(d, `#${p}M`).value = ""; q(d, `#${p}J`).selectedIndex = -1; if (q(d, `#${p}V`).value === "") q(d, `#${p}V`).value = "0"; }
+    q(d, `#${p}UV`).textContent = jp ? "" : u; q(d, `#${p}UM`).textContent = jp ? u : "";
+  };
+  d.querySelectorAll(`[name=${p}B]`).forEach(r => r.addEventListener("change", sync));
+  const reset = () => { q(d, `[name=${p}B][value=el]`).checked = true; q(d, `#${p}V`).value = "0"; q(d, `#${p}M`).value = ""; sync(); };
+  const value = () => { const jp = q(d, `[name=${p}B]:checked`).value === "jp"; return {v: sapLdNum(d, jp ? `#${p}M` : `#${p}V`), jp: jp ? q(d, `#${p}J`).value : null}; };
+  sync();
+  return {sync, reset, value};
+}
+const sapGravDirs = ["X", "Y", "Z", "X Projected", "Y Projected", "Z Projected", "Gravity", "Gravity Projected"];
+
+// ---- Assign > Area Loads (SAP2000 26.3, pictures Assign/AreaLoads) ----
+// Gravity (All): General (Load Pattern, Coordinate System), Gravity Multipliers, Options.
+async function hmSapAreaGravity() {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs} = s, cs = await sapCsys();
+  const d = dialog("Assign Area Gravity Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "agP")], ["Coordinate System", `<select id="agC" style="width:225px">${opts(cs, "GLOBAL")}</select>`]])}</fieldset>
+    <fieldset><legend>Gravity Multipliers</legend><div class="g3">${["X", "Y", "Z"].map(x => sapRow("Global " + x, "ag" + x, 0, "")).join("")}</div></fieldset>
+    ${sapLdOpts("agO")}<button id="agR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, "Area Loads - Gravity", names, q(d, "#agP").value, q(d, "[name=agO]:checked").value,
+      [{CoordSys: q(d, "#agC").value, MultiplierX: sapLdNum(d, "#agX"), MultiplierY: sapLdNum(d, "#agY"), MultiplierZ: sapLdNum(d, "#agZ")}])), {width: 450});
+  q(d, "#agR").onclick = () => { q(d, "#agC").value = "GLOBAL"; ["X", "Y", "Z"].forEach(x => q(d, "#ag" + x).value = "0"); q(d, "[name=agO][value=replace]").checked = true; };
+  return d;
+}
+// Uniform (Shell) and Uniform to Frame (Shell): General (Load Pattern, Coordinate System with Local, Load Direction,
+// and Load Distribution One Way / Two Way for frames), Uniform Load, Options.
+async function sapAreaUniform(toFrame) {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs, u} = s, cs = [...await sapCsys(), "Local"], p = toFrame ? "auf" : "au";
+  const d = dialog(toFrame ? "Assign Area Uniform Loads to Frames" : "Assign Area Uniform Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")], ["Coordinate System", `<select id="${p}C" style="width:225px">${opts(cs, "GLOBAL")}</select>`],
+      ["Load Direction", `<select id="${p}D" style="width:225px"></select>`], ...(toFrame ? [["Load Distribution", `<select id="${p}T" style="width:225px">${opts(["One Way", "Two Way"], "One Way")}</select>`]] : [])])}</fieldset>
+    <fieldset><legend>Uniform Load</legend><div class="g3">${sapRow("Load", p + "V", 0, `${u.f}/${u.l}²`)}</div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, toFrame ? "Area Loads - Uniform To Frame" : "Area Loads - Uniform", names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value,
+      [{CoordSys: q(d, `#${p}C`).value, Dir: q(d, `#${p}D`).value, UnifLoad: sapLdNum(d, `#${p}V`), ...(toFrame ? {DistType: q(d, `#${p}T`).value} : {})}])), {width: 470});
+  const syncDir = () => { const c = q(d, `#${p}C`).value, was = q(d, `#${p}D`).value, list = c === "Local" ? ["1", "2", "3"] : sapGravDirs; q(d, `#${p}D`).innerHTML = opts(list, list.includes(was) ? was : c === "Local" ? "1" : "Gravity"); };
+  q(d, `#${p}C`).onchange = syncDir;
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}C`).value = "GLOBAL"; q(d, `#${p}D`).innerHTML = ""; syncDir(); if (toFrame) q(d, `#${p}T`).value = "One Way"; q(d, `#${p}V`).value = "0"; q(d, `[name=${p}O][value=replace]`).checked = true; };
+  syncDir();
+  return d;
+}
+function hmSapAreaUniform() { return sapAreaUniform(false); }
+function hmSapAreaUniformToFrame() { return sapAreaUniform(true); }
+// Surface Pressure (All): Load Pattern, Loaded Face (Top, Bottom, Edge with its Edge Face Number), Pressure By Element
+// or By Joint Pattern, Options. Solid: the Face list 1 to 6 in place of the loaded face.
+async function sapSurfacePressure(solid) {
+  const s = await sapLdStart(solid ? "solid" : "area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = solid ? "ssp" : "asp";
+  const face = solid ? `<fieldset><legend>Loaded Face</legend>${sapLdGrid([["Face", `<select id="${p}F" style="width:110px">${opts(["1", "2", "3", "4", "5", "6"], "1")}</select>`]])}</fieldset>`
+    : `<fieldset><legend>Loaded Face</legend><label><input type="radio" name="${p}F" value="Top" checked> Top</label><label><input type="radio" name="${p}F" value="Bottom"> Bottom</label><label><input type="radio" name="${p}F" value="Edge"> Edge</label>
+      <div style="display:grid;grid-template-columns:270px 110px;gap:6px 8px;align-items:center;margin-left:22px"><span>Edge Face Number</span><input id="${p}E" value="" disabled></div></fieldset>`;
+  const d = dialog(solid ? "Assign Solid Surface Pressure Loads" : "Assign Area Surface Pressure Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>${face}
+    <fieldset><legend>Pressure</legend>${sapJpBlock(p, "Pressure", `${u.f}/${u.l}²`, jp)}</fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const {v, jp} = w.value(); let f;
+      if (solid) f = q(d, `#${p}F`).value;
+      else { f = q(d, `[name=${p}F]:checked`).value; if (f === "Edge") { f = q(d, `#${p}E`).value.trim(); if (!/^\d+$/.test(f) || +f < 1) { formError(d, "Give the edge face number (1 or more)."); return false; } } }
+      return sapLdSet(d, solid ? "Solid Loads - Surface Pressure" : "Area Loads - Surface Pressure", names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{Face: f, Pressure: v, ...(jp ? {JtPattern: jp} : {})}]);
+    }), {width: 470});
+  const w = sapJpWire(d, p, () => `${u.f}/${u.l}²`);
+  const edge = () => { if (solid) return; const on = q(d, `[name=${p}F]:checked`).value === "Edge"; q(d, `#${p}E`).disabled = !on; q(d, `#${p}E`).value = on ? (q(d, `#${p}E`).value || "1") : ""; };
+  if (!solid) d.querySelectorAll(`[name=${p}F]`).forEach(r => r.onchange = edge);
+  q(d, `#${p}R`).onclick = () => { if (solid) q(d, `#${p}F`).value = "1"; else { q(d, `[name=${p}F][value=Top]`).checked = true; edge(); } w.reset(); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+function hmSapAreaSurfacePressure() { return sapSurfacePressure(false); }
+// Pore Pressure (Plane, Asolid) and the Solid one: Load Pattern, Pressure By Element or By Joint Pattern, Options.
+async function sapPorePressure(solid) {
+  const s = await sapLdStart(solid ? "solid" : "area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = solid ? "spp" : "app";
+  const d = dialog(solid ? "Assign Solid Pore Pressure Loads" : "Assign Area Pore Pressure Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Pressure</legend>${sapJpBlock(p, "Pressure", `${u.f}/${u.l}²`, jp)}</fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const {v, jp} = w.value(); return sapLdSet(d, solid ? "Solid Loads - Pore Pressure" : "Area Loads - Pore Pressure", names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{Pressure: v, ...(jp ? {JtPattern: jp} : {})}]); }), {width: 470});
+  const w = sapJpWire(d, p, () => `${u.f}/${u.l}²`);
+  q(d, `#${p}R`).onclick = () => { w.reset(); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+function hmSapAreaPorePressure() { return sapPorePressure(false); }
+// Temperature (All): Load Pattern, Type (Temperature, Temperature Gradient 3-3), By Element or By Joint Pattern, Options.
+async function hmSapAreaTemperature() {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), T = sapLdTemp();
+  const d = dialog("Assign Area Temperature Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "atP")]])}</fieldset>
+    <fieldset><legend>Type</legend><label><input type="radio" name="atT" value="Temperature" checked> Temperature</label><label><input type="radio" name="atT" value="Gradient3"> Temperature Gradient 3-3</label></fieldset>
+    <fieldset><legend>Temperature</legend>${sapJpBlock("at", "Temperature", T, jp)}</fieldset>
+    ${sapLdOpts("atO")}<button id="atR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const {v, jp} = w.value(), type = q(d, "[name=atT]:checked").value;
+      return sapLdSet(d, "Area Loads - Temperature", names, q(d, "#atP").value, q(d, "[name=atO]:checked").value, [{Type: type, [type === "Temperature" ? "Temp" : "TempGrad3"]: v, ...(jp ? {JtPattern: jp} : {})}]); }), {width: 470});
+  const w = sapJpWire(d, "at", () => q(d, "[name=atT]:checked").value === "Temperature" ? T : `${T}/${u.l}`);
+  d.querySelectorAll("[name=atT]").forEach(r => r.onchange = w.sync);
+  q(d, "#atR").onclick = () => { q(d, "[name=atT][value=Temperature]").checked = q(d, "[name=atO][value=replace]").checked = true; w.reset(); };
+  return d;
+}
+// Strain (All): Load Pattern, By Element or By Joint Pattern, Component, Joint Pattern, Strain, Options.
+async function sapAreaStrain(solid) {
+  const s = await sapLdStart(solid ? "solid" : "area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = solid ? "sst" : "ast";
+  const comps = solid ? ["Strain11", "Strain22", "Strain33", "Strain12", "Strain13", "Strain23"].map(c => [c, c])
+    : [["Strain11", "Strain11"], ["Strain22", "Strain22"], ["Strain12", "Strain12"], ["Strain13", "Strain13"], ["Strain23", "Strain23"], ["Strain33", "Strain33 (not for shells)"], ["Curvature11", "Curvature11"], ["Curvature22", "Curvature22"], ["Curvature12", "Curvature12"]];
+  const d = dialog(solid ? "Assign Solid Strain Loads" : "Assign Area Strain Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Strain Load</legend><div style="display:flex;gap:60px"><label><input type="radio" name="${p}B" value="el" checked> By Element</label><label><input type="radio" name="${p}B" value="jp"> By Joint Pattern</label></div>
+      <div style="display:grid;grid-template-columns:110px 150px 110px 40px;gap:6px 8px;align-items:center">
+        <span>Component</span><select id="${p}C" style="grid-column:span 2">${opts(comps, "Strain11")}</select><span></span>
+        <span>Joint Pattern</span><select id="${p}J" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
+        <span>Strain</span><span></span><input id="${p}V" value="0"><span class="u" id="${p}U"></span></div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const c = q(d, `#${p}C`).value, jpOn = q(d, `[name=${p}B]:checked`).value === "jp";
+      return sapLdSet(d, solid ? "Solid Loads - Strain" : "Area Loads - Strain", names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value,
+        [{Component: c, [/^Curv/.test(c) ? "Curvature" : "Strain"]: sapLdNum(d, `#${p}V`), ...(jpOn ? {JtPattern: q(d, `#${p}J`).value} : {})}]);
+    }), {width: 470});
+  const sync = () => { const jpOn = q(d, `[name=${p}B]:checked`).value === "jp"; q(d, `#${p}J`).disabled = !jpOn; if (!jpOn) q(d, `#${p}J`).selectedIndex = -1; else if (q(d, `#${p}J`).selectedIndex < 0) q(d, `#${p}J`).value = "Default";
+    q(d, `#${p}U`).textContent = /^Curv/.test(q(d, `#${p}C`).value) ? `rad/${u.l}` : `${u.l}/${u.l}`; };
+  d.querySelectorAll(`[name=${p}B]`).forEach(r => r.onchange = sync); q(d, `#${p}C`).onchange = sync;
+  q(d, `#${p}R`).onclick = () => { q(d, `[name=${p}B][value=el]`).checked = q(d, `[name=${p}O][value=replace]`).checked = true; q(d, `#${p}C`).value = "Strain11"; q(d, `#${p}V`).value = "0"; sync(); };
+  sync();
+  return d;
+}
+function hmSapAreaStrain() { return sapAreaStrain(false); }
+// Rotate (Asolid): Load Pattern, Angular Velocity (cyc/sec), Options.
+async function hmSapAreaRotate() {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs} = s;
+  const d = dialog("Assign Area Rotate Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "arP")]])}</fieldset>
+    <fieldset><legend>Load Value</legend><div class="g3">${sapRow("Angular Velocity", "arV", 0, "cyc/sec")}</div></fieldset>
+    ${sapLdOpts("arO")}<button id="arR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, "Area Loads - Rotate", names, q(d, "#arP").value, q(d, "[name=arO]:checked").value, [{AngularVel: sapLdNum(d, "#arV")}])), {width: 450});
+  q(d, "#arR").onclick = () => { q(d, "#arV").value = "0"; q(d, "[name=arO][value=replace]").checked = true; };
+  return d;
+}
+// Wind Pressure Coefficients (Shell): Load Pattern, Pressure Type (Windward / Other), Cp, Load Distribution, Replace or Delete.
+async function hmSapAreaWindCp() {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs} = s;
+  const d = dialog("Assign Area Wind Pressure Coefficient Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "awP")]])}</fieldset>
+    <fieldset><legend>Pressure Type</legend><label><input type="radio" name="awT" value="Yes" checked> Windward&nbsp; (pressure varies over height)</label><label><input type="radio" name="awT" value="No"> Other&nbsp; (pressure constant over height)</label></fieldset>
+    <fieldset><legend>Load Value</legend><div class="g3">${sapRow("Pressure Coefficient, Cp", "awV", 0, "")}</div></fieldset>
+    <fieldset><legend>Load Distribution</legend><select id="awD" style="width:225px">${opts(["To Joints", "To Frames - One-Way", "To Frames - Two-Way"], "To Joints")}</select></fieldset>
+    ${sapLdOpts("awO", true)}<button id="awR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, "Area Loads - Wind Pressure Coefficients", names, q(d, "#awP").value, q(d, "[name=awO]:checked").value,
+      [{Windward: q(d, "[name=awT]:checked").value, Cp: sapLdNum(d, "#awV"), DistType: q(d, "#awD").value}])), {width: 450});
+  q(d, "#awR").onclick = () => { q(d, "[name=awT][value=Yes]").checked = q(d, "[name=awO][value=replace]").checked = true; q(d, "#awV").value = "0"; q(d, "#awD").value = "To Joints"; };
+  return d;
+}
+Object.assign(hmSapAssignForms, {
+  alGravity: () => hmSapAreaGravity(), alUniform: () => hmSapAreaUniform(), alToFrame: () => hmSapAreaUniformToFrame(), alSurface: () => hmSapAreaSurfacePressure(),
+  alPore: () => hmSapAreaPorePressure(), alTemperature: () => hmSapAreaTemperature(), alStrain: () => hmSapAreaStrain(), alRotate: () => hmSapAreaRotate(), alWindCp: () => hmSapAreaWindCp(),
 });
 
 // Assign > Joint > Restraints (SAP2000 26.3: Restraints in Joint Local Directions, Fast Restraints, OK/Close/Apply).

@@ -22,6 +22,9 @@ public static class SapObjectLoads
         ["Frame Loads - Point"] = ("frame", ["POINTF", "POINTM"]),
         ["Frame Loads - Temperature"] = ("frame", ["TEMP"]),
         ["Frame Loads - Strain"] = ("frame", ["STRAIN"]),
+        ["Area Loads - Uniform"] = ("area", ["UNIFF"]),
+        ["Area Loads - Temperature"] = ("area", ["TEMP"]),
+        ["Area Loads - Strain"] = ("area", ["STRAIN"]),
     };
 
     // Tables that hold one row for an object whatever its load pattern: Replace and Delete take every row off.
@@ -78,7 +81,8 @@ public static class SapObjectLoads
                 {
                     if (tokens.Count == 0) continue; // all zero: SAP2000 adds nothing
                     if (kind == "joint") m.PointLoads.Add(new PointLoad { Object = label, Story = a.Story, Tokens = tokens });
-                    else m.LineLoads.Add(new LineLoad { Object = label, Story = a.Story, Tokens = tokens });
+                    else if (kind == "frame") m.LineLoads.Add(new LineLoad { Object = label, Story = a.Story, Tokens = tokens });
+                    else m.AreaLoads.Add(new AreaLoad { Object = label, Story = a.Story, Tokens = tokens });
                     continue;
                 }
                 a.Tables ??= new(StringComparer.OrdinalIgnoreCase);
@@ -159,6 +163,19 @@ public static class SapObjectLoads
                 if (T(r, "JtPattern", "").Length > 0 || !component.StartsWith("Strain", StringComparison.OrdinalIgnoreCase) || component.Length != 8) return null;
                 if (N(r, "Strain") == 0) return [];
                 return AnalysisDefs.LoadTokens("frame_strain", pattern, new Dictionary<string, double> { ["strain"] = N(r, "Strain") }, component[6..]);
+            }
+            case "AREA LOADS - UNIFORM":
+                if (!plain) return null;
+                return N(r, "UnifLoad") == 0 ? [] : AnalysisDefs.LoadTokens("shell_uniform", pattern, new Dictionary<string, double> { ["value"] = N(r, "UnifLoad") }, etabsDir);
+            case "AREA LOADS - TEMPERATURE":
+                if (!T(r, "Type", "Temperature").Equals("Temperature", StringComparison.OrdinalIgnoreCase) || T(r, "JtPattern", "").Length > 0) return null;
+                return AnalysisDefs.LoadTokens("shell_temperature", pattern, new Dictionary<string, double> { ["temperature"] = N(r, "Temp") }, "");
+            case "AREA LOADS - STRAIN":
+            {
+                var component = T(r, "Component", "Strain11");
+                if (T(r, "JtPattern", "").Length > 0 || !component.StartsWith("Strain", StringComparison.OrdinalIgnoreCase) || component.Length != 8) return null;
+                if (N(r, "Strain") == 0) return [];
+                return AnalysisDefs.LoadTokens("shell_strain", pattern, new Dictionary<string, double> { ["strain"] = N(r, "Strain") }, component[6..]);
             }
         }
         return null;

@@ -818,15 +818,22 @@ public static partial class S2kReader
                 m.LineLoads.Add(new LineLoad { Object = f.Label, Story = f.Story, Tokens = AnalysisDefs.LoadTokens("frame_strain", S(r, "LoadPat"), new Dictionary<string, double> { ["strain"] = D(r, "Strain", D(r, "Value")) }, component[6..]) });
             }
 
+        AreaAssign? AreaOf((string Label, string Story) x) => m.AreaAssigns.Find(y => y.Label == x.Label && y.Story == x.Story);
         foreach (var r in use("AREA LOADS - UNIFORM"))
         {
             if (!areaAt.TryGetValue(S(r, "Area"), out var a)) continue;
+            if (!Plain(r)) { Keep(AreaOf(a), "Area Loads - Uniform", r, "Area"); continue; }
             m.AreaLoads.Add(new AreaLoad { Object = a.Label, Story = a.Story, Tokens = AnalysisDefs.LoadTokens("shell_uniform", S(r, "LoadPat"), new Dictionary<string, double> { ["value"] = D(r, "UnifLoad") }, Dir(S(r, "Dir", "Gravity"))) });
         }
-        Temperatures(use("AREA LOADS - TEMPERATURE"), "Area", areaAt, "shell_temperature", (o, s, tk) => m.AreaLoads.Add(new AreaLoad { Object = o, Story = s, Tokens = tk }));
+        var areaTemps = use("AREA LOADS - TEMPERATURE");
+        bool PlainTemp(Dictionary<string, string> r) => S(r, "Type", "Temperature").Equals("Temperature", StringComparison.OrdinalIgnoreCase) && S(r, "JtPattern").Length == 0;
+        foreach (var r in areaTemps.Where(r => !PlainTemp(r)))
+            if (areaAt.TryGetValue(S(r, "Area"), out var a)) Keep(AreaOf(a), "Area Loads - Temperature", r, "Area");
+        Temperatures(areaTemps.Where(PlainTemp).ToList(), "Area", areaAt, "shell_temperature", (o, s, tk) => m.AreaLoads.Add(new AreaLoad { Object = o, Story = s, Tokens = tk }));
         foreach (var r in use("AREA LOADS - STRAIN"))
             if (areaAt.TryGetValue(S(r, "Area"), out var a))
-                m.AreaLoads.Add(new AreaLoad { Object = a.Label, Story = a.Story, Tokens = AnalysisDefs.LoadTokens("shell_strain", S(r, "LoadPat"), new Dictionary<string, double> { ["strain"] = D(r, "Strain", D(r, "Value")) }, S(r, "Component").Replace("Strain", "", StringComparison.OrdinalIgnoreCase)) });
+                if (S(r, "JtPattern").Length > 0 || !S(r, "Component", "Strain11").StartsWith("Strain", StringComparison.OrdinalIgnoreCase)) Keep(AreaOf(a), "Area Loads - Strain", r, "Area");
+                else m.AreaLoads.Add(new AreaLoad { Object = a.Label, Story = a.Story, Tokens = AnalysisDefs.LoadTokens("shell_strain", S(r, "LoadPat"), new Dictionary<string, double> { ["strain"] = D(r, "Strain", D(r, "Value")) }, S(r, "Component").Replace("Strain", "", StringComparison.OrdinalIgnoreCase)) });
 
         void Joint(string table, string kind, (string Sap, string Key)[] keys)
         {

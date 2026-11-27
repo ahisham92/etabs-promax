@@ -579,9 +579,9 @@ public static class S2kWriter
             { notes.Add($"A {type} area load on {area} has no plain SAP2000 equal here and was left out."); continue; }
             areaLoads.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("CoordSys", CoordSys(dir)), ("Dir", Direction(dir)), ("UnifLoad", N(value))));
         }
-        Add(tables, "AREA LOADS - UNIFORM", areaLoads);
-        Add(tables, "AREA LOADS - TEMPERATURE", areaTemps);
-        Add(tables, "AREA LOADS - STRAIN", areaStrains);
+        Add(tables, "AREA LOADS - UNIFORM", areaLoads.Concat(KeptRows("Area Loads - Uniform")));
+        Add(tables, "AREA LOADS - TEMPERATURE", areaTemps.Concat(KeptRows("Area Loads - Temperature")));
+        Add(tables, "AREA LOADS - STRAIN", areaStrains.Concat(KeptRows("Area Loads - Strain")));
         Add(tables, "JOINT LOADS - FORCE", jointLoads.Concat(KeptRows("Joint Loads - Force")));
         Add(tables, "JOINT LOADS - GROUND DISPLACEMENT", jointDisps.Concat(KeptRows("Joint Loads - Ground Displacement")));
 
