@@ -158,6 +158,21 @@ static class PackSpeedTests
             Check(big.Content["manifest"]?["left_out_tables"]?.ToJsonString().Contains(Pack.Stresses) != true, "nothing is left out");
             Equal(6.0, Pack.LargeMostTime.TotalMinutes, "a large model's limit");
         });
+        yield return ("pack speed: a pack read from a copy is zipped after the hidden program is closed, the same pack as one zipped at once", () =>
+        {
+            var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
+            m.AddFrame(0, 0, 0, 0, 0, 3, "C1");
+            m.Locked = true;
+            m.ResultTables["Story Drifts"] = new(["Story", "Output Case", "Drift"], [["Story1", "Dead", "0.001"]]);
+            var later = Pack.Build(m, [], [], [], new System.Text.Json.Nodes.JsonObject { ["ok"] = true }, null, zip: false);
+            Equal(0, later.Zip.Length, "nothing is zipped while the program is open");
+            var zipped = Pack.Zipped(later);
+            var back = Pack.Read(zipped.Zip);
+            Check(back["tables"]!["Story Drifts"] is not null, "the tables are in the zip");
+            Check(back["checks"]?["ok"]?.GetValue<bool>() == true, "the checks are in the zip");
+            Check(back["manifest"]!["timing"] is not null && back["manifest"]!["notes"] is not null, "the manifest is in the zip");
+            Check(ReferenceEquals(zipped, Pack.Zipped(zipped)), "a zipped pack is not zipped again");
+        });
         yield return ("pack speed: the manifest says how long the pack took and which tables were slowest, against 3 minutes", () =>
         {
             var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };

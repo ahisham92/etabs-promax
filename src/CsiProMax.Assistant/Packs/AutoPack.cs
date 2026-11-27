@@ -205,14 +205,14 @@ public static class AutoPack
             ["made_at"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
         };
         var by = why == "design" ? "CSI ProMax, by itself after the design" : "CSI ProMax, by itself after the analysis";
-        Pack.Built Make(ICsiLink from)
+        Pack.Built Make(ICsiLink from, bool zip)
         {
             // The checks and the pack read the same tables: each is read from the program once.
             using var session = PackSession.Start(from);
             JsonObject checks;
             try { checks = ProgramTools.Report(JsonDocument.Parse("{}").RootElement, from).AsObject(); }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ToolInputException) { checks = new JsonObject { ["note"] = "The checks could not be made: " + ex.Message }; }
-            return Pack.Build(from, [], [], [], checks, comments, by: by, instabilities: true, auto: auto, fileAs: look.File);
+            return Pack.Build(from, [], [], [], checks, comments, by: by, instabilities: true, auto: auto, fileAs: look.File, zip: zip);
         }
         Pack.Built? built = null;
         // After an analysis the results are in the saved files: they are read from a copy in a hidden program, so the
@@ -220,12 +220,13 @@ public static class AutoPack
         // window until it is saved, so it is read there.
         if (why != "design" && ReadFromCopy && FieldTest.IsLive(link))
         {
-            var copy = PackCopy.Read(link.Program, look.File, Make);
+            // Zipped after the hidden program is closed: it holds a licence only while it reads.
+            var copy = PackCopy.Read(link.Program, look.File, from => Make(from, zip: false));
             built = copy.Value;
             auto["read"] = copy.Value is not null ? copy.Said : $"the engineer's {link.Program.Name}, because {copy.Said}";
             auto["copy_seconds"] = Math.Round(copy.Took.TotalSeconds, 1);
         }
-        built ??= Make(link);
+        built = built is null ? Make(link, zip: true) : Pack.Zipped(built);
         lock (LockFor(pack)) PackLife.Write(pack, page, built.Zip, Pack.ViewerHtml(built.Content));
         return new Written(pack, page, why, built.Frames, built.Areas, built.Tables.Count, comments.Count, watch.Elapsed, built.Notes);
     }
