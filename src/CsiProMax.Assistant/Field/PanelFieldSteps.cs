@@ -320,7 +320,18 @@ public static class PanelFieldSteps
         }
 
         // ---- The self test, as the chat runs it. ----
-        Tool("run_self_test", "{}", (a, _) => FieldContext.Expect(FieldParts.Int(a["passed"]) > 0, "no check passed: " + a.ToJsonString()));
+        // A newer version downloaded while the test runs (a tester's 0.4.71 run: 0.4.72 came in) makes run_self_test say
+        // so instead of running, as it does in the chat: that answer is the tool working, said as it is.
+        ctx.Step("tool run_self_test", () =>
+        {
+            handled.Add("run_self_test");
+            var result = Execute(registry, app, "run_self_test", "{}");
+            if (result.IsError && OldVersionAnswer(result.Text)) return (JsonNode)JsonValue.Create("it says this version is old and runs nothing, as it should: " + result.Text)!;
+            FieldContext.Expect(!result.IsError, "it answered with an error: " + result.Text);
+            var a = Node(result.Text);
+            FieldContext.Expect(FieldParts.Int(a["passed"]) > 0, "no check passed: " + a.ToJsonString());
+            return a;
+        });
         Tool("self_test_status", "{}", (a, _) => FieldContext.Expect(a["status"]?.GetValue<string>() is "all passed" or "some failed", "it should know the run a moment ago: " + a.ToJsonString()));
         handled.Add("run_field_test"); // this is it
 
@@ -492,4 +503,9 @@ public static class PanelFieldSteps
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static void LoadThemeOnTheWindowsThread() => CsiProMax.App.Ui?.Invoke(() => { _ = UI.CdtTheme.Styles; });
+
+    /// <summary>The answer a tool gives on an old version (Updater.Behind) in place of running.</summary>
+    internal static bool OldVersionAnswer(string text) =>
+        text.StartsWith("This is CSI ProMax ", StringComparison.Ordinal) && text.Contains(", an old version: ", StringComparison.Ordinal);
+
 }
