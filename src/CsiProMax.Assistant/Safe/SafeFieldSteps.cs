@@ -271,24 +271,32 @@ public static class SafeFieldSteps
         // ---- snapshots and the review pack ----
         ctx.Tool("list_snapshots", "{}", a => FieldContext.Expect(Int(a["count"]) >= 1, "the snapshot is not listed"));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""");
+        Pack.Built? packBuilt = null;
+        var took = TimeSpan.Zero;
         // Left out of a rerun of what failed, as in ETABS (Ahmed 2026-11-27: what he says of ETABS holds for all three).
         if (ctx.NoPack) ctx.LeftOutOfRerun("the review pack of the scratch model is written");
         else
         ctx.Step("the review pack of the scratch model is written", () =>
         {
-            var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject();
-            var pack = Pack.Build(link, [], link.LoadCases(), link.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test");
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var (checks, pack) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject(),
+                c => Pack.Build(link, [], link.LoadCases(), link.Combos(), c, null, mostRows: 20000, by: "CSI ProMax field test"));
+            packBuilt = pack; took = watch.Elapsed;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " SAFE.cpmx");
             File.WriteAllBytes(file, pack.Zip);
             FieldContext.Expect(pack.Areas == link.Areas().Count, $"the pack holds {pack.Areas} areas, the model has {link.Areas().Count}");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
+        PackSpeedField.Timed(ctx, packBuilt, took, link.Program.Name);
 
         // ---- the link with GeoProMax: the pressures out, the springs back in (the model is unlocked for them) ----
         GeoProMaxFieldSteps.Run(ctx);
 
         // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
         CsiFieldSteps.Run(ctx);
+
+        // ---- how fast the program gives its tables, each way (last: ETABS's export of every table may take a while) ----
+        PackSpeedField.Probe(ctx, link, link.Program.Name);
 
         ctx.Coverage("every SAFE tool was run");
     }

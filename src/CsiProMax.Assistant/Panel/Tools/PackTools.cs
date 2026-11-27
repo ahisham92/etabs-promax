@@ -96,8 +96,14 @@ public sealed class ExportPackTool : IEtabsTool
             var combos = args.StringList("combinations");
             if (cases.Count > 0) limits["cases"] = new JsonArray(cases.Select(c => (JsonNode)c).ToArray());
             if (combos.Count > 0) limits["combinations"] = new JsonArray(combos.Select(c => (JsonNode)c).ToArray());
-            var checks = ProgramTools.Report(JsonDocument.Parse(limits.ToJsonString()).RootElement, link).AsObject();
-            var built = Pack.Build(link, args.StringList("tables"), cases, combos, checks, null, designFiles: args.StringList("design_files"), instabilities: true);
+            Pack.Built built;
+            JsonObject checks;
+            // The checks and the pack read the same tables: each is read from the program once.
+            using (CsiProMax.Assistant.Etabs.PackSession.Start(link))
+            {
+                checks = ProgramTools.Report(JsonDocument.Parse(limits.ToJsonString()).RootElement, link).AsObject();
+                built = Pack.Build(link, args.StringList("tables"), cases, combos, checks, null, designFiles: args.StringList("design_files"), instabilities: true);
+            }
             var model = built.Content["manifest"]!["model"]!.GetValue<string>();
             var name = OfficeDocs.SafeName((args.OptString("name") ?? "").Trim() is { Length: > 0 } n ? n : model);
             Directory.CreateDirectory(folder);

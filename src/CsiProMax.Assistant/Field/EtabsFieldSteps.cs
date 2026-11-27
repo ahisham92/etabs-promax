@@ -417,6 +417,8 @@ public static class EtabsFieldSteps
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis","to":"cpm-after-analysis"}""", a =>
             FieldContext.Expect(Int(a["frames"]!["removed"]) == 0 && Int(a["areas"]!["removed"]) == 0, "nothing was removed between the two snapshots: " + a.ToJsonString()));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""", null, "tool compare_snapshots with the model as it is now");
+        Pack.Built? packBuilt = null;
+        var took = TimeSpan.Zero;
         // This pack, the Viewer's and the watcher's two are of the same analysed model: its tables are read once for all
         // four (Pack.SameModel), not four times at about 9 minutes each (0.4.61 full test).
         var sameModel = Pack.SameModel();
@@ -427,8 +429,10 @@ public static class EtabsFieldSteps
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var cases = link.LoadCases();
-            var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject();
-            var pack = Pack.Build(link, [], cases, link.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test");
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var (checks, pack) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject(),
+                c => Pack.Build(link, [], cases, link.Combos(), c, null, mostRows: 20000, by: "CSI ProMax field test"));
+            packBuilt = pack; took = watch.Elapsed;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " ETABS.cpmx");
             File.WriteAllBytes(file, pack.Zip);
             FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
@@ -438,6 +442,7 @@ public static class EtabsFieldSteps
             FieldContext.Expect(!piered || pack.Content["model"]!["wall_labels"] is JsonArray { Count: > 0 }, "the wall is pier CPM-P1 and the pack has no wall labels for the Viewer");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, design = design?.ToJsonString(), notes = pack.Notes };
         });
+        PackSpeedField.Timed(ctx, packBuilt, took, link.Program.Name);
 
         // The Viewer's check runs here, while the model still has its results (it is unlocked next).
         if (analysed) ctx.WithResults();
@@ -464,6 +469,9 @@ public static class EtabsFieldSteps
 
         // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
         CsiFieldSteps.Run(ctx);
+
+        // ---- how fast the program gives its tables, each way (last: ETABS's export of every table may take a while) ----
+        PackSpeedField.Probe(ctx, link, link.Program.Name);
 
         ctx.Coverage("every ETABS tool was run");
     }
