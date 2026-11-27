@@ -1045,10 +1045,20 @@ public static class CsiTools
 
     private static (string Model, string Folder) CheckpointFolder(ICsiLink e)
     {
-        var file = e.Info().File;
+        var file = ModelFileOf(e.Info().File, e.Program);
         if (file.Length == 0 || !Path.IsPathRooted(file)) throw new ToolInputException("The model has not been saved yet: save it first, then take a checkpoint.");
         var folder = Path.Combine(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file) + " checkpoints");
         return (file, folder);
+    }
+
+    /// <summary>The model's own file for the file the program answers: ETABS 23 answers its working file name.$et (and
+    /// SAP2000 name.$2k) while name.edb is open, and answered one or the other between a checkpoint's save and its list
+    /// (0.4.62 ETABS field test: the copy was taken as .$et and looked for as .edb, so none was found).</summary>
+    internal static string ModelFileOf(string file, CsiProgram program)
+    {
+        if (file.Length == 0 || !Path.GetExtension(file).StartsWith(".$", StringComparison.Ordinal)) return file;
+        var own = Path.ChangeExtension(file, ModelFiles(program)[0]);
+        return !OperatingSystem.IsWindows() || File.Exists(own) ? own : file;
     }
 
     private static string CheckpointName(string name)

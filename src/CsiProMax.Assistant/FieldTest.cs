@@ -99,10 +99,10 @@ public static class FieldTest
 
         /// <summary>Open the Viewer in a browser without a window and check its screen, for each program's scratch model.</summary>
         public bool Viewer { get; init; } = true;
-        /// <summary>The most one program's part may take before the test gives up on it and goes on. ETABS 23.2's part
-        /// writes the pack four times at about 9 minutes each and needed about 50 minutes (0.4.60 and 0.4.61 full tests
-        /// gave up at 45 while it was still working).</summary>
-        public TimeSpan ScratchLimit { get; init; } = TimeSpan.FromMinutes(80);
+        /// <summary>The most one program's part may take before the test gives up on it and goes on. ETABS 23.2 reads each
+        /// table in about 2.4 s and its part writes the pack four times (161 tables, about 9 minutes each): the 0.4.60 and
+        /// 0.4.61 full tests gave up at 45 minutes, and the 0.4.62 ETABS test at 80, on its last step, still working.</summary>
+        public TimeSpan ScratchLimit { get; init; } = TimeSpan.FromMinutes(120);
     }
 
     /// <summary>What a field test found, and the files it saved.</summary>
