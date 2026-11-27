@@ -130,6 +130,43 @@ public static class ModelerCheck
           if (scope !== 2) return {fail: "it has no choice of all or selected objects"};
           return {ok: `Run Options: Analyze only / Analyze and Design / Design only, ${kinds} designs, all or selected; closed without running`};
         },
+        // The program's File menu (etf*): Close asks to save a changed model (Cancel keeps it); Exit asks the same and is not
+        // let close the window; Print Graphics opens the program's window, and its Print prints the page with the drawing.
+        "m:etf:close": async () => {
+          await hmRun("define_load_pattern", {name: "CPM-CHKCLOSE", type: "Other", self_weight: 0}, true); await wait(300);
+          const count = frames.length; act("m:etf:close"); await wait(500);
+          const box = [...document.querySelectorAll(".dlg.etfAsk")].pop(), words = box ? box.textContent : "";
+          const buttons = box ? [...box.querySelectorAll(".df button")].map(b => b.textContent).join(", ") : "";
+          if (box) formOk("Cancel"); await wait(300); await hmRun("undo"); await wait(300);
+          if (!box) return {fail: "Close did not ask to save the changed model"};
+          if (!/has changed\./.test(words) || !/Save current changes\?/.test(words) || buttons !== "Yes, No, Cancel") return {fail: "the box reads " + words.slice(0, 120) + " with " + buttons};
+          return frames.length === count ? {ok: "asks '<model> has changed. Save current changes?' Yes/No/Cancel; Cancel keeps the model"} : {fail: "Cancel did not keep the model"};
+        },
+        "m:etf:exit": async () => {
+          const real = window.close; let closed = 0; window.close = () => { closed++; };
+          try {
+            await hmRun("define_load_pattern", {name: "CPM-CHKEXIT", type: "Other", self_weight: 0}, true); await wait(300);
+            act("m:etf:exit"); await wait(500);
+            const box = [...document.querySelectorAll(".dlg.etfAsk")].pop();
+            if (box) formOk("Cancel"); await wait(300); await hmRun("undo"); await wait(300);
+            if (!box) return {fail: "Exit did not ask to save the changed model"};
+            return closed ? {fail: "Cancel still closed the window"} : {ok: "asks to save first; Cancel keeps the window open"};
+          } finally { window.close = real; }
+        },
+        "m:etf:print": async () => {
+          const real = window.print; let asked = 0;
+          window.print = () => { asked++; };
+          try {
+            await act("m:etf:print"); await wait(400);
+            const d = [...document.querySelectorAll(".dlg")].pop();
+            if (!d || !d.querySelector("#pgView .etfPg")) return {fail: "Print Graphics opened no page"};
+            const tips = ["#pgPrint", "#pgSetup", "#pgPage", "#pgImg"].map(x => (d.querySelector(x) || {}).title).join(", ");
+            if (tips !== "Print, Printer Setup, Page Setup, Add Image") return {fail: "its toolbar is " + tips};
+            if (!d.querySelector("#pgView img")) return {fail: "the page has no drawing of the active window"};
+            d.querySelector("#pgPrint").click(); await wait(200);
+            return asked === 1 ? {ok: "the program's Print Graphics window with the page; Print asked for the printer once"} : {fail: `Print asked for the printer ${asked} times`};
+          } finally { window.print = real; closeDialogs(); }
+        },
         "m:open": async () => {
           const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
           if (!saved.ok) return {fail: "the check could not save a model to open: " + saved.error};
@@ -631,13 +668,115 @@ public static class ModelerCheck
           const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
           return off.length ? {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")} : {ok: `Analyze ${an.length} items, Draw ${dr.length} items, in the program's order and words`};
         });
+        // Design > Steel Connection Design (its submenu and View/Revise Preferences), Live Load Reduction Factors and the
+        // lateral displacement and time period targets, as the 23.2 pictures show them (field/reference-forms/etabs/Design):
+        // each form set as an engineer sets it, OK, and the model holds what was set.
+        await step("Steel Connection Design, Live Load Reduction and design target forms, as the program has them (23.2 pictures)", async () => {
+          if (typeof etcPrefs !== "function") return {fail: "the forms are not on the page"};
+          const said = [], last = () => { const f = document.querySelectorAll(".dlg"); return f[f.length - 1]; };
+          const read = async () => { const j = await hmPost({tool: "design_settings", args: {}}); return j && j.ok ? j.result : {}; };
+          const words = l => (l || []).filter(Boolean).map(x => x[0]);
+          const sub = words(etcConnectionMenu()), want = ["View/Revise Preferences...", "Select Design Combinations...", "Start Design/Check", "Interactive Design", "Display Design Info...", "Verify All Connections Passed...", "Reset All Overwrites...", "Delete Design Results..."];
+          if (JSON.stringify(sub) !== JSON.stringify(want)) return {fail: "Steel Connection Design submenu: " + sub.join(" | ")};
+          await etcPrefs(); await wait(300);
+          let d = last(), title = d ? d.querySelector(".dt b").textContent : "";
+          if (!/^Steel Connection Design Preferences for AISC 360-/.test(title)) return {fail: "the preferences form is titled " + title};
+          const tabs = [...d.querySelectorAll("#etcT [data-t]")].map(b => b.textContent), types = d.querySelector("#etcTy").options.length, rows = d.querySelectorAll("#etcB tr").length;
+          if (tabs.join("|") !== "Beam-Beam|Beam-Column|Column-Footing" || types !== 4 || rows !== 18) return {fail: `tabs ${tabs.join("|")}, ${types} types, ${rows} rows (want 3 tabs, 4 types, 18 rows)`};
+          const spacing = [...d.querySelectorAll("#etcB tr")].find(tr => /^Bolt Spacing, S/.test(tr.children[1].textContent)).querySelector("input");
+          spacing.value = etcUS() ? "3.5" : "88.9"; spacing.dispatchEvent(new Event("change"));
+          formOk("OK"); await wait(1500);
+          let st = await read();
+          const kept = (st.connection || []).find(r => r.Group === "Beam-Beam|Partial Depth" && r.Item === "Bolt Spacing, S");
+          if (!kept || Math.abs(Number(kept.Value) - 3.5) > 1e-6) return {fail: "the bolt spacing was not kept: " + JSON.stringify(st.connection || [])};
+          said.push("connection preferences kept");
+          await etcLiveLoadReduction(); await wait(300); d = last();
+          const radios = d.querySelectorAll("input[name=llM]").length, codes = d.querySelector("#llC").options.length;
+          if (radios !== 5 || codes !== 13) return {fail: `Live Load Reduction Factor has ${radios} methods and ${codes} codes (want 5 and 13)`};
+          d.querySelector("input[name=llM][value=User]").click(); d.querySelector("input[name=llM][value=User]").dispatchEvent(new Event("change"));
+          formOk("OK"); await wait(1500); st = await read();
+          const llrf = (st.live_load_reduction || []).find(r => r.Row === "Form");
+          if (!llrf || llrf.Method !== "User") return {fail: "User Parameters was not kept: " + JSON.stringify(st.live_load_reduction || [])};
+          await hmRun("set_live_load_reduction", {method: "Code", code: "ASCE7-10", default_min: true}, true);
+          said.push("live load reduction kept");
+          await etcDisplacementTargets(); await wait(300); d = last();
+          d.querySelector("#dtA").click(); await wait(100);
+          const target = d.querySelectorAll("#dtG tbody tr").length;
+          if (target !== 1) return {fail: "Add made " + target + " displacement targets"};
+          formOk("OK"); await wait(1500); st = await read();
+          if ((st.displacement_targets || []).length !== 1) return {fail: "the displacement target was not kept: " + JSON.stringify(st.displacement_targets || [])};
+          for (const c of new Set(st.displacement_targets.map(r => r.StaticCase))) await hmRun("define_table_rows", {table: "Design Optimization - Lateral Displacement Targets", name: c, rows: []}, true);
+          said.push("a displacement target kept");
+          hm.defs = null; if (!((await hmDefs()).load_cases || []).some(c => /^Modal/i.test(c.type || ""))) { said.push("no modal case for a time period target"); return {ok: said.join("; ")}; }
+          await etcPeriodTargets(); await wait(300); d = last();
+          d.querySelector("#ptA").click(); await wait(100);
+          if (d.querySelectorAll("#ptG tbody tr").length !== 1) return {fail: "Add made no time period target"};
+          formOk("OK"); await wait(1500); st = await read();
+          if ((st.period_targets || []).length !== 1) return {fail: "the time period target was not kept: " + JSON.stringify(st.period_targets || [])};
+          for (const c of new Set(st.period_targets.map(r => r.ModalCase))) await hmRun("define_table_rows", {table: "Design Optimization - Time Period Targets", name: c, rows: []}, true);
+          said.push("a time period target kept");
+          return {ok: said.join("; ")};
+        });
+        // The Select menu in the program's order and words (pictures in field/reference-forms/<program>/Select): its
+        // Select > Object Type... form selects every beam, and Deselect takes them off again.
+        await step("Select menu, as the program has it (23.2 pictures), and Select by Object Type selects the beams", async () => {
+          const m = programMenus(), words = l => (l || []).filter(Boolean).map(x => x[0]), sub = (l, n) => ((l || []).find(x => x && x[0] === n) || [])[1];
+          const top = words(m.Select), s1 = words(sub(m.Select, "Select"));
+          const wantTop = ["Select", "Deselect", "Invert Selection", "Get Previous Selection", "Clear Selection"], want1 = ["Pointer/Window", "Intersecting Line", "Object Type...", "Properties", "Labels", "Groups...", "Stories...", "All"];
+          if (JSON.stringify(top) !== JSON.stringify(wantTop) || JSON.stringify(s1) !== JSON.stringify(want1)) return {fail: "Select: " + top.join(" | ") + "; Select >: " + s1.join(" | ")};
+          sel.clear(); selJ.clear(); selChanged();
+          await act("m:ets:type"); await wait(600);
+          const d = [...document.querySelectorAll(".dlg")].pop(), l = d && d.querySelector("#esL");
+          if (!l) return {fail: "Object Type... opened no Select by Object Type form"};
+          [...l.options].forEach(o => { o.selected = o.value === "Beams"; });
+          const press = label => [...d.querySelectorAll(".df button")].find(b => b.textContent === label).click();
+          press("Select"); await wait(400);
+          const beams = frames.filter(f => f.kind === "beam").length, got = [...sel].filter(id => (objOf(id) || {}).kind === "beam").length;
+          press("Deselect"); await wait(400); const left = sel.size; closeDialogs();
+          if (!beams) return {fail: "the model has no beam"};
+          if (got !== beams || sel.size !== 0 && left) return {fail: `Select chose ${got} of ${beams} beams; Deselect left ${left}`};
+          return {ok: `menu in order; Object Type > Beams selected all ${beams} beams, Deselect took them off`};
+        });
+        // The View menu in the program's order and words (pictures in field/reference-forms/<program>/View), and
+        // Set Building View Limits hiding what lies outside its plan box.
+        await step("View menu, as the program has it (23.2 pictures), and Set Building View Limits hides what is outside", async () => {
+          const m = programMenus(), words = (m.View || []).filter(Boolean).map(x => x[0]);
+          const want = ["Set 3D View...", "Set Plan View...", "Set Elevation View...", "Set Building View Limits...", "Set Display Options...", "Rubber Band Zoom", "Restore Full View", "Previous Zoom", "Zoom In One Step", "Zoom Out One Step", "Pan", "Walk", "Measure", "Set Grid System Visibility...", "Show Axes", "Change Axes Location...", "Show Selected Objects Only", "Invert Visibility of Objects", "Make Selected Objects Invisible", "Restore Visibility of Previous Selection", "Show All Objects", "Refresh Window", "Refresh View", "Show Rendered View (Ray Tracing)", "DirectX View Settings"];
+          if (JSON.stringify(words) !== JSON.stringify(want)) return {fail: "View: " + words.join(" | ")};
+          const all = frames.concat(areas); if (!all.length) return {fail: "the model has no objects"};
+          const xs = all.flatMap(o => (o.type === "f" ? [o.a, o.b] : o.pts).map(q => q[0])), x0 = Math.min(...xs), x1 = Math.max(...xs);
+          if (!(x1 - x0 > 0)) return {fail: "the model has no width in X"};
+          await act("m:etv:limits"); await wait(500);
+          let d = [...document.querySelectorAll(".dlg")].pop(); if (!d || !d.querySelector("#blX1")) return {fail: "Set Building View Limits... opened no form"};
+          d.querySelector("#blX1").value = String(L(x0 + (x1 - x0) / 2)); [...d.querySelectorAll(".df button")].find(b => b.textContent === "OK").click(); await wait(400);
+          const kept = all.filter(o => etvInLimits(o)).length;
+          await act("m:etv:limits"); await wait(400); d = [...document.querySelectorAll(".dlg")].pop();
+          d.querySelector("#blI").checked = true; [...d.querySelectorAll(".df button")].find(b => b.textContent === "OK").click(); await wait(300);
+          const back = all.filter(o => etvInLimits(o)).length; etv.limits = null; closeDialogs(); draw();
+          if (!(kept < all.length && kept >= 0) || back !== all.length) return {fail: `limits kept ${kept} of ${all.length}; Ignore Limits showed ${back}`};
+          return {ok: `menu in order; the half-width limits showed ${kept} of ${all.length} objects, Ignore Limits all of them`};
+        });
+        // The Options menu in the program's order and words (pictures in field/reference-forms/<program>/Options), and
+        // Set Tolerances read back from the model after OK.
+        await step("Options menu, as the program has it (23.2 pictures), and Set Tolerances reaches the model", async () => {
+          const m = programMenus(), words = (m.Options || []).filter(Boolean).map(x => x[0]).filter(x => x !== "Engine Extras");
+          const want = ["Display Units...", "Database", "Tolerances...", "Arrange Windows...", "Graphics Preferences...", "Architectural Plan Options...", "Graphics Colors", "Graphics Mode", "Allow Multiple Towers", "Show Start Page at Startup", "Show Value at Cursor for Assign/Design", "Show Frame Information in Local Plane", "Show Bounding Plane", "Architectural Dimensioning", "Moment Diagrams on Tension Side", "Animation Sound", "Auto Save Model...", "Save User Default Settings", "Reset User Default Settings", "Customize Toolbars", "Reset Default Toolbars", "Show Crosshairs", "Show Model Explorer"];
+          if (JSON.stringify(words) !== JSON.stringify(want)) return {fail: "Options: " + words.join(" | ")};
+          await act("m:eto:tolerances"); await wait(700);
+          const box = document.querySelector('.dlg [data-f="MaxInclVertCol"]'); if (!box) return {fail: "Tolerances... opened no Set Tolerances form"};
+          box.value = "2"; formOk("OK"); await wait(1200);
+          const j = await hmPost({tool: "program_forms", args: {table: "Preferences - Tolerance"}});
+          const got = j.ok ? (j.result.items.find(i => i.field === "MaxInclVertCol") || {}).value : "";
+          await hmRun("set_program_form", {table: "Preferences - Tolerance", values: {MaxInclVertCol: ""}}, true);
+          return String(got) === "2" ? {ok: `${words.length} items in order; Maximum Inclination from Vertical for Columns 2 reached the model, then back to the default`} : {fail: "Set Tolerances OK left " + got};
+        });
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL", "m:etf:p3dTxt", "m:etf:p3dStr"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();

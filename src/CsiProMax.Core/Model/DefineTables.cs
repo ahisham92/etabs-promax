@@ -105,12 +105,19 @@ public static class DefineTables
         ["Named Sets - Pushover"] = ["PONamedSet", "Case", "PlotType", "ParamName"],
     };
 
+    public const string DisplacementTargets = "Design Optimization - Lateral Displacement Targets";
+    public const string PeriodTargets = "Design Optimization - Time Period Targets";
+
     /// <summary>Each table and its fields with the names the program shows; the first field is the definition's name.</summary>
     public static readonly IReadOnlyDictionary<string, (string Key, string Label)[]> Tables = WithSap(new Dictionary<string, (string, string)[]>(StringComparer.OrdinalIgnoreCase)
     {
         ["Deck Property Definitions"] = [("Name", "Name"), ("DeckType", "Deck Type"), ("MaterialSlb", "Slab Material"), ("MaterialDck", "Deck Material"), ("SlabDepth", "Slab Depth"), ("RibDepth", "Rib Depth"), ("RibWidthTop", "Rib Width Top"), ("RibWidthBot", "Rib Width Bottom"), ("RibSpacing", "Rib Spacing"), ("DeckShrThk", "Deck Shear Thickness"), ("DeckUnitWt", "Deck Unit Weight"), ("StudDiam", "Shear Stud Diameter"), ("StudHeight", "Shear Stud Height"), ("StudFu", "Shear Stud Tensile Strength"), ("f11Mod", "f11 Modifier"), ("f22Mod", "f22 Modifier"), ("f12Mod", "f12 Modifier"), ("m11Mod", "m11 Modifier"), ("m22Mod", "m22 Modifier"), ("m12Mod", "m12 Modifier"), ("v13Mod", "v13 Modifier"), ("v23Mod", "v23 Modifier"), ("MMod", "Mass Modifier"), ("WMod", "Weight Modifier"), ("Color", "Color"), ("Notes", "Notes")],
         ["Generalized Displacement Definitions"] = [("Name", "Name"), ("Type", "Type"), ("PointName", "PointName"), ("TransU1SF", "Translational U1 SF"), ("TransU2SF", "Translational U2 SF"), ("TransU3SF", "Translational U3 SF"), ("TransR1SF", "Translational R1 SF"), ("TransR2SF", "Translational R2 SF"), ("TransR3SF", "Translational R3 SF"), ("RotU1SF", "Rotational U1 SF"), ("RotU2SF", "Rotational U2 SF"), ("RotU3SF", "Rotational U3 SF"), ("RotR1SF", "Rotational R1 SF"), ("RotR2SF", "Rotational R2 SF"), ("RotR3SF", "Rotational R3 SF")],
         ["Shell Uniform Load Sets"] = [("Name", "Name"), ("LoadPattern", "Load Pattern"), ("LoadValue", "Load Value")],
+        // ETABS 23.2's Design > Set Lateral Displacement Targets and Set Time Period Targets (pictures Design/97-99b), by
+        // ETABS's own table fields; each kept by its load case (the first field), every target of the case a row.
+        [DisplacementTargets] = [("StaticCase", "Static Load Case"), ("Story", "Story"), ("Label", "Joint Label"), ("UniqueName", "UniqueName"), ("MaxDispl", "Maximum Displacement"), ("Active", "Active?")],
+        [PeriodTargets] = [("ModalCase", "Modal Load Case"), ("ModeNum", "Mode Number"), ("TargetPeriod", "Target Time Period"), ("Active", "Active?")],
         // ETABS 23.2's Define > Spring Properties > Soil Profiles and Isolated Column Footings, by the names its
         // Show Tables heads the columns with (field/reference-forms/etabs/Define/Tables, Spring Soil Profiles and
         // Spring Isolated Column Footings); EditableTables.Put finds each one's field key by that name.
@@ -164,6 +171,8 @@ public static class DefineTables
         foreach (var (t, fields) in ProgramForms.WallOverwriteCatalog()) etabs[t] = fields.Select(f => (f.Key, f.Label)).ToArray();
         // ETABS's own load pattern (auto seismic, wind, notional) and load case tables (Ahmed 2026-11-27, every form).
         foreach (var (t, fields) in EtabsLoadTables.Fields) etabs[t] = fields;
+        // ETABS's Detailing > Drawing Management forms, kept by the Engine only (EtabsDetailingTables).
+        foreach (var (t, fields) in EtabsDetailingTables.Tables) etabs[t] = fields;
         return etabs;
     }
 

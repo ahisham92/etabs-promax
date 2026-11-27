@@ -52,7 +52,7 @@ public static class ModelerTables
         }
         // The definitions the .e2k has no keyword for (generalized displacements, hinges, layers, ...), by name.
         // Soil profiles and column footings go in ahead of the point springs that name them.
-        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key))
+        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key) && !EtabsDetailingTables.IsEngineOnly(t.Key))
                      .OrderBy(t => t.Key.Equals(DefineTables.SoilProfiles, StringComparison.OrdinalIgnoreCase) || t.Key.Equals(DefineTables.ColumnFootings, StringComparison.OrdinalIgnoreCase) ? 0 : 1).ThenBy(t => t.Key, StringComparer.Ordinal))
         {
             try
@@ -157,7 +157,7 @@ public static class ModelerTables
     public static bool HasRows(string cpm, CsiProgram program)
     {
         var model = ModelFile.Load(cpm);
-        return ProgramCarry.Has(model, program) || AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.FrameSections.Any(x => x.Tables is not null || FrameTableShapes.Is(x.Shape)) || (model.DefinitionTables ?? []).Keys.Any(k => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, k))))
+        return ProgramCarry.Has(model, program) || AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.FrameSections.Any(x => x.Tables is not null || FrameTableShapes.Is(x.Shape)) || (model.DefinitionTables ?? []).Keys.Any(k => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, k) && !EtabsDetailingTables.IsEngineOnly(k))))
             || (program.Key != CsiProgram.Sap2000.Key && SlabDefs.SlabRebars(model).Count > 0);
     }
 
@@ -278,6 +278,8 @@ public static class ModelerTables
         "story definitions" => "Story",
         "mass source definition" => "Name|LoadPattern",
         "load pattern definitions - auto notional loads" => "LoadPattern",
+        "design optimization - lateral displacement targets" => "StaticCase|Story|Label",
+        "design optimization - time period targets" => "ModalCase|ModeNum",
         "spring property definitions - soil profiles" => "Name|Soil Layer Name",
         // A form's table (design preferences, analysis options) has one row and no name: its row is that one.
         _ when ProgramForms.IsWallOverwrite(table) => table.Contains("Pier Design", StringComparison.OrdinalIgnoreCase) ? "Pier|Story" : "Spandrel|Story",
