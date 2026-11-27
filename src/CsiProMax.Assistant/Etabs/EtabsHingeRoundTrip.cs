@@ -50,7 +50,7 @@ public static class EtabsHingeRoundTrip
         {
             var json = new JsonObject { ["table"] = table, ["name"] = name, ["rows"] = new JsonArray(rows.Select(r => (JsonNode)new JsonObject(r.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)))).ToArray()) };
             ctx.Tool("define_table_rows", json.ToJsonString(), a => FieldContext.Expect(Int(a["rows"]) == rows.Count,
-                $"{table}: {name} holds {a["rows"]} rows, the form set {rows.Count}"), $"ETABS form Hinge Property Data ({Form(table)}): {name} set as the form sets it");
+                $"{table}: {name} holds {a["rows"]} rows, the form set {rows.Count}"), $"ETABS form Hinge Property Data ({Form(table)}): {name} set as the form sets it"); // ETABS itself
         }
     }
 
@@ -60,23 +60,23 @@ public static class EtabsHingeRoundTrip
         var link = ctx.Link;
         if (material is null) return;
         foreach (var (table, name, rows) in All())
-            ctx.Step($"ETABS form Hinge Property Data ({Form(table)}): ETABS holds every value the Engine's form set", () =>
+            ctx.Step($"ETABS form Hinge Property Data ({Form(table)}): ETABS holds every value the Engine's form set", () => // ETABS itself
             {
-                if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no ETABS table to read back");
+                if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no ETABS table to read back"); // ETABS itself
                 TableData data;
                 try { data = link.ReadTable(table, null, null); }
-                catch (EtabsException ex) { throw new FieldCheckException($"{table}: ETABS did not read it back ({ex.Message})"); }
+                catch (EtabsException ex) { throw new FieldCheckException($"{table}: ETABS did not read it back ({ex.Message})"); } // ETABS itself
                 var fields = data.Fields.ToArray();
                 string? Get(string[] r, string f) => Array.FindIndex(fields, x => x.Equals(f, StringComparison.OrdinalIgnoreCase)) is var at && at >= 0 && at < r.Length ? r[at] : null;
                 var mine = data.Rows.Where(r => Get(r, "Name") == name).ToList();
-                FieldContext.Expect(mine.Count > 0, $"{table}: ETABS has no row for {name}");
+                FieldContext.Expect(mine.Count > 0, $"{table}: ETABS has no row for {name}"); // ETABS itself
                 var wrong = new List<string>();
                 for (var i = 0; i < rows.Count; i++)
                 {
                     // ETABS may order or split the rows its own way: the row of the hinge that holds most of what the form set.
                     var best = mine.OrderByDescending(r => rows[i].Count(kv => Same(kv.Value, Get(r, kv.Key)))).First();
                     foreach (var (field, value) in rows[i])
-                        if (!Same(value, Get(best, field))) wrong.Add($"row {i + 1} {field}: form {value}, ETABS {Get(best, field) ?? "(no field)"}");
+                        if (!Same(value, Get(best, field))) wrong.Add($"row {i + 1} {field}: form {value}, ETABS {Get(best, field) ?? "(no field)"}"); // ETABS itself
                 }
                 FieldContext.Expect(wrong.Count == 0, $"{table} {name}: " + string.Join("; ", wrong.Take(12)) + (wrong.Count > 12 ? $"; and {wrong.Count - 12} more" : ""));
                 return $"{rows.Count} rows, every field the same";
