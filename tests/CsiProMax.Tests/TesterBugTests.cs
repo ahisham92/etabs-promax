@@ -952,6 +952,29 @@ static class TesterBugTests
             foreach (var part in new[] { "read every model table", "run the analysis", "run the design", "read every result and design table", "  model table ", "  result table " })
                 Check(src.Contains("Mark(\"" + part, StringComparison.Ordinal), "not noted: " + part);
         });
+        yield return ("engine: the run file is named after the model file, not a title copied from another model", () =>
+        {
+            var m = new CsiProMax.Model.StructuralModel { Title = "Eurocode 2-2004 CO-FR-002" };
+            Check(CsiProMax.Assistant.Tools.EngineRun.RunName(new CsiProMax.Assistant.Etabs.OfflineEtabs(m, @"C:\v\HK CP-2013 Ex002.e2k")) == "HK CP-2013 Ex002", "named after the file");
+            Check(CsiProMax.Assistant.Tools.EngineRun.RunName(new CsiProMax.Assistant.Etabs.OfflineEtabs(m)) == "Eurocode 2-2004 CO-FR-002", "a model never saved keeps its title");
+        });
+        yield return ("field test: a stop request ends a running full test at its next step, which is listed as not run", () =>
+        {
+            var stop = Path.Combine(Path.GetTempPath(), "real-models-stop-" + Guid.NewGuid().ToString("N") + ".stop");
+            File.WriteAllText(stop, "now");
+            var field = typeof(CsiProMax.Assistant.FieldTest).GetField("_stopFile", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+            try
+            {
+                field.SetValue(null, stop);
+                var ctx = new CsiProMax.Assistant.FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new CsiProMax.Assistant.Etabs.OfflineEtabs());
+                var ran = false;
+                ctx.Step("a step after the stop", () => { ran = true; return "ran"; });
+                Check(!ran, "the step ran after the stop request");
+                Check(ctx.Steps.Count == 1 && ctx.Steps[0].Skipped && ctx.Steps[0].Detail.Contains("stopped on request", StringComparison.Ordinal), "the step is not listed as stopped");
+                Check(CsiProMax.Assistant.FieldTest.StopFileFor(@"C:\a\field-test.lock").EndsWith("field-test.stop", StringComparison.Ordinal), "the stop file sits beside the lock");
+            }
+            finally { field.SetValue(null, null); File.Delete(stop); }
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
