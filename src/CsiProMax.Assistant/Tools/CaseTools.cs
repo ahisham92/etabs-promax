@@ -30,9 +30,12 @@ public static class CaseTools
             "Adds or changes a response spectrum or time history function (Define > Functions). from 'points': the [x, y] pairs given (period and Sa in g, or time and value). from 'code': a code's spectrum (ASCE 7, IBC, Eurocode 8, ECP 201, IS 1893, UBC 97, NBCC, with the inputs lateral_codes lists for it). from 'sine', 'cosine' or 'ramp': a time history wave of the given period, cycles, amplitude and steps (a ramp with ramp_time and max_time: up to the amplitude at ramp_time, held to max_time). 'sawtooth' (period, ramp_time, cycles, amplitude), 'triangular' (period, cycles, amplitude), 'periodic' (points of one cycle, repeated cycles times). 'file': points read from a file by the form (file, header_lines, prefix_chars, ... kept with it). preview true returns the points and changes nothing (the form's Function Graph and Convert to User Defined).",
             """
             {"type":"object","required":["name","kind"],"properties":{
-              "name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["spectrum","history"]},
+              "name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["spectrum","history","psd","steady"],"description":"psd (power spectral density) and steady (steady state) are SAP2000's own: points [frequency, value], with sap_table."},
+              "sap_table":{"type":"string","description":"SAP2000's own function table the function is kept in, e.g. 'Function - Response Spectrum - ASCE 7-16' (its code or type and parameters go back to SAP2000 as they are)."},
+              "sap_values":{"type":"object","additionalProperties":{"type":["string","number"]},"description":"That table's parameter fields (SAP2000 field names) for this function."},
+              "sap_points":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"The points SAP2000's table keeps when they differ from the function's own (User Periodic: one cycle)."},
               "from":{"type":"string","enum":["points","code","sine","cosine","ramp","sawtooth","triangular","periodic","file"],"description":"Default points."},
-              "ramp_time":{"type":"number"},"max_time":{"type":"number"},"preview":{"type":"boolean"},
+              "ramp_time":{"type":"number"},"max_time":{"type":"number"},"preview":{"type":"boolean"},"units":{"type":"string","description":"Frequency Units Hz or RPM (power spectral density, steady state), as the form shows the frequencies."},
               "file":{"type":"object","additionalProperties":{"type":["string","number","boolean"]},"description":"The From File form's fields, kept with the function."},
               "points":{"type":"array","items":{"type":"array","items":{"type":"number"}}},
               "code":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":["string","number"]}},
@@ -81,6 +84,19 @@ public static class CaseTools
         var name = a.Need("name").Trim();
         var kind = a.Need("kind").ToLowerInvariant();
         var from = a.Text("from", "points").ToLowerInvariant();
+        if (kind is not ("spectrum" or "history" or "psd" or "steady")) throw new ToolInputException("kind is spectrum, history, psd or steady.");
+        // SAP2000's own table for the function (its code or type and every parameter, written back to the .s2k as they are).
+        var sapTable = a.Text("sap_table").Trim();
+        if (sapTable.Length > 0)
+        {
+            sapTable = SapFunctions.Table(sapTable) ?? throw new ToolInputException($"There is no SAP2000 function table '{sapTable}'.");
+            if (SapFunctions.KindOf(sapTable) != kind) throw new ToolInputException($"The table \"{sapTable}\" is for {SapFunctions.KindOf(sapTable)} functions, not {kind}.");
+        }
+        else if (kind is "psd" or "steady") throw new ToolInputException("A power spectral density or steady state function is SAP2000's own: give its sap_table.");
+        var sapValues = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (a.TryGetProperty("sap_values", out var sv) && sv.ValueKind == JsonValueKind.Object)
+            foreach (var x in sv.EnumerateObject()) sapValues[x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
+        if (kind is "psd" or "steady" && from is not ("points" or "file")) throw new ToolInputException("A power spectral density or steady state function is from points or a file.");
         List<(double, double)> points;
         if (from is "points" or "periodic" or "file")
         {
@@ -156,6 +172,32 @@ public static class CaseTools
             if (points.Count == 0) throw new ToolInputException("The function has no points.");
             return new JsonObject { ["points"] = new JsonArray(points.Select(p => (JsonNode)Pair(p)).ToArray()) };
         }
+        if (kind is "psd" or "steady")
+        {
+            if (points.Count < 2) throw new ToolInputException($"The function {name} needs two points at least.");
+            for (var i = 1; i < points.Count; i++)
+                if (points[i].Item1 <= points[i - 1].Item1) throw new ToolInputException($"The function {name}: the frequencies must go up ({points[i].Item1} after {points[i - 1].Item1}).");
+            var wasOther = a.Text("was").Trim();
+            return link.Edit(m => Core(() =>
+            {
+                if (wasOther.Length > 0 && wasOther != name)
+                {
+                    if (!AnalysisDefs.DeleteFunction(m, wasOther)) throw new ArgumentException($"There is no function '{wasOther}'.");
+                    foreach (var c in m.LoadCases) foreach (var l in c.Lines) for (var i = 0; i + 1 < l.Count; i++) if (l[i] == "FUNC" && E2kText.Unquote(l[i + 1]) == wasOther) l[i + 1] = E2kText.Quote(name);
+                }
+                // ETABS keeps its own power spectral density and steady state functions in the model file: SAP2000's form takes one over.
+                var same = AnalysisDefs.ListFunctions(m).Find(x => x.Name == name);
+                if (same is not null && same.Kind != (kind == "psd" ? "powerspecdensity" : "steadystate")) throw new ArgumentException($"There is already a function named {name}.");
+                if (same is not null) AnalysisDefs.DeleteFunction(m, name);
+                SapFunctions.Set(m, sapTable, name, sapValues, points);
+                // The form's own choices the table has no field for (User's Frequency Units, From File's file settings).
+                var keepSrc = new Dictionary<string, string> { ["Type"] = from };
+                if (a.Text("units") is { Length: > 0 } units) keepSrc["units"] = units;
+                if (from == "file" && a.TryGetProperty("file", out var ff) && ff.ValueKind == JsonValueKind.Object) foreach (var x in ff.EnumerateObject()) keepSrc["f:" + x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
+                AnalysisDefs.SetFunctionSource(m, name, keepSrc);
+                return (JsonNode)new JsonObject { ["done"] = $"The {(kind == "psd" ? "power spectral density" : "steady state")} function {name}, {points.Count} points.", ["points"] = points.Count, ["first"] = Pair(points[0]), ["last"] = Pair(points[^1]) };
+            }));
+        }
         var f = new FunctionDef(name, kind, points, a.Number("damping", 0.05));
         var was = a.Text("was").Trim();
         // What the definition form showed, so Modify/Show opens it again with the same fields.
@@ -172,8 +214,19 @@ public static class CaseTools
                 if (!AnalysisDefs.DeleteFunction(m, was)) throw new ArgumentException($"There is no function '{was}'.");
                 foreach (var c in m.LoadCases) foreach (var l in c.Lines) for (var i = 0; i + 1 < l.Count; i++) if (l[i] == "FUNC" && E2kText.Unquote(l[i + 1]) == was) l[i + 1] = E2kText.Quote(name);
             }
+            if (SapFunctions.Find(m, name) is { } other && SapFunctions.KindOf(other) is "psd" or "steady") throw new ArgumentException($"There is already a function named {name}.");
             AnalysisDefs.SetFunction(m, f);
             AnalysisDefs.SetFunctionSource(m, name, source);
+            // SAP2000's own rows: set by the SAP2000 form; any other change of the function makes it a plain one again.
+            SapFunctions.Remove(m, name);
+            if (sapTable.Length > 0)
+            {
+                if (kind == "spectrum" && !sapValues.ContainsKey("FuncDamp") && SapFunctions.Tables[sapTable].Contains("FuncDamp")) sapValues["FuncDamp"] = f.Damping.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+                var rowPoints = points;
+                if (a.TryGetProperty("sap_points", out var sp) && sp.ValueKind == JsonValueKind.Array)
+                    rowPoints = sp.EnumerateArray().Select(x => x.EnumerateArray().Select(y => y.GetDouble()).ToArray()).Where(x => x.Length == 2).Select(x => (x[0], x[1])).ToList();
+                SapFunctions.Set(m, sapTable, name, sapValues, rowPoints);
+            }
             return (JsonNode)new JsonObject { ["done"] = $"The {kind} function {name}, {points.Count} points.", ["points"] = points.Count, ["first"] = Pair(points[0]), ["last"] = Pair(points[^1]) };
         }));
     }
@@ -355,7 +408,17 @@ public static class CaseTools
                 ["name"] = f.Name, ["kind"] = f.Kind, ["damping"] = f.Damping, ["points"] = new JsonArray(f.Points.Select(p => (JsonNode)Pair(p)).ToArray()),
                 ["source"] = AnalysisDefs.FunctionSource(m, f.Name) is { } src ? new JsonObject(src.Where(x => x.Key != "Name").Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) : null,
                 ["used_by"] = new JsonArray(AnalysisDefs.UsersOfFunction(m, f.Name).Select(x => (JsonNode)x).ToArray()),
-            }).ToArray()),
+                ["sap_table"] = SapFunctions.Find(m, f.Name),
+                ["sap_values"] = SapFunctions.Find(m, f.Name) is { } st ? new JsonObject(SapFunctions.Parameters(m, st, f.Name).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) : null,
+            }).Concat(SapFunctions.Others(m).Select(f => (JsonNode)new JsonObject
+            {
+                // SAP2000's power spectral density and steady state functions.
+                ["name"] = f.Name, ["kind"] = f.Kind, ["damping"] = 0, ["points"] = new JsonArray(f.Points.Select(p => (JsonNode)Pair(p)).ToArray()),
+                ["source"] = AnalysisDefs.FunctionSource(m, f.Name) is { } src ? new JsonObject(src.Where(x => x.Key != "Name").Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) : null,
+                ["used_by"] = new JsonArray(AnalysisDefs.UsersOfFunction(m, f.Name).Select(x => (JsonNode)x).ToArray()),
+                ["sap_table"] = SapFunctions.Find(m, f.Name),
+                ["sap_values"] = new JsonObject(SapFunctions.Parameters(m, SapFunctions.Find(m, f.Name)!, f.Name).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))),
+            })).ToArray()),
             ["load_cases"] = new JsonArray(m.LoadCases.Select(c =>
             {
                 var d = AnalysisDefs.ReadCase(c);

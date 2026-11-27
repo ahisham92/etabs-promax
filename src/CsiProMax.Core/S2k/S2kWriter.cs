@@ -787,9 +787,19 @@ public static class S2kWriter
     /// <summary>The functions as SAP2000's user function tables.</summary>
     private static void Functions(StructuralModel m, List<string> tables)
     {
-        var fs = AnalysisDefs.ListFunctions(m);
-        Add(tables, "FUNCTION - RESPONSE SPECTRUM - USER", fs.Where(f => f.Kind == "spectrum").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Period", N(p.X)), ("Accel", N(p.Y)), ("FuncDamp", N(f.Damping))))));
-        Add(tables, "FUNCTION - TIME HISTORY - USER", fs.Where(f => f.Kind == "history").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Time", N(p.X)), ("Value", N(p.Y))))));
+        // A function made in SAP2000's own forms (a code spectrum, a sine, From File, a power spectral density ...) goes in
+        // its own table with every parameter, as SAP2000 exports it (SapFunctions); the others as user functions.
+        var fs = AnalysisDefs.ListFunctions(m).Where(f => SapFunctions.Find(m, f.Name) is null).ToList();
+        var own = (m.DefinitionTables ?? []).Where(t => SapFunctions.IsTable(t.Key) && t.Value.Count > 0).ToDictionary(t => SapFunctions.Table(t.Key)!, t => t.Value, StringComparer.OrdinalIgnoreCase);
+        IEnumerable<IReadOnlyList<(string, string)>> Own(string table) => own.TryGetValue(table, out var rows)
+            ? rows.Select(r => (IReadOnlyList<(string, string)>)SapFunctions.Tables[table].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()) : [];
+        Add(tables, "FUNCTION - RESPONSE SPECTRUM - USER", Own("Function - Response Spectrum - User").Concat(fs.Where(f => f.Kind == "spectrum").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Period", N(p.X)), ("Accel", N(p.Y)), ("FuncDamp", N(f.Damping)))))));
+        Add(tables, "FUNCTION - TIME HISTORY - USER", Own("Function - Time History - User").Concat(fs.Where(f => f.Kind == "history").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Time", N(p.X)), ("Value", N(p.Y)))))));
+        // ETABS's own power spectral density and steady state functions (FUNCTYPE in the .e2k) as SAP2000's user ones.
+        Add(tables, "FUNCTION - POWER SPECTRAL DENSITY - USER", Own("Function - Power Spectral Density - User").Concat(fs.Where(f => f.Kind == "powerspecdensity").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Frequency", N(p.X)), ("Value", N(p.Y)))))));
+        Add(tables, "FUNCTION - STEADY STATE - USER", Own("Function - Steady State - User").Concat(fs.Where(f => f.Kind == "steadystate").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Frequency", N(p.X)), ("Value", N(p.Y)))))));
+        foreach (var t in own.Keys.Where(k => !k.EndsWith(" - User", StringComparison.OrdinalIgnoreCase)).OrderBy(k => k, StringComparer.Ordinal))
+            Add(tables, t.ToUpperInvariant(), Own(t));
     }
 
     /// <summary>The case types beyond linear static and modal: nonlinear static, response spectrum, histories, buckling.</summary>

@@ -4955,7 +4955,7 @@ async function hmProgForm(i, list) {
 function hmDefineMenu() {
   const dt = label => { const x = defTables.find(t => t[0] === label); return x ? only(x[2] || ["etabs"], [program === "sap2000" && x[3] || x[0], "m:dt:" + x[1].join("|")]) : 0; };
   const springs = [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]];
-  const fns = ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"])]];
+  const fns = ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"]), only(["sap2000"], ["Power Spectral Density...", "m:fnPSD"]), only(["sap2000"], ["Steady State...", "m:fnSS"])]];
   const hinges = hmDefineTableItems().slice(-2);
   if (program === "sap2000") return [["Materials...", "m:materials"],
     ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Tendon Sections...", "m:ex:tendonsections"], ["Area Sections...", "m:shellSections"], ["Link/Support Properties...", "m:links"], ...hinges, dt("Panel Zone Properties..."), ["Reinforcing Bar Sizes...", "m:rebarSizes"], 0,
@@ -5025,6 +5025,8 @@ async function modelAct(a) {
     case "asgSupport": return hmAssignSupport();
     case "fnRS": return hmFunctions("spectrum");
     case "fnTH": return hmFunctions("history");
+    case "fnPSD": return hmFunctions("psd");
+    case "fnSS": return hmFunctions("steady");
     case "cases": return hmCases();
     case "mass": return hmMass();
     case "pdelta": return hmPDelta();
@@ -6717,6 +6719,7 @@ async function fnCodes() {
   return r ? r.codes.filter(c => !["User Coefficient", "User Loads"].includes(c.code)) : [];
 }
 async function hmFunctions(kind) {
+  if (program === "sap2000") return hmSapFunctions(kind);
   const spectrum = kind === "spectrum", a = await hmAnalysis(), list = a.functions.filter(f => f.kind === kind), codes = spectrum ? await fnCodes() : [];
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFunctions(kind); };
   const types = fnTypes(spectrum, codes.map(c => c.code));
@@ -6846,6 +6849,2109 @@ async function hmFunction(kind, f, after, type, codesIn) {
   const show = d.querySelector("#fShow"); if (show) show.onclick = preview;
   if (!table && from !== "file") preview(); else fnGraph(q(d, "#fG"), pts);
 }
+
+// ==== SAP2000 26.3 Define > Functions, as SAP2000 shows them (Ahmed 2026-11-27: identical forms, no greyed or missing
+// option). Read from SAP2000 26.3's own forms (pictures in field/reference-forms/sap2000/Define/, RS/ and TH/): Define
+// Response Spectrum Functions (every code of its type list, From File, User), Define Time History Functions (Cosine, From
+// File, Matched to Response Spectrum, Ramp, Sawtooth, Sine, Triangular, User, User Periodic), Define Power Spectral
+// Density Functions and Define Steady State Functions (From File, User). Each function keeps SAP2000's own table and
+// fields (define_function sap_table/sap_values), so it goes back to SAP2000 as that code or type with its parameters.
+const sapFnKinds = {
+  spectrum: {title: "Define Response Spectrum Functions", legend: "Response Spectra", mod: "Modify/Show Spectrum...", del: "Delete Spectrum", group: "Response Spectrum", x: "Period", y: "Acceleration", px: "Period", py: "Accel", def: "AASHTO 2006", name: "Response Spectrum"},
+  history: {title: "Define Time History Functions", legend: "Functions", mod: "Modify/Show Function...", del: "Delete Function", group: "Time History", x: "Time", y: "Value", px: "Time", py: "Value", def: "Cosine", name: "Time History"},
+  psd: {title: "Define Power Spectral Density Functions", legend: "Functions", mod: "Modify/Show Function...", del: "Delete Function", group: "Power Spectral Density", x: "Frequency", y: "Value", px: "Frequency", py: "Value", def: "From File", name: "Power Spectral Density"},
+  steady: {title: "Define Steady State Functions", legend: "Functions", mod: "Modify/Show Function...", del: "Delete Function", group: "Steady State", x: "Frequency", y: "Value", px: "Frequency", py: "Value", def: "From File", name: "Steady State"},
+};
+// SAP2000's "Choose Function Type to Add" lists, in its order.
+const sapRsOrder = ["AASHTO 2006", "AASHTO 2007", "AASHTO 2012", "Argentina INPRES-CIRSOC 103", "AS1170 2007", "ASCE 7-16", "ASCE 7-22", "BOCA 96", "Chile Norma NCh2369-2003", "Chile Norma NCh433+DS61",
+  "Chinese 2010", "CJJ 166-2011", "Colombia NSR-10", "Costa Rica Seismic Code 2010", "Dominican Republic R-001", "Ecuador NEC-11 Capitulo 2", "Ecuador Norma NEC-SE-DS 2015", "EuroCode8 1994", "EuroCode8 2004", "From File",
+  "GB50111-2006", "Guatemala AGIES NSE 2-10", "IBC 2003", "IBC 2006", "IBC 2009", "IBC 2012", "IS 1893-2016", "IS1893 2002", "Italian 3274", "Italian NTC 2008", "Italian NTC 2018", "JTG/T 2231-01-2020", "JTG/T B02-2013",
+  "KBC 2016", "KDS 41 17 00:2019", "Korean KBC 2009", "Mexico CFE-2008", "Mexico CFE-93", "Mexico NTC-2004", "NBCC 2005", "NBCC 2010", "NBCC 2015", "NBCC 2020", "NBCC 95", "NCHRP20-07", "NEHRP 97", "NZS 1170.5-2016", "NZS 4203",
+  "Peru Norma E.030", "Peru NTE E.030 2014", "SI 413", "SP 14.13330.2014", "TCVN 9386:2012", "TSC 2007", "TSC-2018", "UBC 94", "UBC 97", "User", "Venezuela"];
+const sapFnTypes = kind => kind === "spectrum" ? sapRsOrder.map(n => n === "Venezuela" ? Object.keys(SAP_RS).find(k => k.startsWith("Venezuela")) : n).filter(n => n && (SAP_RS[n] || n === "From File" || n === "User"))
+  : kind === "history" ? ["Cosine", "From File", "Matched to Response Spectrum", "Ramp", "Sawtooth", "Sine", "Triangular", "User", "User Periodic"] : ["From File", "User"];
+// The SAP2000 table of a type, and back.
+const sapFnTable = (kind, type) => kind === "spectrum" && SAP_RS[type] ? SAP_RS[type].table : `Function - ${sapFnKinds[kind].group} - ${type}`;
+const sapFnTypeOf = (kind, table) => {
+  if (!table) return "User";
+  if (kind === "spectrum") { const k = Object.keys(SAP_RS).find(n => SAP_RS[n].table.toLowerCase() === table.toLowerCase()); if (k) return k; }
+  return table.split(" - ").slice(2).join(" - ") || "User";
+};
+// A number as SAP2000's boxes and lists show it: "1.", "0.0675", "5.000E-03".
+// Halves round to even, as SAP2000 shows 0.78125 as 0.7812.
+const sapNum = x => { x = +x; if (!isFinite(x)) return ""; if (x !== 0 && Math.abs(x) < 1e-3) return x.toExponential(3).toUpperCase().replace(/E([+-])(\d)$/, "E$10$2");
+  const t = x * 1e4, f = Math.floor(t), half = Math.abs(t - f - 0.5) < 1e-9, r = (half ? (f % 2 === 0 ? f : f + 1) : Math.round(t)) / 1e4; return Number.isInteger(r) ? r + "." : String(r); };
+const sapKeep = x => typeof x === "number" ? String(+x.toPrecision(10)) : String(x ?? "");
+const sapFolder = () => { try { return localStorage.getItem("cpm.sapFnFolder") || "C:\\Program Files\\Computers and Structures\\SAP2000 26\\"; } catch (e) { return "C:\\Program Files\\Computers and Structures\\SAP2000 26\\"; } };
+
+async function hmSapFunctions(kind) {
+  // ETABS's model file names the kinds powerspecdensity and steadystate.
+  const K = sapFnKinds[kind], a = await hmAnalysis(), list = a.functions.filter(f => f.kind === kind || f.kind === {psd: "powerspecdensity", steady: "steadystate"}[kind]), types = sapFnTypes(kind);
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmSapFunctions(kind); };
+  const d = dialog(K.title, `<div style="display:flex;gap:12px">
+      <fieldset style="flex:1;margin:0"><legend>${K.legend}</legend>
+      <select id="sfL" size="12" style="width:100%;height:auto;min-width:150px">${list.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("")}</select></fieldset>
+      <div style="width:170px;display:flex;flex-direction:column;gap:6px">
+      <fieldset style="margin:0"><legend>Choose&nbsp; Function Type to Add</legend><select id="sfT" style="width:100%">${opts(types, K.def)}</select></fieldset>
+      <fieldset style="margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">
+      <button id="sfAdd">Add New Function...</button><button id="sfMod">${K.mod}</button><button id="sfDel">${K.del}</button></div></fieldset>
+      <fieldset style="margin:0"><legend>Default Function Folder <span title="The folder Browse... starts in for function files">&#9432;</span></legend>
+      <div style="display:flex;gap:6px;align-items:center"><span id="sfF" style="flex:1;font-size:11px;word-break:break-all">${esc(sapFolder())}</span><button id="sfFB" title="Choose the default function folder">&#128193;</button></div></fieldset></div></div>`,
+    [["OK"], ["Cancel"]], {width: 380});
+  const L = q(d, "#sfL"); if (list.length) L.selectedIndex = 0;
+  const mod = () => { const f = list.find(x => x.name === L.value); if (f) hmSapFunction(kind, sapFnTypeOf(kind, f.sap_table), f, again, a); };
+  q(d, "#sfAdd").onclick = () => hmSapFunction(kind, q(d, "#sfT").value, null, again, a);
+  q(d, "#sfMod").onclick = mod; L.ondblclick = mod;
+  q(d, "#sfDel").onclick = () => L.value && hmRun("delete_definition", {kind: "function", name: L.value}, true).then(j => j.ok ? again() : hmSay(j.error, true));
+  q(d, "#sfFB").onclick = () => {
+    const f = dialog("Default Function Folder", `<div class="g2"><span>Folder</span><input id="sfFN" style="width:300px" value="${esc(sapFolder())}"></div>`, [["OK", x => {
+      const v = q(x, "#sfFN").value.trim(); if (!v) return false; try { localStorage.setItem("cpm.sapFnFolder", v); } catch (e) {} q(d, "#sfF").textContent = v; }], ["Cancel"]], {width: 420});
+    q(f, "#sfFN").select();
+  };
+}
+
+// The Function Graph as SAP2000 draws it: white, a fine black grid with red lines every fifth, the function in blue; the
+// box under it shows the point under the mouse.
+function sapGraph(el, pts, readout, more, color) {
+  const W = 400, H = 200, gx = 30, gy = 20;
+  if (!pts || pts.length < 2) { el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;background:#fff;border:1px solid #888"></svg>`; return; }
+  const all = pts.concat(...(more || []).map(m => m.pts)), xs = all.map(p => p[0]), ys = all.map(p => p[1]), xa = Math.min(...xs), xb = Math.max(...xs), ya = Math.min(0, ...ys), yb = Math.max(0, ...ys) || 1;
+  const X = x => 8 + (x - xa) / ((xb - xa) || 1) * (W - 16), Y = y => H - 8 - (y - ya) / ((yb - ya) || 1) * (H - 16);
+  let grid = "";
+  for (let i = 0; i <= gx; i++) { const x = 8 + i * (W - 16) / gx; grid += `<line x1="${x}" x2="${x}" y1="8" y2="${H - 8}" stroke="${i % 5 ? "#000" : "#e00"}" stroke-width="${i % 5 ? 0.3 : 0.7}"/>`; }
+  for (let i = 0; i <= gy; i++) { const y = 8 + i * (H - 16) / gy; grid += `<line y1="${y}" y2="${y}" x1="8" x2="${W - 8}" stroke="${i % 5 ? "#000" : "#e00"}" stroke-width="${i % 5 ? 0.3 : 0.7}"/>`; }
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;background:#fff;border:1px solid #888;cursor:crosshair">${grid}
+    <polyline fill="none" stroke="${color || "#1010e0"}" stroke-width="2" points="${pts.map(p => X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1)).join(" ")}"/>
+    ${(more || []).map(m => `<polyline fill="none" stroke="${m.color}" stroke-width="1.5" points="${m.pts.map(p => X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1)).join(" ")}"/>`).join("")}</svg>`;
+  const svg = el.firstChild;
+  if (readout) svg.onmousemove = e => { const r = svg.getBoundingClientRect(), sx = (e.clientX - r.left) / r.width * W, sy = (e.clientY - r.top) / r.height * H;
+    readout.value = `${sapNum(xa + (sx - 8) / (W - 16) * (xb - xa))},${sapNum(ya + (H - 8 - sy) / (H - 16) * (yb - ya))}`; };
+}
+
+// The parts every definition form shares: Function Name (and the damping box of a spectrum), the Define Function list,
+// the Function Graph with Display Graph and its readout.
+const sapNameRow = (kind, name, damp) => kind === "spectrum"
+  ? `<div style="display:flex;gap:10px;align-items:flex-end"><fieldset style="flex:1;margin:0"><div style="display:flex;align-items:center;gap:10px;justify-content:center"><b>Function Name</b><input id="sfN" value="${esc(name)}" style="width:150px"></div></fieldset>
+     <fieldset style="margin:0;min-width:130px"><legend style="white-space:nowrap">Function Damping Ratio</legend><input id="sfD" type="number" step="any" value="${esc(damp)}" style="width:100%"></fieldset></div>`
+  : `<fieldset style="margin:0"><div style="display:flex;align-items:center;gap:10px;justify-content:center"><b>Function Name</b><input id="sfN" value="${esc(name)}" style="width:150px"></div></fieldset>`;
+const sapListBox = (K, entry, rows) => `<div style="display:flex;gap:6px"><div style="width:190px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;text-align:center;font-size:11px"><span>${K.x}</span><span>${K.y}</span></div>
+    ${entry ? `<div style="display:grid;grid-template-columns:1fr 1fr"><input id="sfX" style="width:100%"><input id="sfY" style="width:100%"></div>` : ""}
+    <div class="scroll" style="height:${rows ? rows * 18 : 110}px;border:1px solid #888;background:#fff"><table class="list hmgrid" style="width:100%"><tbody id="sfRows"></tbody></table></div></div>
+    <div style="display:flex;flex-direction:column;gap:5px;width:60px"><button id="sfA" ${entry ? "" : "disabled"}>Add</button><button id="sfM" ${entry ? "" : "disabled"}>Modify</button><button id="sfR" ${entry ? "" : "disabled"}>Delete</button></div></div>`;
+const sapGraphBox = (btn) => `<fieldset style="margin:0"><legend>Function Graph</legend><div id="sfG"></div>
+    <div style="display:flex;justify-content:space-around;margin-top:6px"><button id="sfShow">${btn || "Display Graph"}</button><input id="sfXY" readonly value="0.0,0.0" style="width:110px;text-align:center"></div></fieldset>`;
+
+async function hmSapFunction(kind, type, f, after, a) {
+  a = a || await hmAnalysis();
+  if (kind === "history" && type === "Matched to Response Spectrum") return hmSapMatched(f, after, a);
+  if (type === "From File") return hmSapFromFile(kind, f, after);
+  if (type === "User") return hmSapUser(kind, f, after);
+  if (kind === "spectrum") return hmSapCode(type, f, after);
+  return hmSapWave(type, f, after);
+}
+// The name of a new function: FUNC1, FUNC2 ... not yet used.
+async function sapNewName() { const a = await hmAnalysis(), used = new Set(a.functions.map(f => f.name)); let i = 1; while (used.has("FUNC" + i)) i++; return "FUNC" + i; }
+function sapSave(d, kind, f, args, after) {
+  const name = q(d, "#sfN").value.trim();
+  if (!name) { formError(d, "The function needs a name."); return false; }
+  Object.assign(args, {name, kind, was: f && f.name !== name ? f.name : undefined});
+  // A number as the program writes it ("8." in the box is 8 in its table).
+  if (args.sap_values) for (const k of Object.keys(args.sap_values)) { const x = String(args.sap_values[k]).trim(); args.sap_values[k] = /^-?\d+\.$/.test(x) ? String(+x) : x; }
+  if (kind === "spectrum") { args.damping = fnum(d, "#sfD"); if (!(args.damping >= 0 && args.damping < 1)) { formError(d, "The damping ratio is from 0 to below 1."); return false; } }
+  if (!args.points || args.points.length < 2) { formError(d, "The function needs two points at least."); return false; }
+  return submit(d, "define_function", args, after);
+}
+function sapRowsPaint(d, pts, pick, onPick) {
+  q(d, "#sfRows").innerHTML = pts.map((p, i) => `<tr data-i="${i}" style="cursor:default${i === pick ? ";background:#0078d7;color:#fff" : ""}"><td>${sapNum(p[0])}</td><td>${sapNum(p[1])}</td></tr>`).join("");
+  if (onPick) d.querySelectorAll("#sfRows tr").forEach(r => r.onclick = () => onPick(+r.dataset.i));
+}
+
+// A code's Response Spectrum form, drawn from its spec (SAP_RS): Parameters as SAP2000 lists them, the calculated boxes,
+// the Define Function list (SAP2000 makes the points: its Add, Modify and Delete are greyed), the graph.
+async function hmSapCode(code, f, after) {
+  const S = SAP_RS[code]; if (!S) return hmSay(`There is no ${code} form.`, true);
+  const K = sapFnKinds.spectrum, vals = f && f.sap_values || {}, name = f ? f.name : await sapNewName();
+  const v0 = {}; for (const i of S.items) if (i.k) v0[i.k] = vals[i.k] ?? (i.def ?? "");
+  const item = i => {
+    if (i.hidden) return "";
+    if (i.sep) return `<hr style="grid-column:1/3;width:100%;border:0;border-top:1px solid var(--fgroup)">`;
+    if (i.blank) return `<span style="grid-column:1/3;height:8px"></span>`;
+    if (i.heading) return `<span style="grid-column:1/3">${esc(i.heading)}</span>`;
+    const pad = i.indent ? "padding-left:14px" : "";
+    if (i.radio) return i.radio.map(([val, label]) => `<label style="grid-column:1/3"><input type="radio" name="sr_${esc(i.k)}" data-k="${esc(i.k)}" value="${esc(val)}" ${String(v0[i.k]) === String(val) ? "checked" : ""}> ${esc(label)}</label>`).join("");
+    if (i.check) return `<label style="grid-column:1/3;${pad}"><input type="checkbox" data-k="${esc(i.k)}" ${/^(yes|true|1)$/i.test(String(v0[i.k])) ? "checked" : ""}> ${esc(i.label)}</label>`;
+    // SAP2000's "?" beside the site's latitude, longitude and zip code (the hazard look-up).
+    if (i.help === undefined && /latitude|longitude|zip/i.test(i.label || "") && S.items.some(x => x.radio) && !S.noHelp) i.help = true;
+    const help = i.help ? ` <button type="button" class="sfHelp" data-h="${esc(i.k)}" title="${esc(i.help === true ? "Value from SAP2000's hazard data for this site" : i.help)}" style="padding:0 5px">?</button>` : "";
+    const ctl = i.choices ? `<select data-k="${esc(i.k)}" style="width:110px">${String(v0[i.k]) === "" && !i.choices.some(c => (Array.isArray(c) ? c[0] : c) === "") ? `<option value="" selected></option>` : ""}${opts(i.choices, String(v0[i.k]))}</select>` : `<input data-k="${esc(i.k)}" value="${esc(v0[i.k])}" style="width:110px">`;
+    return `<span data-l="${esc(i.k)}" style="white-space:pre;${pad}">${esc(i.label)}${help}</span>${ctl}`;
+  };
+  // A box SAP2000 puts on the same line as the check box before it (sameRow).
+  const rowsHtml = S.items.map((i, n) => {
+    const next = S.items[n + 1];
+    if (i.check && next && next.sameRow) return item(i).replace("grid-column:1/3;", "");
+    if (i.sameRow && n > 0 && S.items[n - 1].check) return item(i).replace(/^<span[^>]*>.*?<\/span>/, "");
+    return item(i);
+  }).join("");
+  const params = `<fieldset style="margin:0;flex:1;display:flex;flex-direction:column"><legend>Parameters</legend><div class="g2" style="grid-template-columns:1fr auto">${rowsHtml}</div>
+      ${S.convertUnderList ? "" : `<div style="text-align:center;margin-top:auto;padding-top:8px"><button id="sfConv">Convert to User Defined</button></div>`}</fieldset>`;
+  // NZS 1170.5 has Convert to User Defined under its Define Function list.
+  const listFs = `<fieldset style="margin:0"><legend>Define Function</legend>${sapListBox(K, false, S.listRows)}${S.convertUnderList ? `<div style="text-align:center;margin-top:8px"><button id="sfConv">Convert to User Defined</button></div>` : ""}</fieldset>`;
+  const body = sapNameRow("spectrum", name, f ? f.damping : 0.05) + (S.layout === "top"
+    ? `<div style="display:flex;gap:10px;margin-top:8px">${params}${listFs}</div><div style="margin-top:8px">${sapGraphBox(S.graphButton)}</div>`
+    : `<div style="display:flex;gap:10px;margin-top:8px">${params}<div style="width:270px;display:flex;flex-direction:column;gap:8px">${listFs}${sapGraphBox(S.graphButton)}</div></div>`);
+  let pts = [];
+  const d = dialog(S.title, body, [["OK", d => sapSave(d, "spectrum", f, {from: "points", points: pts, sap_table: S.table, sap_values: values()}, after), true], ["Cancel"]], {width: S.layout === "top" ? 700 : 740});
+  const read = () => { const v = {}; d.querySelectorAll("[data-k]").forEach(x => { if (x.type === "radio") { if (x.checked) v[x.dataset.k] = x.value; } else v[x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "No") : x.value; });
+    for (const i of S.items) if (i.k && !(i.k in v)) v[i.k] = String(v0[i.k] ?? ""); v.FuncDamp = q(d, "#sfD").value; return v; };
+  let last = {};
+  const values = () => { const v = read(), out = {}; for (const i of S.items) if (i.k) { const box = d.querySelector(`[data-k="${CSS.escape(i.k)}"]:not([type=radio])`), off = box && box.disabled; const x = off && i.k in last ? last[i.k] : v[i.k]; out[i.k] = sapKeep(!i.choices && !i.radio && /^-?\d+\.$/.test(String(x).trim()) ? +x : x); } return out; };
+  const run = () => {
+    const v = read();
+    // Which boxes SAP2000 greys in this state; a calculated box is filled by the form.
+    for (const i of S.items) if (i.k) d.querySelectorAll(`[data-k="${CSS.escape(i.k)}"]`).forEach(x => { x.disabled = i.en ? !i.en(v) : !!i.out; });
+    let r; try { r = S.calc(v); } catch (e) { r = null; }
+    last = r && r.set || {};
+    // SAP2000 greys the label too when the box is greyed by the state, or is a calculated box left blank.
+    for (const i of S.items) if (i.k) { const l = d.querySelector(`[data-l="${CSS.escape(i.k)}"]`); if (l) l.style.color = (i.en && !i.en(v)) || (i.out && (last[i.k] === "" || last[i.k] === undefined)) ? "#8d8d8d" : ""; }
+    for (const [k, x] of Object.entries(last)) { const box = d.querySelector(`[data-k="${CSS.escape(k)}"]:not([type=radio])`); if (box && box.disabled && box.tagName === "INPUT" && box.type !== "checkbox") box.value = typeof x === "number" ? sapNum(x) : x; else if (box && box.disabled && box.tagName === "SELECT") box.value = x; }
+    pts = r && r.pts ? r.pts.map(p => [+p[0], +p[1]]) : [];
+    formError(d, pts.length >= 2 ? "" : "These parameters give no spectrum: check the values.");
+    sapRowsPaint(d, pts, -1); sapGraph(q(d, "#sfG"), pts, q(d, "#sfXY"));
+  };
+  q(d, ".dt b").style.whiteSpace = "pre"; // SAP2000's own title spacing ("Response Spectrum  IS1893:2002")
+  d.querySelectorAll("[data-k]").forEach(x => { x.onchange = run; x.oninput = run; });
+  q(d, "#sfD").onchange = run;
+  q(d, "#sfShow").onclick = run;
+  d.querySelectorAll(".sfHelp").forEach(b => b.onclick = () => hmSay(b.title));
+  q(d, "#sfConv").onclick = () => { if (pts.length < 2) return; const nm = q(d, "#sfN").value.trim(), damp = q(d, "#sfD").value; d.close();
+    hmSapUser("spectrum", {name: nm, damping: +damp, points: pts, was: f && f.name}, after); };
+  run();
+}
+
+// The Time History types SAP2000 makes from parameters (Cosine, Sine, Ramp, Sawtooth, Triangular, User Periodic).
+const sapWaves = {
+  Cosine: [["Period", "Period", "1."], ["StepsPerCyc", "Number of Steps per Cycle", "20"], ["NumCycles", "Number of Cycles", "5"], ["Amplitude", "Amplitude", "1."]],
+  Sine: [["Period", "Period", "1."], ["StepsPerCyc", "Number of Steps per Cycle", "20"], ["NumCycles", "Number of Cycles", "5"], ["Amplitude", "Amplitude", "1."]],
+  Ramp: [["RampTime", "Ramp Time", "1."], ["Amplitude", "Amplitude", "1."], ["MaxTime", "Maximum Time", "20."]],
+  Sawtooth: [["Period", "Period", "1."], ["RampTime", "Ramp Time", "0.1"], ["NumCycles", "Number of Cycles", "5"], ["Amplitude", "Amplitude", "1."]],
+  Triangular: [["Period", "Period", "1."], ["NumCycles", "Number of Cycles", "5"], ["Amplitude", "Amplitude", "1."]],
+  "User Periodic": [["NumCycles", "Number of Cycles", "5"]],
+};
+// The points of a wave, as SAP2000's Define Function list shows them; an error text when the values cannot make one.
+function sapWavePoints(type, v, cycle) {
+  const n = k => RS.n(v[k]), P = n("Period"), A = n("Amplitude"), C = n("NumCycles"), r9 = x => Math.round(x * 1e9) / 1e9;
+  if (type === "Cosine" || type === "Sine") {
+    const steps = Math.round(n("StepsPerCyc"));
+    if (!(P > 0) || !(steps >= 1) || !(C > 0)) return "The period, steps per cycle and number of cycles are above 0.";
+    const N = Math.round(steps * C); if (N > 100000) return "That is more than 100000 points.";
+    return Array.from({length: N + 1}, (_, i) => { const t = i * P / steps, w = 2 * Math.PI * t / P; return [r9(t), r9(A * (type === "Sine" ? Math.sin(w) : Math.cos(w)))]; });
+  }
+  if (type === "Ramp") { const rt = n("RampTime"), mt = n("MaxTime"); if (!(rt > 0) || !(mt > rt)) return "The ramp time is above 0 and the maximum time above the ramp time."; return [[0, 0], [rt, A], [mt, A]]; }
+  if (type === "Sawtooth" || type === "Triangular") {
+    if (!(P > 0) || !(C >= 1) || C > 100000) return "The period is above 0 and the number of cycles 1 or more.";
+    const rt = n("RampTime");
+    if (type === "Sawtooth" && !(rt > 0 && rt <= P / 4)) return "The ramp time is above 0 and at most a quarter of the period.";
+    const one = type === "Sawtooth" ? [[rt, A], [P / 2 - rt, A], [P / 2, 0], [P / 2 + rt, -A], [P - rt, -A], [P, 0]] : [[P / 4, A], [P / 2, 0], [3 * P / 4, -A], [P, 0]];
+    const out = [[0, 0]]; for (let c = 0; c < Math.round(C); c++) for (const [t, y] of one) out.push([r9(c * P + t), y]);
+    return out.filter((p, i) => i === 0 || p[0] > out[i - 1][0]);
+  }
+  if (type === "User Periodic") {
+    if (!cycle || cycle.length < 2) return "Define one cycle: two points at least.";
+    if (!(C >= 1) || C * cycle.length > 100000) return "The number of cycles is 1 or more (100000 points at most).";
+    const span = cycle[cycle.length - 1][0] - cycle[0][0], out = cycle.map(p => [...p]);
+    for (let c = 1; c < Math.round(C); c++) for (const p of cycle.slice(1)) out.push([r9(p[0] + c * span), p[1]]);
+    return out;
+  }
+  return "There is no such time history type.";
+}
+async function hmSapWave(type, f, after) {
+  const K = sapFnKinds.history, P = sapWaves[type]; if (!P) return hmSay(`There is no ${type} form.`, true);
+  const vals = f && f.sap_values || {}, name = f ? f.name : await sapNewName(), periodic = type === "User Periodic";
+  // User Periodic keeps its one cycle in SAP2000's table rows: the points of the function up to the first cycle's end.
+  let cycle = periodic && f ? (() => { const c = Math.max(1, Math.round(RS.n(vals.NumCycles) || 1)), p = f.points.map(x => [x[0], x[1]]); if (c <= 1) return p; const span = (p[p.length - 1][0] - p[0][0]) / c; return p.filter(x => x[0] <= p[0][0] + span + 1e-9); })() : [];
+  const d = dialog(`Time History ${type} Function Definition`, sapNameRow("history", name) + `<div style="display:flex;gap:10px;margin-top:8px">
+      <fieldset style="margin:0;flex:1"><legend>Parameters</legend><div class="g2" style="grid-template-columns:1fr 90px">${P.map(([k, label, def]) => `<span>${esc(label)}</span><input data-k="${k}" value="${esc(vals[k] ?? def)}">`).join("")}</div>
+        <div style="text-align:center;margin-top:14px"><button id="sfConv">Convert to User Defined</button></div></fieldset>
+      <fieldset style="margin:0"><legend>Define Function</legend>${sapListBox(K, periodic)}</fieldset></div><div style="margin-top:8px">${sapGraphBox()}</div>`,
+    [["OK", d => { const p = make(); if (typeof p === "string") { formError(d, p); return false; }
+      const sv = {}; d.querySelectorAll("[data-k]").forEach(x => sv[x.dataset.k] = x.value.trim());
+      return sapSave(d, "history", f, {from: "points", points: p, sap_table: sapFnTable("history", type), sap_values: sv, sap_points: periodic ? cycle : undefined}, after); }, true], ["Cancel"]], {width: 600});
+  let pick = -1;
+  const v = () => { const o = {}; d.querySelectorAll("[data-k]").forEach(x => o[x.dataset.k] = x.value); return o; };
+  const make = () => sapWavePoints(type, v(), cycle);
+  const run = () => { const p = make(); const ok = typeof p !== "string"; formError(d, ok ? "" : p);
+    sapRowsPaint(d, periodic ? cycle : ok ? p : [], pick, periodic ? i => { pick = i; q(d, "#sfX").value = sapNum(cycle[i][0]); q(d, "#sfY").value = sapNum(cycle[i][1]); run(); } : null);
+    sapGraph(q(d, "#sfG"), ok ? p : [], q(d, "#sfXY")); };
+  if (periodic) sapEntry(d, () => cycle, x => { cycle = x; }, () => pick, x => { pick = x; }, run);
+  d.querySelectorAll("[data-k]").forEach(x => { x.oninput = run; });
+  q(d, "#sfShow").onclick = run;
+  q(d, "#sfConv").onclick = () => { const p = make(); if (typeof p === "string") return formError(d, p); const nm = q(d, "#sfN").value.trim(); d.close(); hmSapUser("history", {name: nm, points: p, was: f && f.name}, after); };
+  run();
+}
+// The entry boxes above a Define Function list and its Add, Modify and Delete, as SAP2000's User forms have them.
+function sapEntry(d, get, set, getPick, setPick, run) {
+  const xy = () => [parseFloat(q(d, "#sfX").value), parseFloat(q(d, "#sfY").value)];
+  const put = (p, at) => { if (p.some(x => !isFinite(x))) return formError(d, "Type both values first."); const l = get().slice(); if (at >= 0) l[at] = p; else l.push(p); l.sort((x, y) => x[0] - y[0]);
+    for (let i = 1; i < l.length; i++) if (l[i][0] === l[i - 1][0]) return formError(d, "That value is in the list already."); set(l); setPick(l.indexOf(p)); run(); };
+  q(d, "#sfA").onclick = () => put(xy(), -1);
+  q(d, "#sfM").onclick = () => getPick() >= 0 ? put(xy(), getPick()) : formError(d, "Pick a row of the list first.");
+  q(d, "#sfR").onclick = () => { if (getPick() < 0) return formError(d, "Pick a row of the list first."); const l = get().slice(); l.splice(getPick(), 1); set(l); setPick(-1); run(); };
+  q(d, "#sfY").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); put(xy(), -1); } };
+}
+
+// User: the points typed in (or converted from a code, a type or a file). Power spectral density and steady state
+// functions have Frequency Units beside the list (Hz or RPM): the list shows that unit, the function keeps Hz.
+async function hmSapUser(kind, f, after) {
+  const K = sapFnKinds[kind], freq = kind === "psd" || kind === "steady", name = f ? f.name : await sapNewName();
+  let units = (f && f.source && f.source.units) || "Hz";
+  const sc = () => units === "RPM" ? 60 : 1;
+  let pts = f ? f.points.map(p => [p[0] * (freq ? sc() : 1), p[1]]) : [], pick = -1;
+  const title = `${K.name}  Function Definition`;
+  const body = sapNameRow(kind, name, f && f.damping != null ? f.damping : 0.05) + `<fieldset style="margin-top:8px"><legend>Define Function</legend><div style="display:flex;gap:12px;align-items:flex-start">${sapListBox(K, true)}
+      ${freq ? `<fieldset style="margin:40px 0 0"><legend>Frequency Units</legend><label><input type="radio" name="sfU" value="Hz" ${units === "Hz" ? "checked" : ""}> Hz</label> &nbsp; <label><input type="radio" name="sfU" value="RPM" ${units === "RPM" ? "checked" : ""}> RPM</label></fieldset>` : ""}</div></fieldset>${sapGraphBox()}`;
+  // Convert to User Defined hands over {name, points, was}: the function it replaces is "was" (none for a new one).
+  const fixed = f && "was" in f ? (f.was ? {name: f.was} : null) : f;
+  const d = dialog(title, body, [["OK", d => sapSave(d, kind, fixed, {from: "points", points: pts.map(p => [p[0] / (freq ? sc() : 1), p[1]]), units: freq ? units : undefined,
+    sap_table: kind === "spectrum" || kind === "history" ? undefined : sapFnTable(kind, "User")}, after), true], ["Cancel"]], {width: 440});
+  const run = () => { sapRowsPaint(d, pts, pick, i => { pick = i; q(d, "#sfX").value = sapNum(pts[i][0]); q(d, "#sfY").value = sapNum(pts[i][1]); run(); }); sapGraph(q(d, "#sfG"), pts, q(d, "#sfXY")); };
+  sapEntry(d, () => pts, x => { pts = x; }, () => pick, x => { pick = x; }, run);
+  d.querySelectorAll("[name=sfU]").forEach(r => r.onchange = () => { const was = sc(); units = r.value; pts = pts.map(p => [p[0] / was * sc(), p[1]]); run(); });
+  q(d, "#sfShow").onclick = run;
+  run();
+}
+
+// From File: the file's numbers read as the form says (header lines, prefix characters, points per line, free or fixed
+// format, pairs or equal intervals; a spectrum by frequency or period). SAP2000's table keeps the file's settings and
+// the points read, so the function goes back to SAP2000 complete even where the file is not.
+async function hmSapFromFile(kind, f, after) {
+  const K = sapFnKinds[kind], rs = kind === "spectrum", freq = kind === "psd" || kind === "steady", vals = f && f.sap_values || {}, name = f ? f.name : await sapNewName();
+  const src = f && f.source || {};
+  let pts = f ? f.points.map(p => [p[0], p[1]]) : [], text = null;
+  const dt = vals.DataType || "";
+  const pairs = rs ? !/freq/i.test(dt || "Frequency") : dt ? /time|freq|pair|value/i.test(dt) && !/equal|interval/i.test(dt) : false;
+  const valuesFs = rs ? `<fieldset style="margin:0"><legend>Values are:</legend><label><input type="radio" name="sfV" value="Frequency vs Value" ${!pairs ? "checked" : ""}> Frequency vs Value</label><br>
+      <label><input type="radio" name="sfV" value="Period vs Value" ${pairs ? "checked" : ""}> Period vs Value</label></fieldset>`
+    : `<fieldset style="margin:0"><legend>Values are:</legend><label><input type="radio" name="sfV" value="${freq ? "Frequency and Function Values" : "Time and Function Values"}" ${pairs ? "checked" : ""}> ${freq ? "Frequency and Function Values" : "Time and Function Values"}</label><br>
+      <label><input type="radio" name="sfV" value="Values at Equal Intervals" ${!pairs ? "checked" : ""}> Values at Equal Intervals of</label> <input id="sfI" style="width:80px" value="${esc(vals.Interval ? sapNum(vals.Interval) : "5.000E-03")}"></fieldset>
+      <fieldset style="margin:0"><legend>Format Type</legend><label><input type="radio" name="sfFT" value="Free" ${!/fix/i.test(vals.FormatType || "") ? "checked" : ""}> Free Format</label><br>
+      <label><input type="radio" name="sfFT" value="Fixed" ${/fix/i.test(vals.FormatType || "") ? "checked" : ""}> Fixed Format</label><br><span style="padding-left:18px">Characters per item</span> <input id="sfFL" style="width:70px" value="${esc(vals.FixedLength || "")}"></fieldset>
+      ${freq ? `<fieldset style="margin:0"><legend>Frequency Units</legend><label><input type="radio" name="sfU" value="Hz" ${(vals.FreqUnits || "Hz") !== "RPM" ? "checked" : ""}> Hz</label> &nbsp; &nbsp; <label><input type="radio" name="sfU" value="RPM" ${vals.FreqUnits === "RPM" ? "checked" : ""}> RPM</label></fieldset>` : ""}`;
+  const fileFs = `<fieldset style="margin:0;flex:1"><legend>Function File</legend><div style="display:flex;justify-content:space-between;align-items:center"><span>File Name</span><button id="sfB">Browse...</button></div>
+      <input id="sfFN" readonly style="width:100%;margin:3px 0" value="${esc(vals.FileName || "")}">
+      <div>File Loaded From</div><input id="sfFrom" readonly style="width:100%;margin:3px 0" value="${esc(src["f:from"] || (vals.FileName ? vals.FileName : "No file specified or file not found."))}">
+      <div class="g2" style="grid-template-columns:1fr 90px;margin-top:6px"><span>Header Lines to Skip</span><input id="sfH" value="${esc(vals.HeaderLines ?? "0")}">
+      ${rs ? "" : `<span>Prefix Characters per Line to Skip</span><input id="sfP" value="${esc(vals.PrefixChars ?? "0")}"><span>Number of Points per Line</span><input id="sfK" value="${esc(vals.PtsPerLine ?? "1")}">`}</div>
+      <div style="display:flex;justify-content:space-around;margin-top:8px"><button id="sfConv">Convert to User Defined</button><button id="sfView">View File</button></div></fieldset>`;
+  const title = rs ? "Response Spectrum  Function Definition" : `${K.name} Function Definition`;
+  const d = dialog(title, sapNameRow(kind, name, f ? f.damping : 0.05) + `<div style="display:flex;gap:10px;margin-top:8px">${fileFs}<div style="width:250px;display:flex;flex-direction:column;gap:8px">${valuesFs}</div></div><div style="margin-top:8px">${sapGraphBox()}</div>`,
+    [["OK", d => { if (!readFile()) return false; if (pts.length < 2) { formError(d, "Choose the function file (Browse...): it has no points yet."); return false; }
+      const sv = {FileName: q(d, "#sfFN").value, HeaderLines: q(d, "#sfH").value, DataType: (d.querySelector("[name=sfV]:checked") || {}).value || ""};
+      if (!rs) Object.assign(sv, {PrefixChars: q(d, "#sfP").value, PtsPerLine: q(d, "#sfK").value, FormatType: (d.querySelector("[name=sfFT]:checked") || {}).value || "Free", FixedLength: q(d, "#sfFL").value, Interval: q(d, "#sfI").value});
+      if (freq) sv.FreqUnits = (d.querySelector("[name=sfU]:checked") || {}).value || "Hz";
+      for (const k of Object.keys(sv)) if (sv[k] === "" || sv[k] == null) delete sv[k]; else sv[k] = String(sv[k]).trim();
+      return sapSave(d, kind, f, {from: "file", points: pts, sap_table: sapFnTable(kind, "From File"), sap_values: sv, file: {from: q(d, "#sfFrom").value}}, after); }, true], ["Cancel"]], {width: 640});
+  const on = () => {
+    const eq = (d.querySelector("[name=sfV]:checked") || {}).value === "Values at Equal Intervals", fx = (d.querySelector("[name=sfFT]:checked") || {}).value === "Fixed";
+    if (d.querySelector("#sfI")) q(d, "#sfI").disabled = !eq;
+    if (d.querySelector("#sfFL")) q(d, "#sfFL").disabled = !fx;
+    q(d, "#sfConv").disabled = q(d, "#sfShow").disabled = pts.length < 2; q(d, "#sfView").disabled = text === null;
+  };
+  // The numbers of the file, read the way the form says.
+  const readFile = () => {
+    if (text === null) return true;
+    const skip = Math.max(0, parseInt(q(d, "#sfH").value) || 0), pre = rs ? 0 : Math.max(0, parseInt(q(d, "#sfP").value) || 0), mode = (d.querySelector("[name=sfV]:checked") || {}).value;
+    const fixedW = !rs && (d.querySelector("[name=sfFT]:checked") || {}).value === "Fixed" ? parseInt(q(d, "#sfFL").value) : 0;
+    const per = rs ? 0 : Math.max(1, parseInt(q(d, "#sfK").value) || 1);
+    const nums = [];
+    for (const raw of text.split(/\r?\n/).slice(skip)) {
+      const l = raw.slice(pre);
+      let items = fixedW > 0 ? Array.from({length: Math.ceil(l.length / fixedW)}, (_, i) => l.slice(i * fixedW, (i + 1) * fixedW).trim()).filter(Boolean) : l.trim().split(/[\s,;]+/).filter(Boolean);
+      if (per && mode === "Values at Equal Intervals") items = items.slice(0, per);
+      for (const x of items) { const v = Number(x); if (isFinite(v)) nums.push(v); }
+    }
+    if (mode === "Values at Equal Intervals") { const di = RS.n(q(d, "#sfI").value); if (!(di > 0)) { formError(d, "The equal interval is above 0."); return false; } pts = nums.map((y, i) => [Math.round(i * di * 1e9) / 1e9, y]); }
+    else { pts = []; for (let i = 0; i + 1 < nums.length; i += 2) pts.push(mode === "Frequency vs Value" ? [nums[i] ? 1 / nums[i] : 0, nums[i + 1]] : [nums[i], nums[i + 1]]); pts.sort((x, y) => x[0] - y[0]); }
+    if (freq && (d.querySelector("[name=sfU]:checked") || {}).value === "RPM") pts = pts.map(p => [p[0] / 60, p[1]]);
+    formError(d, ""); return true;
+  };
+  const run = () => { readFile(); on(); sapGraph(q(d, "#sfG"), pts, q(d, "#sfXY")); };
+  q(d, "#sfB").onclick = () => { const i = document.createElement("input"); i.type = "file"; i.onchange = () => { const fl = i.files[0]; if (!fl) return;
+    q(d, "#sfFN").value = fl.name; q(d, "#sfFrom").value = sapFolder().replace(/\\?$/, "\\") + fl.name; fl.text().then(t => { text = t; run(); }); }; i.click(); };
+  q(d, "#sfView").onclick = () => text !== null && dialog(q(d, "#sfFN").value, `<textarea readonly style="width:560px;height:360px;font-family:monospace">${esc(text)}</textarea>`, [["OK"]], {width: 600});
+  d.querySelectorAll("#sfH,#sfP,#sfK,#sfI,#sfFL,[name=sfV],[name=sfFT],[name=sfU]").forEach(x => x.onchange = run);
+  q(d, "#sfShow").onclick = run;
+  q(d, "#sfConv").onclick = () => { if (!readFile() || pts.length < 2) return; const nm = q(d, "#sfN").value.trim(), damp = rs ? +q(d, "#sfD").value : 0.05; d.close(); hmSapUser(kind, {name: nm, damping: damp, points: pts, was: f && f.name}, after); };
+  on(); sapGraph(q(d, "#sfG"), pts, q(d, "#sfXY"));
+}
+
+// ---- Time History > Matched to Response Spectrum: an acceleration record changed until its response spectrum follows a
+// target spectrum. Frequency domain: the record's Fourier amplitudes are scaled by target/record spectrum over the
+// frequency range, again and again; time domain: the same correction applied in Number of Recursions passes, each one
+// raised to 1/Recursion Factor so the record changes gently. "Program Default" is SAP2000's own spectrum and record:
+// the Engine uses the ASCE 7-16 form's default spectrum and a fixed 20 s, 0.01 s record of its own.
+const sapMatch = {
+  fft(re, im, inv) {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) { let b = n >> 1; for (; j & b; b >>= 1) j ^= b; j ^= b; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = 2 * Math.PI / len * (inv ? 1 : -1), wr = Math.cos(ang), wi = Math.sin(ang);
+      for (let i = 0; i < n; i += len) { let cr = 1, ci = 0;
+        for (let k = 0; k < len / 2; k++) { const ur = re[i + k], ui = im[i + k], vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci, vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr;
+          re[i + k] = ur + vr; im[i + k] = ui + vi; re[i + k + len / 2] = ur - vr; im[i + k + len / 2] = ui - vi; const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t; } }
+    }
+    if (inv) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+  },
+  // Pseudo-acceleration of a damped single degree of freedom under the record (exact for a record linear between its
+  // points: Nigam and Jennings).
+  sa(acc, dt, T, z) {
+    const w = 2 * Math.PI / T, r = Math.sqrt(1 - z * z), wd = w * r, e = Math.exp(-z * w * dt), s = Math.sin(wd * dt), c = Math.cos(wd * dt), w2 = w * w;
+    const A = e * (z / r * s + c), B = e * s / wd;
+    const C = (2 * z / (w * dt) + e * (((1 - 2 * z * z) / (wd * dt) - z / r) * s - (1 + 2 * z / (w * dt)) * c)) / w2;
+    const D = (1 - 2 * z / (w * dt) + e * ((2 * z * z - 1) / (wd * dt) * s + 2 * z / (w * dt) * c)) / w2;
+    const A1 = -e * w / r * s, B1 = e * (c - z / r * s);
+    const C1 = (-1 / dt + e * ((w / r + z / (dt * r)) * s + c / dt)) / w2, D1 = (1 - e * (z / r * s + c)) / (w2 * dt);
+    let u = 0, v = 0, peak = 0;
+    for (let i = 0; i + 1 < acc.length; i++) {
+      const p0 = -acc[i], p1 = -acc[i + 1], un = A * u + B * v + C * p0 + D * p1; v = A1 * u + B1 * v + C1 * p0 + D1 * p1; u = un;
+      if (Math.abs(u) > peak) peak = Math.abs(u);
+    }
+    return peak * w2;
+  },
+  spectrum(acc, dt, periods, z) { return periods.map(T => sapMatch.sa(acc, dt, T, z)); },
+  // SAP2000's default record stands in as a fixed synthetic one (seeded noise, built up, strong, then dying away).
+  defaultRecord() {
+    let s = 12345; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647, dt = 0.01, n = 2000, out = [];
+    let y1 = 0, y2 = 0;
+    for (let i = 0; i < n; i++) { const t = i * dt, env = t < 2 ? (t / 2) ** 2 : t < 8 ? 1 : Math.exp(-0.35 * (t - 8)), e = (rnd() - 0.5) * 2;
+      const y = 1.6 * y1 - 0.8 * y2 + e; y2 = y1; y1 = y; out.push(0.12 * env * y); }
+    return out.map((v, i) => [Math.round(i * dt * 1e9) / 1e9, v]);
+  },
+  run(rec, target, opt) {
+    const dt = rec[1][0] - rec[0][0], acc = rec.map(p => p[1]), z = opt.damping || 0.05;
+    const tgt = T => RS.interp(target, T);
+    const tMin = Math.max(target[0][0] || 0.02, 2 * dt), tMax = target[target.length - 1][0];
+    const f1 = opt.range === "User" ? opt.f1 : 1 / tMax, f2 = opt.range === "User" ? opt.f2 : Math.min(1 / tMin, 0.5 / dt * 0.8);
+    const periods = []; for (let f = f1; f <= f2 * 1.0001; f *= 1.08) periods.push(1 / f);
+    let n = 1; while (n < acc.length * 2) n <<= 1;
+    let cur = acc.slice();
+    const passes = opt.method === "Time" ? Math.max(1, Math.round(opt.recur || 5)) : 8, power = opt.method === "Time" ? 1 / Math.max(1, opt.factor || 2) : 1;
+    for (let it = 0; it < passes; it++) {
+      const sp = sapMatch.spectrum(cur, dt, periods, z), ratio = periods.map((T, i) => sp[i] > 0 ? Math.pow(tgt(T) / sp[i], power) : 1);
+      const re = new Array(n).fill(0), im = new Array(n).fill(0); cur.forEach((v, i) => re[i] = v);
+      sapMatch.fft(re, im, false);
+      for (let k = 1; k < n / 2; k++) {
+        const f = k / (n * dt); let r = 1;
+        if (f >= f1 && f <= f2) { const T = 1 / f; let j = 0; while (j < periods.length - 1 && periods[j + 1] > T) j++; r = ratio[Math.min(j, ratio.length - 1)]; }
+        re[k] *= r; im[k] *= r; re[n - k] *= r; im[n - k] *= r;
+      }
+      sapMatch.fft(re, im, true); cur = cur.map((_, i) => re[i]);
+    }
+    const spec = periods.slice().reverse(), matched = sapMatch.spectrum(cur, dt, spec, z), before = sapMatch.spectrum(acc, dt, spec, z);
+    return {th: cur.map((v, i) => [rec[i][0], Math.round(v * 1e7) / 1e7]), spec: spec.map((T, i) => [T, matched[i]]), specRef: spec.map((T, i) => [T, before[i]]), f1, f2};
+  },
+};
+async function hmSapMatched(f, after, a) {
+  const vals = f && f.sap_values || {}, name = f ? f.name : await sapNewName();
+  const rsList = a.functions.filter(x => x.kind === "spectrum"), thList = a.functions.filter(x => x.kind === "history" && (!f || x.name !== f.name));
+  const accU = ["g Units", `${(P.model.units && P.model.units.length) || "m"}/sec^2`];
+  let opt = {method: /time/i.test(vals.SpecMatchMethod || "") ? "Time" : "Frequency", range: /user/i.test(vals.FreqRangeOption || "") ? "User" : "Program", f1: RS.n(vals.FreqF1), f2: RS.n(vals.FreqF2), recur: RS.n(vals.nRecur) || 5, factor: RS.n(vals.RecurFact) || 2};
+  let result = f ? {th: f.points.map(p => [p[0], p[1]])} : null;
+  const rb = (nm, val, label, on, dis) => `<label${dis ? ' class="sfDis"' : ""}><input type="radio" name="${nm}" value="${val}" ${on ? "checked" : ""}> ${label}</label>`;
+  const d = dialog("Time History Matched to Response Spectrum", `<fieldset style="margin:0"><div style="display:flex;align-items:center;gap:10px;justify-content:center"><span>Time History Function Name</span><input id="sfN" value="${esc(name)}" style="width:220px"></div></fieldset>
+    <fieldset><legend>Method to Use for Spectral Matching</legend><div style="display:flex;justify-content:space-around">${rb("sfMM", "Frequency", "Spectral Matching in Frequency Domain", opt.method === "Frequency")}${rb("sfMM", "Time", "Spectral Matching in Time Domain", opt.method === "Time")}</div></fieldset>
+    <fieldset><legend>Choose Input Response Spectrum and Reference Time History</legend><div class="g2" style="grid-template-columns:auto 200px 1fr auto 110px">
+      <span>Target Response Spectrum</span><select id="sfTR">${opts([["", "Program Default"], ...rsList.map(x => x.name)], vals.TargetRS && vals.TargetRS !== "Program Default" ? vals.TargetRS : "")}</select><span title="The spectrum the record is matched to">&#9432;</span><span>Response Spectrum Acceleration Units</span><select id="sfRU">${opts(accU, vals.RSAccUnits || "g Units")}</select>
+      <span>Reference Acceleration Time History</span><select id="sfRT">${opts([["", "Program Default"], ...thList.map(x => x.name)], vals.RefAccTH && vals.RefAccTH !== "Program Default" ? vals.RefAccTH : "")}</select><span title="The record that is changed to match">&#9432;</span><span>Time History Acceleration Units</span><select id="sfTU">${opts(accU, vals.RefTHAccUnits || "g Units")}</select></div></fieldset>
+    <div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Target/Matched Response Spectrum</legend><div id="sfG1"></div></fieldset><fieldset style="flex:1.4;margin:0"><legend>Reference/Spectrally Matched Acceleration Time History</legend><div id="sfG"></div></fieldset></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <fieldset style="margin:0"><legend>Resp. Spec. Plot Axes Options</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">${rb("sfAx", "LL", "X Lin - Y Lin", true)}${rb("sfAx", "LgL", "X Lin - Y Log")}${rb("sfAx", "GL", "X Log - Y Lin")}${rb("sfAx", "GG", "X Log - Y Log")}</div></fieldset>
+      <fieldset style="margin:0"><legend>Response Spectrum Plot Options</legend>${rb("sfRP", "ref", "Plot for Reference Time History", true)}<br>${rb("sfRP", "match", "Plot for Matched Time History")}<br>${rb("sfRP", "both", "Plot for Both Time Histories")}</fieldset>
+      <fieldset style="margin:0"><legend>Time History Plot Options</legend>${rb("sfTP", "ref", "Plot Reference Time History", true)}<br>${rb("sfTP", "match", "Plot Matched Time History")}<br>${rb("sfTP", "both", "Plot Both Time Histories")}</fieldset>
+      <fieldset style="margin:0;flex:1"><legend id="sfML">Frequency-Domain Spectral Matching</legend><div style="display:flex;flex-direction:column;gap:5px"><button id="sfSet">Set Matching Parameters</button><button id="sfRun">Match Time History</button><button id="sfFq">Show Frequency Content</button></div></fieldset></div>
+    <div style="display:flex;justify-content:space-between;margin-top:8px"><span></span><span><button id="sfOK">OK</button> <button id="sfCan">Cancel</button></span><button id="sfConv">Convert to User Defined</button></div>`, [], {width: 900});
+  let target = [], ref = [];
+  const pick = nm => (d.querySelector(`[name=${nm}]:checked`) || {}).value;
+  const load = () => {
+    const tr = q(d, "#sfTR").value, rt = q(d, "#sfRT").value;
+    const ts = tr ? (rsList.find(x => x.name === tr) || {}).points || [] : SAP_RS["ASCE 7-16"].calc(Object.fromEntries(SAP_RS["ASCE 7-16"].items.filter(i => i.k).map(i => [i.k, String(i.def ?? "")]))).pts;
+    const g = 9.80665 * ({mm: 1000, cm: 100, m: 1, in: 39.3701, ft: 3.28084}[(P.model.units && P.model.units.length || "m").toLowerCase()] || 1);
+    target = ts.map(p => [p[0], p[1] / (q(d, "#sfRU").value === "g Units" ? 1 : g)]);
+    ref = (rt ? (thList.find(x => x.name === rt) || {}).points || [] : sapMatch.defaultRecord()).map(p => [p[0], p[1] / (q(d, "#sfTU").value === "g Units" ? 1 : g)]);
+    q(d, "#sfRU").disabled = !tr; q(d, "#sfTU").disabled = !rt;
+  };
+  const scale = (pts, ax) => pts.filter(p => (!/^G/.test(ax) || p[0] > 0) && (!/L$|G$/.test(ax) || ax === "LL" || ax === "GL" || p[1] > 0)).map(p => [/^G/.test(ax) ? Math.log10(p[0]) : p[0], ax === "LgL" || ax === "GG" ? Math.log10(p[1]) : p[1]]);
+  const paint = () => {
+    const ax = pick("sfAx"), rp = pick("sfRP"), tp = pick("sfTP"), done = !!(result && result.spec);
+    d.querySelectorAll("[name=sfRP],[name=sfTP]").forEach(r => { r.disabled = r.value !== "ref" && !done; });
+    q(d, "#sfFq").disabled = !result; q(d, "#sfConv").disabled = q(d, "#sfOK").disabled = !result;
+    q(d, "#sfML").textContent = pick("sfMM") === "Time" ? "Time-Domain Spectral Matching" : "Frequency-Domain Spectral Matching";
+    // Target in black, the reference record's spectrum in blue, the matched one in red.
+    const more = [];
+    if (done && rp !== "match") more.push({pts: scale(result.specRef, ax), color: "#1010e0"});
+    if (done && rp !== "ref") more.push({pts: scale(result.spec, ax), color: "#e00000"});
+    sapGraph(q(d, "#sfG1"), scale(target, ax), null, more, "#000");
+    const thMore = tp === "both" && done ? [{pts: result.th, color: "#e00000"}] : [];
+    sapGraph(q(d, "#sfG"), tp === "match" && result ? result.th : ref, null, thMore);
+  };
+  const go = () => { load(); paint(); };
+  d.querySelectorAll("select,[name=sfMM],[name=sfAx],[name=sfRP],[name=sfTP]").forEach(x => x.onchange = () => { if (x.id === "sfTR" || x.id === "sfRT") result = null; go(); });
+  q(d, "#sfSet").onclick = () => {
+    const tm = pick("sfMM") === "Time";
+    const s = dialog("Parameters for Response Spectrum Matching", `<fieldset><legend>Frequency Range Options for Scaling</legend>
+      <label><input type="radio" name="sfFR" value="Program" ${opt.range !== "User" ? "checked" : ""}> Program Determined Frequency Range</label><br>
+      <label><input type="radio" name="sfFR" value="User" ${opt.range === "User" ? "checked" : ""}> User Defined Frequency Range</label>
+      <div class="g2" style="grid-template-columns:auto 90px auto;margin-left:20px"><span>Frequency, f1</span><input id="sfF1" value="${isFinite(opt.f1) ? opt.f1 : ""}"><span>cyc/sec</span><span>Frequency, f2</span><input id="sfF2" value="${isFinite(opt.f2) ? opt.f2 : ""}"><span>cyc/sec</span></div></fieldset>
+      ${tm ? `<fieldset><legend>Time Domain Spectral Matching Parameters</legend><div class="g2" style="grid-template-columns:1fr 90px"><span>Number of Recursions</span><input id="sfNR" value="${opt.recur}"><span>Recursion Factor</span><input id="sfRF" value="${opt.factor}"></div></fieldset>` : ""}`,
+      [["OK", x => { const r = (x.querySelector("[name=sfFR]:checked") || {}).value, f1 = RS.n(q(x, "#sfF1").value), f2 = RS.n(q(x, "#sfF2").value);
+        if (r === "User" && !(f1 > 0 && f2 > f1)) { formError(x, "f1 is above 0 and f2 above f1."); return false; }
+        opt = {...opt, range: r, f1, f2}; if (tm) { const nr = Math.round(RS.n(q(x, "#sfNR").value)), rf = RS.n(q(x, "#sfRF").value); if (!(nr >= 1 && rf >= 1)) { formError(x, "The recursions are 1 or more and the factor 1 or more."); return false; } opt.recur = nr; opt.factor = rf; } }], ["Cancel"]], {width: 360});
+    const en = () => { const u = (s.querySelector("[name=sfFR]:checked") || {}).value === "User"; q(s, "#sfF1").disabled = q(s, "#sfF2").disabled = !u; };
+    s.querySelectorAll("[name=sfFR]").forEach(r => r.onchange = en); en();
+  };
+  q(d, "#sfRun").onclick = () => {
+    load(); if (target.length < 2 || ref.length < 3) return formError(d, "The target spectrum and the reference record need their points.");
+    const dt = ref[1][0] - ref[0][0]; if (!ref.every((p, i) => i === 0 || Math.abs(p[0] - ref[i - 1][0] - dt) < 1e-6)) return formError(d, "The reference record needs equal time steps.");
+    formError(d, "Matching..."); setTimeout(() => { result = sapMatch.run(ref, target, {...opt, method: pick("sfMM")}); formError(d, ""); d.querySelector("[name=sfRP][value=both]").checked = true; d.querySelector("[name=sfTP][value=match]").checked = true; paint(); }, 20);
+  };
+  q(d, "#sfFq").onclick = () => {
+    const th = result.th, n0 = th.length; let n = 1; while (n < n0) n <<= 1; const dt = th[1][0] - th[0][0], re = new Array(n).fill(0), im = new Array(n).fill(0); th.forEach((p, i) => re[i] = p[1]); sapMatch.fft(re, im, false);
+    const fq = dialog("Frequency Content", `<div id="sfFG" style="width:520px"></div>`, [["OK"]], {width: 560}); sapGraph(q(fq, "#sfFG"), Array.from({length: n / 2 - 1}, (_, k) => [(k + 1) / (n * dt), Math.hypot(re[k + 1], im[k + 1]) * dt]));
+  };
+  const save = () => { if (!result) return; const sv = {TargetRS: q(d, "#sfTR").value || "Program Default", RSAccUnits: q(d, "#sfRU").value, RefAccTH: q(d, "#sfRT").value || "Program Default", RefTHAccUnits: q(d, "#sfTU").value,
+      SpecMatchMethod: pick("sfMM") === "Time" ? "Time Domain" : "Frequency Domain", FreqRangeOption: opt.range === "User" ? "User Defined" : "Program Determined", nRecur: String(opt.recur), RecurFact: String(opt.factor)};
+    if (opt.range === "User") { sv.FreqF1 = String(opt.f1); sv.FreqF2 = String(opt.f2); }
+    sapSave(d, "history", f, {from: "points", points: result.th, sap_table: "Function - Time History - Matched to Response Spectrum", sap_values: sv}, after); };
+  q(d, "#sfOK").onclick = save; q(d, "#sfCan").onclick = () => d.close();
+  q(d, "#sfConv").onclick = () => { if (!result) return; const nm = q(d, "#sfN").value.trim(); d.close(); hmSapUser("history", {name: nm, points: result.th, was: f && f.name}, after); };
+  go();
+}
+// Helpers of the SAP2000 response spectrum code forms (SAP_RS calc).
+const RS = {
+  // A form value as a number (blank or text -> NaN).
+  n: x => { const v = parseFloat(String(x ?? "").trim()); return isFinite(v) ? v : NaN; },
+  // Linear interpolation in rows [[x, y], ...] sorted by x, clamped at the ends.
+  interp: (rows, x) => {
+    if (x <= rows[0][0]) return rows[0][1];
+    for (let i = 1; i < rows.length; i++) if (x <= rows[i][0]) { const [x0, y0] = rows[i - 1], [x1, y1] = rows[i]; return y0 + (y1 - y0) * (x - x0) / (x1 - x0); }
+    return rows[rows.length - 1][1];
+  },
+  // The points of Sa(T) at the given periods: sorted, duplicates (within 1e-9) dropped.
+  curve: (sa, periods) => {
+    const ts = [...new Set(periods.filter(t => isFinite(t) && t >= 0).map(t => Math.round(t * 1e9) / 1e9))].sort((a, b) => a - b);
+    return ts.map(t => [t, sa(t)]);
+  },
+  // Periods from a to b (inclusive) in steps of d.
+  range: (a, b, d) => { const out = []; for (let i = 0; a + i * d <= b + 1e-9; i++) out.push(Math.round((a + i * d) * 1e9) / 1e9); return out; },
+  // A value as SAP2000 shows it in a read-only box (4 significant digits, no trailing zeros).
+  show: x => isFinite(x) ? String(+(+x).toPrecision(4)) : "",
+};
+// Every code of SAP2000 26.3's Response Spectrum type list: its form (Parameters as SAP2000 lists them, which boxes it
+// greys, the calculated boxes) and its spectrum, each checked against SAP2000's own Define Function list in the pictures.
+const SAP_RS = {};
+// Example entry (ASCE 7-16), checked against Define/RS/05 ASCE 7-16.jpg.
+SAP_RS["ASCE 7-16"] = {
+  table: "Function - Response Spectrum - ASCE 7-16",
+  title: "Response Spectrum ASCE 7-16 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss", def: "2.29"},
+    {k: "S1", label: "1 Sec Spectral Accel, S1", def: "0.869"},
+    {k: "TL", label: "Long-Period Transition Period", def: "8."},
+    {sep: true},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "C", "D", "E", "F"], def: "B"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {sep: true},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true, out: true},
+    {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true, out: true},
+  ],
+  calc(v) {
+    const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), TL = RS.n(v.TL), sc = v.SiteClass;
+    // ASCE 7-16 Tables 11.4-1 and 11.4-2.
+    const FA = {A: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], B: [0.9, 0.9, 0.9, 0.9, 0.9, 0.9], C: [1.3, 1.3, 1.2, 1.2, 1.2, 1.2], D: [1.6, 1.4, 1.2, 1.1, 1.0, 1.0], E: [2.4, 1.7, 1.3, 1.1, 0.9, 0.8]};
+    const FV = {A: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], B: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], C: [1.5, 1.5, 1.5, 1.5, 1.5, 1.4], D: [2.4, 2.2, 2.0, 1.9, 1.8, 1.7], E: [4.2, 3.3, 2.8, 2.4, 2.2, 2.0]};
+    const Fa = sc === "F" ? RS.n(v.Fa) : RS.interp([0.25, 0.5, 0.75, 1, 1.25, 1.5].map((x, i) => [x, FA[sc][i]]), Ss);
+    const Fv = sc === "F" ? RS.n(v.Fv) : RS.interp([0.1, 0.2, 0.3, 0.4, 0.5, 0.6].map((x, i) => [x, FV[sc][i]]), S1);
+    const SDS = 2 / 3 * Fa * Ss, SD1 = 2 / 3 * Fv * S1, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : t <= TL ? SD1 / t : SD1 * TL / (t * t);
+    const grid = [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2)];
+    return {set: {Fa, Fv, SDS, SD1}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Site class E Fa for Ss > 0.75 is site-specific in ASCE 7-16; the 7-10 style values are used. Period grid past the picture's rows is a guess.",
+};
+// Checked against Define/RS/00 AASHTO 2006.jpg
+SAP_RS["AASHTO 2006"] = {
+  table: "Function - Response Spectrum - AASHTO 2006",
+  title: "Response Spectrum AASHTO LRFD 2006 Function Definition",
+  layout: "side",
+  items: [
+    {k: "A", label: "Acceleration Coefficient, A", def: "0.4"},
+    {k: "SoilType", label: "Soil Profile Type", choices: ["I", "II", "III", "IV"], def: "III"},
+  ],
+  calc(v) {
+    // AASHTO LRFD (2006) 3.10.6.1: Csm = 1.2 A S / T^(2/3) <= 2.5 A (2.0 A for soil III/IV when A >= 0.3);
+    // T > 4 s: Csm = 3 A S / T^(4/3). Short-period soil III/IV reduction is not applied (the picture's row 0 is the cap).
+    const A = RS.n(v.A), st = v.SoilType;
+    const S = {I: 1.0, II: 1.2, III: 1.5, IV: 2.0}[st] ?? 1.2;
+    const cap = (st === "III" || st === "IV") && A >= 0.3 ? 2.0 * A : 2.5 * A;
+    const Tc = Math.pow(1.2 * A * S / cap, 1.5);
+    const sa = t => t <= Tc ? cap : t <= 4 ? 1.2 * A * S / Math.pow(t, 2 / 3) : 3 * A * S / Math.pow(t, 4 / 3);
+    const grid = [0, Tc, ...RS.range(0.2, 4, 0.2).filter(t => t > Tc + 1e-9), ...RS.range(4.5, 10, 0.5)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Soil type value texts I/II/III/IV are a guess (shown text). The T > 4 s branch (3AS/T^(4/3)) is from the code; the picture's graph shows the kink at 4 s. Period grid past 2 s is a guess. Picture's second period reads 0.8536/0.8538; computed 0.8538.",
+};
+
+// AASHTO 2007 and 2012 forms are identical (Define/RS/01 and 02 pictures).
+SAP_RS["AASHTO 2007"] = {
+  table: "Function - Response Spectrum - AASHTO 2007",
+  title: "Response Spectrum AASHTO 2007 Function Definition",
+  layout: "side",
+  items: [
+    {k: "AccOption", radio: [["Lat/Long", "Ss, S1 and PGA from USGS - by Lat/Long"], ["Zip Code", "Ss, S1 and PGA from USGS - by Zip Code"], ["User", "Ss, S1 and PGA User Specified"]], def: "User"},
+    {k: "Latitude", label: "Site Latitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Lat/Long"},
+    {k: "Longitude", label: "Site Longitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Lat/Long"},
+    {k: "ZipCode", label: "Site Zip Code (5-Digits)", indent: true, def: "", en: v => v.AccOption === "Zip Code"},
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss", indent: true, def: "2.29", en: v => v.AccOption === "User"},
+    {k: "S1", label: "1 Sec Spectral Accel, S1", indent: true, def: "0.869", en: v => v.AccOption === "User"},
+    {k: "PGA", label: "Peak Ground Accel., PGA", indent: true, def: "0.954", en: v => v.AccOption === "User"},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "C", "D", "E", "F"], def: "B"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "Fpga", label: "Site Coefficient, Fpga", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = Fa * Ss", indent: true, out: true},
+    {k: "SD1", label: "SD1 = Fv * S1", indent: true, out: true},
+  ],
+  calc(v) {
+    const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), PGA = RS.n(v.PGA), sc = v.SiteClass;
+    // AASHTO Guide Spec 2009 / LRFD 2012 Tables 3.10.3.2-1, -2, -3.
+    const FA = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.2, 1.2, 1.1, 1.0, 1.0], D: [1.6, 1.4, 1.2, 1.1, 1.0], E: [2.5, 1.7, 1.2, 0.9, 0.9]};
+    const FV = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.7, 1.6, 1.5, 1.4, 1.3], D: [2.4, 2.0, 1.8, 1.6, 1.5], E: [3.5, 3.2, 2.8, 2.4, 2.4]};
+    const tab = (T, xs, x) => RS.interp(xs.map((a, i) => [a, T[sc][i]]), x);
+    const Fa = sc === "F" ? RS.n(v.Fa) : tab(FA, [0.25, 0.5, 0.75, 1.0, 1.25], Ss);
+    const Fpga = sc === "F" ? RS.n(v.Fpga) : tab(FA, [0.1, 0.2, 0.3, 0.4, 0.5], PGA);
+    const Fv = sc === "F" ? RS.n(v.Fv) : tab(FV, [0.1, 0.2, 0.3, 0.4, 0.5], S1);
+    const SDS = Fa * Ss, SD1 = Fv * S1, As = Fpga * PGA, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? As + (SDS - As) * t / T0 : t <= Ts ? SDS : SD1 / t;
+    const grid = [0, T0 / 3, 2 * T0 / 3, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2 - 1e-9)];
+    return {set: {Fa, Fv, Fpga, SDS, SD1}, pts: RS.curve(sa, grid)};
+  },
+  notes: "AccOption field values 'Lat/Long', 'Zip Code', 'User' are guesses. The picture shows a small '?' help button right after the Latitude/Longitude/Zip labels (boxes greyed and empty) - not representable in the schema. By Lat/Long or Zip Code needs SAP2000's USGS database: the boxes are enabled, Ss/S1/PGA are greyed but kept and the curve is computed from them. Site class F: Fa, Fv, Fpga become user boxes. Period grid past 1 s is a guess.",
+};
+SAP_RS["AASHTO 2012"] = {...SAP_RS["AASHTO 2007"], table: "Function - Response Spectrum - AASHTO 2012", title: "Response Spectrum AASHTO 2012 Function Definition"};
+
+// Checked against Define/RS/03 Argentina INPRES-CIRSOC 103.jpg
+SAP_RS["Argentina INPRES-CIRSOC 103"] = {
+  table: "Function - Response Spectrum - Argentina INPRES-CIRSOC 103",
+  title: "Argentina INPRES-CIRSOC 103 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Z", label: "Seismic Zone", choices: ["Zone 1", "Zone 2", "Zone 3", "Zone 4"], def: "Zone 4"},
+    {k: "SoilType", label: "Soil Type", choices: ["A", "B", "C", "D", "E"], def: "E"},
+    {k: "Category", label: "Occupation Category", choices: ["A0", "A", "B", "C"], def: "A0"},
+    {k: "R", label: "Response Modification Factor, R", def: "6."},
+  ],
+  calc(v) {
+    // INPRES-CIRSOC 103 Parte I (2013/2018) Table 3.1 (Ca, Cv with Na = 1, Nv = 1.2 in zones 3-4), Table 3.2 (T3).
+    const z = +String(v.Z).replace(/\D/g, "") || 4, s = v.SoilType, R = RS.n(v.R);
+    const grp = s === "D" ? 1 : s === "E" ? 2 : 0;
+    const CA = {4: [0.37, 0.40, 0.36], 3: [0.29, 0.32, 0.35], 2: [0.18, 0.22, 0.30], 1: [0.09, 0.12, 0.19]};
+    const CV = {4: [0.51 * 1.2, 0.59 * 1.2, 0.90 * 1.2], 3: [0.39 * 1.2, 0.47 * 1.2, 0.74 * 1.2], 2: [0.25, 0.32, 0.50], 1: [0.13, 0.18, 0.26]};
+    const T3 = {4: 13, 3: 8, 2: 5, 1: 3}[z];
+    const Ca = CA[z][grp], Cv = CV[z][grp], gr = {A0: 1.5, A: 1.3, B: 1.0, C: 0.8}[v.Category] ?? 1;
+    const T2 = Cv / (2.5 * Ca), T1 = 0.2 * T2, f = gr / R;
+    const sa = t => f * (t <= T1 ? Ca * (1 + 1.5 * t / T1) : t <= T2 ? 2.5 * Ca : t <= T3 ? Cv / t : Cv * T3 / (t * t));
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, ...RS.range(2, 4, 0.5), ...RS.range(5, 15, 1)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Implements INPRES-CIRSOC 103-2013/2018 (Ca/Cv spectrum, Sa*gamma_r/R) - reproduces all 13 picture rows. Choice lists are from knowledge, not the picture: zones 'Zone 1'..'Zone 4' (no Zone 0), soil A..E (SA/SB/SC share values; SF needs a site study so it is left out), categories A0/A/B/C (gamma_r 1.5/1.3/1.0/0.8; C may not be in SAP's list). Value texts are the shown texts (guess). Period grid past 1.5 s is a guess.",
+};
+
+// Checked against Define/RS/04 AS1170 2007.jpg
+SAP_RS["AS1170 2007"] = {
+  table: "Function - Response Spectrum - AS 1170 2007",
+  title: "Response Spectrum AS1170.4 - 2007 Function Definition",
+  layout: "side",
+  items: [
+    {k: "SiteClass", label: "Site Subsoil Class", choices: ["A", "B", "C", "D", "E"], def: "C"},
+    {k: "ProbFact", label: "Probability Factor, kp", def: "1.3"},
+    {k: "HazFact", label: "Hazard Factor, Z", def: "0.09"},
+    {k: "StPerFact", label: "Structural Performance Factor, Sp", def: "0.77"},
+    {k: "StDucFact", label: "Structural Ductility Factor, u", def: "2."},
+  ],
+  calc(v) {
+    // AS 1170.4-2007 Table 6.4 spectral shape factor Ch(T); Sa = kp Z Ch(T) Sp / mu.
+    const P = {A: [0.8, 15.5, 0.704, 2.35, 1.056], B: [1.0, 19.4, 0.88, 2.94, 1.32], C: [1.3, 23.8, 1.25, 3.68, 1.874], D: [1.1, 25.8, 1.98, 3.68, 2.97], E: [1.1, 25.8, 3.08, 3.68, 4.62]}[v.SiteClass] || [1.3, 23.8, 1.25, 3.68, 1.874];
+    const f = RS.n(v.ProbFact) * RS.n(v.HazFact) * RS.n(v.StPerFact) / RS.n(v.StDucFact);
+    const ch = t => t <= 0.1 ? Math.min(P[0] + P[1] * t, P[3]) : t <= 1.5 ? Math.min(P[2] / t, P[3]) : P[4] / (t * t);
+    const grid = [...RS.range(0, 2, 0.1), ...RS.range(2.5, 10, 0.5)];
+    return {set: {}, pts: RS.curve(t => f * ch(t), grid)};
+  },
+  notes: "Site class list shown as A..E (picture shows 'C'); the code calls them Ae..Ee, value texts are a guess. 'u' is the label as rendered (mu in the code). Grid past 0.7 s is a guess; the code tabulates Ch(T) to 5 s, the 1/T^2 branch is continued to 10 s (SAP2000 graph appears to run to ~10 s).",
+};
+
+// Checked against Define/RS/06 ASCE 7-22.jpg
+SAP_RS["ASCE 7-22"] = {
+  table: "Function - Response Spectrum - ASCE 7-22",
+  title: "ASCE 7-22 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Direction", label: "Spectrum Direction", choices: ["Horizontal", "Vertical"], def: "Horizontal"},
+    {k: "SpecType", label: "Spectrum Type", choices: ["Design Spectrum", "MCER Spectrum"], def: "Design Spectrum"},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "BC", "C", "CD", "D", "DE", "E", "Default"], def: "Default"},
+    {k: "Sds", label: "Short-Period Design Accel, Sds", def: "2.29"},
+    {k: "Sd1", label: "1 sec Design Accel, Sd1", def: "0.869"},
+    {k: "Sms", hidden: true, out: true, def: "3.435"},
+    {k: "Sm1", hidden: true, out: true, def: "1.3035"},
+    {k: "TL", label: "Long-Period Transition Period, TL", def: "8."},
+  ],
+  calc(v) {
+    // MCER spectrum = 1.5 x design spectrum (SMS = 1.5 SDS, SM1 = 1.5 SD1), computed from the Sds / Sd1 boxes.
+    const mce = v.SpecType === "MCER Spectrum", Sms = 1.5 * RS.n(v.Sds), Sm1 = 1.5 * RS.n(v.Sd1);
+    const S0 = mce ? Sms : RS.n(v.Sds), S1 = mce ? Sm1 : RS.n(v.Sd1), TL = RS.n(v.TL);
+    if (v.Direction === "Vertical") {
+      // ASCE 7 11.9: SaMv with Cv from Table 11.9-1 (SMS); design = 2/3 SaMv. SMS = 1.5 SDS for the design spectrum.
+      const SMS = mce ? S0 : 1.5 * S0, sc = v.SiteClass;
+      const col = ["A", "B", "BC"].includes(sc) ? 0 : ["C", "CD"].includes(sc) ? 1 : 2;
+      const CV = [[0.7, 0.7, 0.7], [0.8, 0.8, 0.9], [0.9, 1.0, 1.1], [0.9, 1.1, 1.3], [0.9, 1.3, 1.5]];
+      const Cv = RS.interp([0.2, 0.3, 0.6, 1.0, 2.0].map((x, i) => [x, CV[i][col]]), SMS);
+      const k = (mce ? 1 : 2 / 3) * Cv * SMS;
+      const sa = t => t <= 0.025 ? 0.3 * k : t <= 0.05 ? 20 * k * (t - 0.025) + 0.3 * k : t <= 0.15 ? 0.8 * k : 0.8 * k * Math.pow(0.15 / t, 0.75);
+      return {set: {Sms, Sm1}, pts: RS.curve(sa, [0, 0.025, 0.05, 0.1, 0.15, ...RS.range(0.2, 2, 0.1)])};
+    }
+    const Ts = S1 / S0, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? S0 * (0.4 + 0.6 * t / T0) : t <= Ts ? S0 : t <= TL ? S1 / t : S1 * TL / (t * t);
+    const grid = [0, T0, Ts, ...RS.range(0.2, 2, 0.2).filter(t => t >= Ts + 0.2 - 1e-9), ...RS.range(2.5, 10, 0.5)];
+    return {set: {Sms, Sm1}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Picture shows only Sds/Sd1. The table's Sms/Sm1 fields are hidden items set to 1.5*Sds / 1.5*Sd1 (MCER spectrum = 1.5 x design); if SAP2000 instead relabels the two boxes to Sms/Sm1 for MCER, the renderer would need a dynamic label. Choice lists from knowledge: Direction Horizontal/Vertical, Spectrum Type 'Design Spectrum'/'MCER Spectrum' (picture shows 'Design Spectr...'), Site Class A..E incl. BC/CD/DE plus Default. Vertical spectrum uses ASCE 7-16 Table 11.9-1 Cv columns (B-like for A/B/BC, C for C/CD, D for D/DE/E/Default) - approximate. Horizontal reproduces all 13 picture rows.",
+};
+
+// Checked against Define/RS/07 BOCA 96.jpg
+SAP_RS["BOCA 96"] = {
+  table: "Function - Response Spectrum - BOCA96",
+  title: "Response Spectrum BOCA96 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Aa", label: "Effective Peak Accel, Aa", def: "0.4"},
+    {k: "Av", label: "Effective Peak Velocity, Av", def: "0.4"},
+    {k: "R", label: "Response Modification Factor, R", def: "1."},
+    {k: "S", label: "Soil Profile Coefficient, S", def: "1.2"},
+  ],
+  calc(v) {
+    // BOCA 1996 1610.5 modal: Csm = 1.2 Av S / (R T^(2/3)) <= 2.5 Aa / R (2.0 Aa/R for S >= 1.5 with Aa >= 0.3).
+    // No T > 4 s branch: the SAP2000 graph is smooth to 10 s (the AASHTO 2006 graph, by contrast, shows its kink at 4 s).
+    const Aa = RS.n(v.Aa), Av = RS.n(v.Av), R = RS.n(v.R), S = RS.n(v.S);
+    const cap = (S >= 1.5 && Aa >= 0.3 ? 2.0 : 2.5) * Aa / R;
+    const sa = t => t === 0 ? cap : Math.min(cap, 1.2 * Av * S / (R * Math.pow(t, 2 / 3)));
+    const grid = [...RS.range(0, 1, 0.2), ...RS.range(1.5, 10, 0.5)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Reproduces all 8 picture rows. The 2.0Aa/R cap for soil S3/S4 is from the code, not visible in the picture. The code's T > 4 s modal branch is left out because the SAP2000 graph shows no kink at 4 s. Grid past 2 s is a guess.",
+};
+
+// Checked against Define/RS/08 Chile Norma NCh2369-2003.jpg
+SAP_RS["Chile Norma NCh2369-2003"] = {
+  table: "Function - Response Spectrum - Chile Norma NCh2369-2003",
+  title: "Chile Norma NCh2369-2003 Function Definition",
+  layout: "side",
+  items: [
+    {blank: true},
+    {k: "R", label: "Response Modification Factor, R", def: "5."},
+    {k: "Si", label: "Damping Ratio, ξ", def: "0.05"},
+    {k: "Category", label: "Building Category", choices: ["C1", "C2", "C3"], def: "C2"},
+    {k: "Zone", label: "Seismic Zone", choices: ["Zone 1", "Zone 2", "Zone 3"], def: "Zone 3"},
+    {k: "SoilType", label: "Soil Type", choices: ["I", "II", "III", "IV"], def: "III"},
+  ],
+  calc(v) {
+    // NCh2369-2003 5.4: Sa = 2.75 A0 I / R (T'/T)^n (0.05/xi)^0.4 <= Cmax I (Table 5.7); Sa(0) = Cmin = 0.25 A0 I.
+    const R = RS.n(v.R), xi = RS.n(v.Si);
+    const A0 = {"Zone 1": 0.2, "Zone 2": 0.3, "Zone 3": 0.4}[v.Zone] ?? 0.4;
+    const I = {C1: 1.2, C2: 1.0, C3: 0.8}[v.Category] ?? 1;
+    const [Tp, n] = {I: [0.20, 1.00], II: [0.35, 1.33], III: [0.62, 1.80], IV: [1.35, 1.80]}[v.SoilType] || [0.62, 1.8];
+    const CM = [[0.79, 0.68, 0.55], [0.60, 0.49, 0.42], [0.40, 0.34, 0.28], [0.32, 0.27, 0.22], [0.26, 0.22, 0.18]];
+    const byXi = row => RS.interp([[0.02, row[0]], [0.03, row[1]], [0.05, row[2]]], xi);
+    const Cmax = RS.interp([1, 2, 3, 4, 5].map((r, i) => [r, byXi(CM[i])]), R);
+    const sa = t => t === 0 ? 0.25 * A0 * I : Math.min(Cmax * I, 2.75 * A0 * I / R * Math.pow(Tp / t, n) * Math.pow(0.05 / xi, 0.4));
+    const grid = [...RS.range(0, 0.3, 0.05), ...RS.range(0.5, 1.5, 0.1), ...RS.range(1.75, 3, 0.25), ...RS.range(3.5, 10, 0.5)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Reproduces all 13 picture rows (the picture's grid jumps 0.3 -> 0.5). Sa(0) = 0.25 A0 I (Cmin) is inferred from the single picture value 0.1. Cmax Table 5.7 values for R other than 5 / damping other than 0.05 are from knowledge (interpolated). Choice lists C1-C3, Zone 1-3, soil I-IV from the code; value texts are the shown texts (guess). The picture has an empty row above R at the top of Parameters. Grid past 1 s is a guess.",
+};
+
+// Checked against Define/RS/09 Chile Norma NCh433+DS61.jpg
+SAP_RS["Chile Norma NCh433+DS61"] = {
+  table: "Function - Response Spectrum - Chile Norma NCh433+DS61",
+  title: "Chile Norma NCh433+DS61 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Zone", label: "Seismic Zone", choices: ["Zone 1", "Zone 2", "Zone 3"], def: "Zone 1"},
+    {k: "SoilType", label: "Soil Type", choices: ["1", "2", "3", "4", "5"], def: "2"},
+    {k: "Category", label: "Occupation Category", choices: ["1", "2", "3", "4"], def: "1"},
+  ],
+  calc(v) {
+    // NCh433 + DS61: Sa = S A0 alpha I, alpha = (1 + 4.5 (T/T0)^p) / (1 + (T/T0)^3); elastic (no R*).
+    const A0 = {"Zone 1": 0.2, "Zone 2": 0.3, "Zone 3": 0.4}[v.Zone] ?? 0.2;
+    const [S, T0, p] = {1: [0.90, 0.15, 2.0], 2: [1.00, 0.30, 1.5], 3: [1.05, 0.40, 1.6], 4: [1.20, 0.75, 1.0], 5: [1.30, 1.20, 1.0]}[v.SoilType] || [1, 0.3, 1.5];
+    const I = {1: 0.6, 2: 1.0, 3: 1.2, 4: 1.2}[v.Category] ?? 1;
+    const sa = t => { const r = t / T0; return S * A0 * I * (1 + 4.5 * Math.pow(r, p)) / (1 + r * r * r); };
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, ...RS.range(2, 4, 0.5), ...RS.range(5, 10, 1)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Reproduces all 13 picture rows. Soil types 1-5 = DS61 soil A-E, categories 1-4 = I-IV (I = 0.6, II = 1.0, III/IV = 1.2); lists are from knowledge (picture shows '2' and '1'). Grid past 1.5 s is a guess.",
+};
+// Response spectrum code forms 10-18 (Chinese 2010 .. EuroCode8 2004), checked against Define/RS/10..18 *.jpg.
+
+SAP_RS["Chinese 2010"] = {
+  table: "Function - Response Spectrum - Chinese 2010",
+  title: "Response Spectrum Chinese 2010 Function Definition",
+  layout: "top",
+  items: [
+    {k: "AlphaMax", label: "Max Influence Factor, AlphaMax", def: "0.16"},
+    {k: "SI", label: "Seismic Intensity, SI", choices: ["6 (0.05g)", "7 (0.10g)", "7 (0.15g)", "8 (0.20g)", "8 (0.30g)", "9 (0.40g)"], def: "8 (0.20g)"},
+    {k: "Tg", label: "Characteristic Ground Period, Tg", def: "0.4"},
+    {k: "PTDF", label: "Period Time Discount Factor, PTDF", def: "1."},
+  ],
+  calc(v) {
+    const am = RS.n(v.AlphaMax), Tg = RS.n(v.Tg), f = isFinite(RS.n(v.PTDF)) ? RS.n(v.PTDF) : 1;
+    const z = isFinite(RS.n(v.FuncDamp)) ? RS.n(v.FuncDamp) : 0.05;
+    const g = 0.9 + (0.05 - z) / (0.3 + 6 * z);
+    const e1 = Math.max(0, 0.02 + (0.05 - z) / (4 + 32 * z));
+    const e2 = Math.max(0.55, 1 + (0.05 - z) / (0.08 + 1.6 * z));
+    const a = T => T < 0.1 ? am * (0.45 + (10 * e2 - 4.5) * T) : T <= Tg ? e2 * am : T <= 5 * Tg ? Math.pow(Tg / T, g) * e2 * am : (e2 * Math.pow(0.2, g) - e1 * (T - 5 * Tg)) * am;
+    const sa = T => a(T * f);
+    const grid = [0, 0.1, Tg, ...RS.range(0.05, 6, 0.05).filter(t => t > Tg + 1e-9)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "SI list (6, 7, 7(0.15g), 8, 8(0.30g), 9 intensities) is from knowledge; only '8 (0.20g)' is visible. SI is informational here (AlphaMax is the input the curve uses, as the picture shows it editable). PTDF is applied as a multiplier on the period (T' = PTDF*T) - a guess, it has no effect at the shown value 1. Grid past 0.65 s (0.05 s steps to 6 s) is a guess. Damping adjustment per GB 50011-2010 eq. 5.1.5 using the Function Damping Ratio.",
+};
+
+SAP_RS["CJJ 166-2011"] = {
+  table: "Function - Response Spectrum - CJJ1662011",
+  title: "Response Spectrum Chinese CJJ 166-2011 Function Definition",
+  layout: "top",
+  items: [
+    {k: "A", label: "Peak Acceleration, A", def: "0.46"},
+    {k: "Tg", label: "Characteristic Ground Period, Tg", def: "0.4"},
+    {k: "Direction", label: "Direction", choices: ["Horizontal", "Vertical"], def: "Horizontal"},
+  ],
+  calc(v) {
+    const A = RS.n(v.A), Tg = RS.n(v.Tg);
+    const z = isFinite(RS.n(v.FuncDamp)) ? RS.n(v.FuncDamp) : 0.05;
+    const g = 0.9 + (0.05 - z) / (0.3 + 6 * z);
+    const e1 = Math.max(0, 0.02 + (0.05 - z) / (4 + 32 * z));
+    const e2 = Math.max(0.55, 1 + (0.05 - z) / (0.08 + 1.6 * z));
+    const Smax = 2.25 * A;
+    const h = T => T < 0.1 ? Smax * (0.45 + (10 * e2 - 4.5) * T) : T <= Tg ? e2 * Smax : T <= 5 * Tg ? Math.pow(Tg / T, g) * e2 * Smax : Math.max(0, e2 * Math.pow(0.2, g) - e1 * (T - 5 * Tg)) * Smax;
+    // CJJ 166-2011 5.2.4: vertical/horizontal spectral ratio R(T) for soil sites.
+    const R = T => v.Direction === "Vertical" ? (T < 0.1 ? 1 : T < 0.3 ? 1 - 2.5 * (T - 0.1) : 0.5) : 1;
+    const grid = [0, Tg, ...RS.range(0.1, 10, 0.1)];
+    return {set: {}, pts: RS.curve(T => h(T) * R(T), grid)};
+  },
+  notes: "Layout of the picture is the 'top' arrangement (same as Chinese 2010), and the title reads 'Chinese CJJ 166-2011'. Direction list (Horizontal/Vertical) is from knowledge. Smax = 2.25*A; the shape (Tg/T)^0.9 matches the picture, and beyond 5Tg the GB 50011 linear branch is used (guess). Vertical uses the CJJ 166 soil-site ratio R(T) (1.0 / 1-2.5(T-0.1) / 0.5) - a guess since the form has no site/rock option. Grid 0.1 s steps to 10 s past the shown rows is a guess.",
+};
+
+SAP_RS["Colombia NSR-10"] = {
+  table: "Function - Response Spectrum - Colombia NSR-10",
+  title: "Colombia NSR-10 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Aa", label: "Effective Peak Acceleration, Aa", def: "0.15"},
+    {k: "Av", label: "Effective Peak Velocity, Av", def: "0.2"},
+    {k: "Ae", label: "Reduced Effective Peak Acceleration, Ae", def: "0.13"},
+    {k: "Ad", label: "Eff. Peak Accel. for Damage Threshold, Ad", def: "0.07"},
+    {k: "GroupUse", label: "Group of Use", choices: ["Group 1", "Group 2", "Group 3", "Group 4"], def: "Group 4"},
+    {k: "Fa", label: "Amplification Factor for Acceleration, Fa", def: "1.2"},
+    {k: "Fv", label: "Amplification Factor for Velocity, Fv", def: "1.6"},
+  ],
+  calc(v) {
+    const Aa = RS.n(v.Aa), Av = RS.n(v.Av), Fa = RS.n(v.Fa), Fv = RS.n(v.Fv);
+    const I = {"Group 1": 1.0, "Group 2": 1.1, "Group 3": 1.25, "Group 4": 1.5}[v.GroupUse] ?? 1;
+    const TC = 0.48 * Av * Fv / (Aa * Fa), TL = 2.4 * Fv;
+    const sa = T => T <= TC ? 2.5 * Aa * Fa * I : T <= TL ? 1.2 * Av * Fv * I / T : 1.2 * Av * Fv * TL * I / (T * T);
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, ...RS.range(2, 5, 0.5), 6, 7, 8, 9, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "NSR-10 A.2.6 spectrum (flat from T=0 as in the picture; TC = 0.48AvFv/(AaFa), TL = 2.4Fv). Group of Use list (Group 1..4, I = 1.0/1.1/1.25/1.5) is from knowledge; the .s2k text 'Group 4' etc. is the shown text (guess). Ae and Ad are stored but not used by the curve. Grid past 1.5 s is a guess.",
+};
+
+SAP_RS["Costa Rica Seismic Code 2010"] = {
+  table: "Function - Response Spectrum - Costa Rica Seismic Code 2010",
+  title: "Costa Rica Seismic Code 2010 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Zone", label: "Seismic Zone", choices: ["II", "III", "IV"], def: "III"},
+    {k: "SoilType", label: "Soil Type", choices: ["S1", "S2", "S3", "S4"], def: "S2"},
+    {k: "Occupancy", label: "Occupancy", choices: ["Group A", "Group B", "Group C", "Group D", "Group E"], def: "Group D"},
+    {k: "Overstrength", label: "Ductility Overstrength", choices: ["1", "1.5", "2", "3", "4", "6"], def: "3"},
+    {k: "OSFactor", label: "Overstrength Factor", def: "2."},
+  ],
+  calc(v) {
+    // CSCR-2010 Table 2.3 effective peak acceleration aef.
+    const AEF = {II: {S1: 0.20, S2: 0.24, S3: 0.28, S4: 0.24}, III: {S1: 0.30, S2: 0.33, S3: 0.36, S4: 0.33}, IV: {S1: 0.40, S2: 0.40, S3: 0.44, S4: 0.36}};
+    const aef = (AEF[v.Zone] || AEF.III)[v.SoilType] ?? 0.33;
+    const I = {"Group A": 1.5, "Group B": 1.25, "Group C": 1.0, "Group D": 1.0, "Group E": 0.75}[v.Occupancy] ?? 1;
+    const mu = RS.n(v.Overstrength), SR = RS.n(v.OSFactor);
+    // Elastic Newmark-Hall shape: plateau amplification and acceleration/velocity and velocity/displacement corners per soil (guess).
+    const Amp = 2.5, Tc = {S1: 0.4, S2: 0.6, S3: 0.8, S4: 1.2}[v.SoilType] ?? 0.6, Td = 2.5;
+    const T1 = 1 / 33, T2 = 1 / 8, Rp = Math.sqrt(2 * mu - 1);
+    const plat = Amp / Rp, Tv = Tc * Rp / mu; // inelastic plateau meets velocity branch (Amp*Tc/T)/mu at Tv
+    const fed = T => T <= T1 ? 1 : T <= T2 ? Math.exp(Math.log(plat) * Math.log(T / T1) / Math.log(T2 / T1)) : T <= Tv ? plat : T <= Td ? Amp * Tc / (T * mu) : Amp * Tc * Td / (T * T * mu);
+    const sa = T => aef * I * fed(T) / SR;
+    const grid = [0, 0.02, 0.03, T1, ...RS.range(0.04, 0.3, 0.01), ...RS.range(0.35, 1, 0.05), ...RS.range(1.1, 4, 0.1), ...RS.range(4.5, 10, 0.5)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Sa = aef*I*FED/SR. FED uses the Newmark-Hall inelastic construction (1 up to 1/33 s, log-log rise to 2.5/sqrt(2mu-1) at 1/8 s), which reproduces the visible rows (0 to 0.12 s) to within 1 in the 4th digit (0.08/0.09/0.11 s are off by 0.0001; SAP probably interpolates rounded FED values). Beyond the plateau the corner periods (Tc = 0.4/0.6/0.8/1.2 s for S1..S4, Td = 2.5 s, plateau 2.5 for all soils) are NOT from the code tables - guesses; the CSCR-2010 FED figures may differ past 0.125 s. aef table and Occupancy importance (A 1.5, B 1.25, C 1.0, D 1.0, E 0.75) are from memory. Lists: Zone II/III/IV, Soil S1..S4, Occupancy Group A..E, Ductility 1/1.5/2/3/4/6 are from knowledge; .s2k texts are the shown texts (guess). Label 'Ductility Overstrength' is as shown in the picture (field Overstrength = global ductility). Grid past 0.12 s is a guess.",
+};
+
+SAP_RS["Dominican Republic R-001"] = {
+  table: "Function - Response Spectrum - Dominican Republic R-001",
+  title: "Dominican Republic R-001 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Ss", label: "Sorted Spectral Short Period, Ss", def: "1.55"},
+    {k: "S1", label: "Sorted Spectral Long Period, S1", def: "0.75"},
+    {k: "Fa", label: "Soil Factor for Short Period, Fa", def: "1.2"},
+    {k: "Fv", label: "Soil Factor for Long Period, Fv", def: "1.5"},
+    {k: "Location", label: "Location in Near Field", choices: ["FCA", "FCB", "FCC"], def: "FCC"},
+    {k: "Classification", label: "Classification by Use of Structure", choices: ["1", "2", "3", "4"], def: "4"},
+    {k: "R", label: "Response Modification Factor, R", def: "5.5"},
+  ],
+  calc(v) {
+    const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), Fa = RS.n(v.Fa), Fv = RS.n(v.Fv), R = RS.n(v.R);
+    const I = {"1": 1.5, "2": 1.3, "3": 1.2, "4": 1.0}[v.Classification] ?? 1;
+    const SDS = 2 / 3 * Fa * Ss, SD1 = 2 / 3 * Fv * S1, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const el = T => T < T0 ? SDS * (0.4 + 0.6 * T / T0) : T <= Ts ? SDS : SD1 / T;
+    const sa = T => Math.max(el(T) * I / R, 0.03);
+    const grid = [...RS.range(0, 0.2, 0.05), ...RS.range(0.3, 1, 0.1), ...RS.range(1.2, 3, 0.2), ...RS.range(3.5, 10, 0.5)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Sa = (SDS, SD1 shape with T0 = 0.2Ts) * I / R with SDS = 2/3 Fa Ss, SD1 = 2/3 Fv S1; all visible rows match. The flat tail in the graph is modelled as a 0.03 g minimum (guess, matches the graph's flat level). Location in Near Field list (FCA/FCB/FCC) and its role are guesses (only 'FCC' visible; not used by the curve). Classification list 1..4 from knowledge; importance factors 1.5/1.3/1.2/1.0 are guesses (4 = 1.0 matches the picture). Labels 'Sorted Spectral ...' are as shown. Grid past 1 s is a guess.",
+};
+
+SAP_RS["Ecuador NEC-11 Capitulo 2"] = {
+  table: "Function - Response Spectrum - Ecuador NEC-11 Capitulo 2",
+  title: "Ecuador NEC-11 Capitulo 2 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Zone", label: "Zone Coefficient, Z", def: "0.4"},
+    {k: "Coeff", label: "η Coefficient", def: "1.8"},
+    {k: "Fa", label: "Site Factor, Fa", def: "1.2"},
+    {k: "Fd", label: "Site Factor, Fd", def: "1.4"},
+    {k: "SoilType", label: "Soil Type", choices: ["A", "B", "C", "D", "E", "F"], def: "A"},
+    {k: "FS", label: "Inelastic Behavior Fctor of Subsurface, Fs", def: "1.5"},
+    {k: "I", label: "Importance Factor, I", def: "1."},
+    {k: "R", label: "Response Modification Factor, R", def: "5."},
+  ],
+  calc(v) {
+    const Z = RS.n(v.Zone), eta = RS.n(v.Coeff), Fa = RS.n(v.Fa), Fd = RS.n(v.Fd), Fs = RS.n(v.FS), I = RS.n(v.I), R = RS.n(v.R);
+    const Tc = 0.55 * Fs * Fd / Fa, r = (v.SoilType === "D" || v.SoilType === "E") ? 1.5 : 1;
+    const sa = T => (T <= Tc ? eta * Z * Fa : eta * Z * Fa * Math.pow(Tc / T, r)) * I / R;
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, ...RS.range(2, 5, 0.5), 6, 7, 8, 9, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Sa = eta*Z*Fa for T <= Tc = 0.55FsFd/Fa, eta*Z*Fa*(Tc/T)^r after, times I/R; flat from T=0 as in the picture. r = 1.5 for soil D and E, 1 otherwise (NEC-11, from memory). Soil Type list A..F from knowledge. Label 'Fctor' is spelled as shown. Grid past 1.5 s is a guess.",
+};
+
+SAP_RS["Ecuador Norma NEC-SE-DS 2015"] = {
+  table: "Function - Response Spectrum - Ecuador Norma NEC-SE-DS 2015",
+  title: "Ecuador Norma NEC-SE-DS 2015 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Zone", label: "Zone Coefficient, Z", def: "0.25"},
+    {k: "Coeff", label: "η Coefficient", def: "2.48"},
+    {k: "Fa", label: "Site Factor, Fa", def: "1.3"},
+    {k: "Fd", label: "Site Factor, Fd", def: "1.28"},
+    {k: "SoilType", label: "Soil Type", choices: ["A", "B", "C", "D", "E", "F"], def: "C"},
+    {k: "FS", label: "Inelastic Behavior Fctor of Subsurface, Fs", def: "0.94"},
+    {k: "I", label: "Importance Factor, I", def: "1.3"},
+    {k: "R", label: "Response Modification Factor, R", def: "5."},
+  ],
+  calc(v) {
+    const Z = RS.n(v.Zone), eta = RS.n(v.Coeff), Fa = RS.n(v.Fa), Fd = RS.n(v.Fd), Fs = RS.n(v.FS), I = RS.n(v.I), R = RS.n(v.R);
+    const Tc = 0.55 * Fs * Fd / Fa, r = v.SoilType === "E" ? 1.5 : 1;
+    const sa = T => (T <= Tc ? eta * Z * Fa : eta * Z * Fa * Math.pow(Tc / T, r)) * I / R;
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, ...RS.range(2, 5, 0.5), 6, 7, 8, 9, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "NEC-SE-DS 2015 3.3.1: Sa = eta*Z*Fa up to Tc = 0.55FsFd/Fa, then eta*Z*Fa*(Tc/T)^r (r = 1.5 for soil E, 1 otherwise), times I/R; all visible rows match. No TL branch (TL = 2.4Fd is for displacement spectra). Soil Type list A..F from knowledge. Label 'Fctor' is spelled as shown. Grid past 1.5 s is a guess.",
+};
+
+SAP_RS["EuroCode8 1994"] = {
+  table: "Function - Response Spectrum - EuroCode8",
+  title: "Response Spectrum EuroCode 8 - 1994 Function Definition",
+  layout: "top",
+  items: [
+    {k: "Ag", label: "Design Ground Acceleration, Ag", def: "0.4"},
+    {k: "SoilClass", label: "Subsoil Class", choices: ["A", "B", "C"], def: "B"},
+    {k: "DampFactor", label: "Damping Correction Factor, n", def: "1."},
+  ],
+  calc(v) {
+    const ag = RS.n(v.Ag), eta = RS.n(v.DampFactor);
+    // ENV 1998-1-1 Table 4.1 (elastic spectrum: beta0 = 2.5, k1 = 1, k2 = 2).
+    const P = {A: [1.0, 0.10, 0.40, 3.0], B: [1.0, 0.15, 0.60, 3.0], C: [0.9, 0.20, 0.80, 3.0]}[v.SoilClass] || [1.0, 0.15, 0.60, 3.0];
+    const [S, TB, TC, TD] = P, b0 = 2.5;
+    const sa = T => T < TB ? ag * S * (1 + T / TB * (eta * b0 - 1)) : T <= TC ? ag * S * eta * b0 : T <= TD ? ag * S * eta * b0 * TC / T : ag * S * eta * b0 * TC / TD * Math.pow(TD / T, 2);
+    const grid = [0, 0.1, TB, ...RS.range(0.2, 10, 0.2)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Picture uses the 'top' arrangement (same as Chinese 2010). ENV 1998-1-1 elastic spectrum with Table 4.1 values (S, TB, TC, TD = 1.0/0.10/0.40/3.0, 1.0/0.15/0.60/3.0, 0.9/0.20/0.80/3.0 for A/B/C); all visible rows match. Subsoil Class list A/B/C from knowledge. The damping label reads 'n' in the picture (probably the Greek eta drawn small) - kept as 'n'. Grid past 1 s (0.2 s steps to 10 s) is a guess.",
+};
+
+SAP_RS["EuroCode8 2004"] = {
+  table: "Function - Response Spectrum - EuroCode8 2004",
+  title: "Response Spectrum EuroCode 8 - 2004 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Country", label: "Country", choices: ["CEN Default", "Bulgaria", "Denmark", "Finland", "Greece", "Ireland", "Italy", "Norway", "Portugal", "Romania", "Singapore", "Slovenia", "Sweden", "United Kingdom"], def: "CEN Default"},
+    {k: "Direction", label: "Direction", choices: ["Horizontal", "Vertical"], def: "Horizontal"},
+    {k: "Ag", label: "Horizontal Ground Accel.,  ag/g", def: "0.4"},
+    {k: "SpecType", label: "Spectrum Type", choices: ["1", "2"], def: "1"},
+    {k: "GroundType", label: "Ground Type", choices: ["A", "B", "C", "D", "E"], def: "B"},
+    {k: "SoilFact", label: "Soil Factor, S", out: true},
+    {k: "AvgOverAg", label: "Acceleration Ratio,  Avg/Ag", out: true},
+    {k: "Tb", label: "Spectrum Period, Tb", out: true},
+    {k: "Tc", label: "Spectrum Period, Tc", out: true},
+    {k: "Td", label: "Spectrum Period, Td", out: true},
+    {k: "LBFact", label: "Lower Bound Factor, Beta", out: true},
+    {k: "BehaveFact", label: "Behavior Factor, q", def: "2."},
+  ],
+  calc(v) {
+    const ag = RS.n(v.Ag), q = RS.n(v.BehaveFact), type2 = v.SpecType === "2", vert = v.Direction === "Vertical";
+    // EN 1998-1 Tables 3.2 (Type 1), 3.3 (Type 2): S, TB, TC, TD.
+    const T1 = {A: [1.0, 0.15, 0.4, 2.0], B: [1.2, 0.15, 0.5, 2.0], C: [1.15, 0.20, 0.6, 2.0], D: [1.35, 0.20, 0.8, 2.0], E: [1.4, 0.15, 0.5, 2.0]};
+    const T2 = {A: [1.0, 0.05, 0.25, 1.2], B: [1.35, 0.05, 0.25, 1.2], C: [1.5, 0.10, 0.25, 1.2], D: [1.8, 0.10, 0.30, 1.2], E: [1.6, 0.05, 0.25, 1.2]};
+    let [S, TB, TC, TD] = (type2 ? T2 : T1)[v.GroundType] || T1.B, a = ag, avg = "";
+    if (vert) { // EN 1998-1 3.2.2.3 Table 3.4 and 3.2.2.5(5): avg replaces ag, S = 1.
+      avg = type2 ? 0.45 : 0.9;
+      a = ag * avg; S = 1; TB = 0.05; TC = 0.15; TD = 1.0;
+    }
+    const beta = 0.2;
+    const sa = T => T < TB ? a * S * (2 / 3 + T / TB * (2.5 / q - 2 / 3)) : T <= TC ? a * S * 2.5 / q : T <= TD ? Math.max(a * S * 2.5 / q * TC / T, beta * a) : Math.max(a * S * 2.5 / q * TC * TD / (T * T), beta * a);
+    const grid = [0, ...RS.range(0.05, TB, 0.05), TB, TC, ...RS.range(0.25, 10, 0.25).filter(t => t > TC + 1e-9)];
+    return {set: {SoilFact: S, AvgOverAg: avg, Tb: TB, Tc: TC, Td: TD, LBFact: beta}, pts: RS.curve(sa, grid)};
+  },
+  notes: "EN 1998-1 3.2.2.5 design spectrum with CEN Tables 3.2/3.3; all visible rows match. S, Tb, Tc, Td and Beta are greyed (calculated) as in the picture. Avg/Ag is greyed and blank for Horizontal (as shown); for Vertical it stays greyed and is filled from Table 3.4 (0.90 Type 1, 0.45 Type 2), with S = 1, Tb/Tc/Td = 0.05/0.15/1.0 (behaviour from knowledge, not pictured). Country list is from knowledge (only 'CEN Default' is visible); National Annex values are not implemented - every country uses the CEN tables (gap). Direction, Spectrum Type (1/2) and Ground Type (A..E) lists from knowledge. Grid past 1.25 s (0.25 s steps to 10 s) is a guess.",
+};
+// SAP2000 26.3 response spectrum code forms, part 3 (Define/RS/20..28).
+
+SAP_RS["GB50111-2006"] = {
+  table: "Function - Response Spectrum - GB501112006",
+  title: "Response Spectrum Chinese GB50111-2006 Function Definition",
+  layout: "side",
+  items: [
+    {k: "A", label: "Max Influence Factor, AlphaMax", def: "0.1"},
+    {k: "SI", label: "Seismic Intensity, SI", choices: ["7 (0.10g)", "7 (0.15g)", "8 (0.20g)", "8 (0.30g)", "9 (0.40g)"], def: "7 (0.10g)"},
+    {k: "Tg", label: "Characteristic Ground Period, Tg", def: "0.4"},
+  ],
+  calc(v) {
+    // GB 50111-2006 (railway) dynamic factor: beta = 2.25 plateau 0.1 s..Tg, 2.25*Tg/T after; 0.45*plateau at T = 0.
+    const A = RS.n(v.A), Tg = RS.n(v.Tg), top = 2.25 * A;
+    const sa = t => t < 0.1 ? top * (0.45 + 5.5 * t) : t <= Tg ? top : top * Tg / t;
+    const grid = [0, ...RS.range(0.1, Tg, 0.1), Tg, ...RS.range(0.2, 2, 0.2).filter(t => t >= Tg + 0.2 - 1e-9)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Seismic Intensity list is from knowledge of GB50111-2006 (design basic accelerations 0.10g..0.40g), only '7 (0.10g)' is visible; " +
+    "the .s2k value text for SI is a guess (shown text used). AlphaMax is kept as the user's value (the picture shows it editable); " +
+    "the curve uses AlphaMax only, SI is not used in calc. Grid ends at 2 s (fitted to the picture's graph); steps after 1 s guessed (0.2 s).",
+};
+
+SAP_RS["Guatemala AGIES NSE 2-10"] = {
+  table: "Function - Response Spectrum - Guatemala AGIES NSE 2-10",
+  title: "Guatemala AGIES NSE 2-10 Function Definition",
+  layout: "side",
+  items: [
+    {k: "I0", label: "Seismicity Index, I0", def: "4."},
+    {k: "Scr", label: "Spectral sorted for Short Period, Scr", def: "1.5"},
+    {k: "S1r", label: "Spectral sorted for Long Period, S1r", def: "0.55"},
+    {k: "FS", label: "Type of Seismic Source, Fs", choices: ["A", "B", "C"], def: "B"},
+    {k: "Dh", label: "Horizontal Distance to Seismic Source, Dh", choices: ["≤2 km", "5 km", "10 km", "≥15 km"], def: "≥15 km"},
+    {k: "TS", label: "Type of Earthquake, TS", choices: ["Ordinary", "Severe", "Extreme", "Minimum"], def: "Severe"},
+    {k: "Fa", label: "Site Coefficient, Fa", def: "1."},
+    {k: "Fv", label: "Site Coefficient, Fv", def: "1.5"},
+    {k: "R", label: "Response Modification Factor, R", def: "8."},
+  ],
+  calc(v) {
+    // AGIES NSE 2-10 sec. 4.5: Scs = Scr*Fa*Na, S1s = S1r*Fv*Nv, Scd = Kd*Scs, S1d = Kd*S1s, Ts = S1s/Scs;
+    // Sa = Scd (T <= Ts), S1d/T (T > Ts); divided by R.
+    const Scr = RS.n(v.Scr), S1r = RS.n(v.S1r), Fa = RS.n(v.Fa), Fv = RS.n(v.Fv), R = RS.n(v.R);
+    const dist = {"≤2 km": 2, "5 km": 5, "10 km": 10, "≥15 km": 15}[v.Dh] ?? 15;
+    const NA = {A: [[2, 1.25], [5, 1.12], [10, 1.0]], B: [[2, 1.12], [5, 1.0], [10, 1.0]], C: [[2, 1], [15, 1]]};
+    const NV = {A: [[2, 1.4], [5, 1.2], [10, 1.1], [15, 1.0]], B: [[2, 1.2], [5, 1.1], [10, 1.0], [15, 1.0]], C: [[2, 1], [15, 1]]};
+    const src = NA[v.FS] ? v.FS : "C";
+    const Na = RS.interp(NA[src], dist), Nv = RS.interp(NV[src], dist);
+    const Kd = {Minimum: 0.55, Ordinary: 0.66, Severe: 0.80, Extreme: 1.0}[v.TS] ?? 0.8;
+    const Scs = Scr * Fa * Na, S1s = S1r * Fv * Nv, Scd = Kd * Scs / R, S1d = Kd * S1s / R, Ts = S1s / Scs;
+    const sa = t => t <= Ts ? Scd : S1d / t;
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10, 12, 15];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Drop-down lists are from knowledge (only B, '≥15 km', 'Severe' visible). TS option names and order are a guess " +
+    "(AGIES levels: minimum 0.55, ordinary/basic 0.66, severe 0.80, extreme 1.00 = Kd). Dh/TS/FS .s2k value texts are guesses (shown text). " +
+    "Near-source factors Na/Nv per AGIES NSE 2-10 table 4-6 (from knowledge). I0 is informational (not used in calc). " +
+    "Grid after 1.5 s is a guess; the graph ends near 15 s (fitted).",
+};
+
+SAP_RS["IBC 2003"] = {
+  table: "Function - Response Spectrum - IBC2003",
+  title: "Response Spectrum IBC 2003 Function Definition",
+  layout: "side",
+  items: [
+    {heading: "Design Spectral Response Acceleration"},
+    {k: "SDS", label: "at Short Period, Sds", indent: true, def: "1."},
+    {k: "SD1", label: "at 1 Second Period,Sd1", indent: true, def: "0.4"},
+  ],
+  calc(v) {
+    const SDS = RS.n(v.SDS), SD1 = RS.n(v.SD1), Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : SD1 / t;
+    const grid = [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2 - 1e-9)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Label 'at 1 Second Period,Sd1' has no space after the comma in the picture. Grid to 10 s fitted to the graph.",
+};
+
+// IBC 2006 / 2009 / 2012 forms are identical (ASCE 7-05 / 7-10 site coefficient tables 11.4-1, 11.4-2).
+SAP_RS["IBC 2006"] = {
+  table: "Function - Response Spectrum - IBC2006",
+  title: "Response Spectrum IBC 2006 Function Definition",
+  layout: "side",
+  items: [
+    {k: "AccOption", radio: [["Ss and S1 from USGS - by Lat./Long.", "Ss and S1 from USGS - by Lat./Long."], ["Ss and S1 from USGS - by Zip Code", "Ss and S1 from USGS - by Zip Code"], ["Ss and S1 User Specified", "Ss and S1 User Specified"]], def: "Ss and S1 User Specified"},
+    {k: "Latitude", label: "Site Latitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Lat./Long."},
+    {k: "Longitude", label: "Site Longitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Lat./Long."},
+    {k: "ZipCode", label: "Site Zip Code (5-Digits)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Zip Code"},
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss", indent: true, out: true, def: "2.29", en: v => v.AccOption === "Ss and S1 User Specified"},
+    {k: "S1", label: "1 Sec Spectral Accel, S1", indent: true, out: true, def: "0.869", en: v => v.AccOption === "Ss and S1 User Specified"},
+    {k: "TL", label: "Long-Period Transition Period", indent: true, def: "8."},
+    {sep: true},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "C", "D", "E", "F"], def: "B"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {sep: true},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true, out: true},
+    {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true, out: true},
+  ],
+  calc(v) {
+    const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), TL = RS.n(v.TL), sc = v.SiteClass;
+    const FA = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.2, 1.2, 1.1, 1.0, 1.0], D: [1.6, 1.4, 1.2, 1.1, 1.0], E: [2.5, 1.7, 1.2, 0.9, 0.9]};
+    const FV = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.7, 1.6, 1.5, 1.4, 1.3], D: [2.4, 2.0, 1.8, 1.6, 1.5], E: [3.5, 3.2, 2.8, 2.4, 2.4]};
+    const Fa = sc === "F" ? RS.n(v.Fa) : RS.interp([0.25, 0.5, 0.75, 1, 1.25].map((x, i) => [x, FA[sc][i]]), Ss);
+    const Fv = sc === "F" ? RS.n(v.Fv) : RS.interp([0.1, 0.2, 0.3, 0.4, 0.5].map((x, i) => [x, FV[sc][i]]), S1);
+    const SDS = 2 / 3 * Fa * Ss, SD1 = 2 / 3 * Fv * S1, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : t <= TL ? SD1 / t : SD1 * TL / (t * t);
+    const grid = [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2 - 1e-9), TL];
+    return {set: {Ss, S1, Fa, Fv, SDS, SD1}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Each of Site Latitude / Longitude / Zip Code has a small '?' button between the label and the box (not in the schema). " +
+    "AccOption .s2k value texts are guesses (shown text used). Lat/Long and Zip Code need SAP2000's USGS database: those options " +
+    "stay selectable, their boxes enable, Ss/S1 grey and keep their numeric values for the curve. Lat/Long/Zip defaults are blank " +
+    "(greyed, unreadable in the picture). TL editable in all modes (assumed).",
+};
+
+SAP_RS["IBC 2009"] = {
+  table: "Function - Response Spectrum - IBC2009",
+  title: "Response Spectrum IBC 2009 Function Definition",
+  layout: "side",
+  items: [
+    {k: "AccOption", radio: [["Ss and S1 from USGS - by Lat./Long.", "Ss and S1 from USGS - by Lat./Long."], ["Ss and S1 from USGS - by Zip Code", "Ss and S1 from USGS - by Zip Code"], ["Ss and S1 User Specified", "Ss and S1 User Specified"]], def: "Ss and S1 User Specified"},
+    {k: "Latitude", label: "Site Latitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Lat./Long."},
+    {k: "Longitude", label: "Site Longitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Lat./Long."},
+    {k: "ZipCode", label: "Site Zip Code (5-Digits)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Zip Code"},
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss", indent: true, out: true, def: "2.29", en: v => v.AccOption === "Ss and S1 User Specified"},
+    {k: "S1", label: "1 Sec Spectral Accel, S1", indent: true, out: true, def: "0.869", en: v => v.AccOption === "Ss and S1 User Specified"},
+    {k: "TL", label: "Long-Period Transition Period", indent: true, def: "8."},
+    {sep: true},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "C", "D", "E", "F"], def: "B"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {sep: true},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true, out: true},
+    {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true, out: true},
+  ],
+  calc(v) {
+    const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), TL = RS.n(v.TL), sc = v.SiteClass;
+    const FA = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.2, 1.2, 1.1, 1.0, 1.0], D: [1.6, 1.4, 1.2, 1.1, 1.0], E: [2.5, 1.7, 1.2, 0.9, 0.9]};
+    const FV = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.7, 1.6, 1.5, 1.4, 1.3], D: [2.4, 2.0, 1.8, 1.6, 1.5], E: [3.5, 3.2, 2.8, 2.4, 2.4]};
+    const Fa = sc === "F" ? RS.n(v.Fa) : RS.interp([0.25, 0.5, 0.75, 1, 1.25].map((x, i) => [x, FA[sc][i]]), Ss);
+    const Fv = sc === "F" ? RS.n(v.Fv) : RS.interp([0.1, 0.2, 0.3, 0.4, 0.5].map((x, i) => [x, FV[sc][i]]), S1);
+    const SDS = 2 / 3 * Fa * Ss, SD1 = 2 / 3 * Fv * S1, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : t <= TL ? SD1 / t : SD1 * TL / (t * t);
+    const grid = [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2 - 1e-9), TL];
+    return {set: {Ss, S1, Fa, Fv, SDS, SD1}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Each of Site Latitude / Longitude / Zip Code has a small '?' button between the label and the box (not in the schema). " +
+    "AccOption .s2k value texts are guesses (shown text used). Lat/Long and Zip Code need SAP2000's USGS database: those options " +
+    "stay selectable, their boxes enable, Ss/S1 grey and keep their numeric values for the curve. Lat/Long/Zip defaults are blank " +
+    "(greyed, unreadable in the picture). TL editable in all modes (assumed).",
+};
+
+SAP_RS["IBC 2012"] = {
+  table: "Function - Response Spectrum - IBC2012",
+  title: "Response Spectrum IBC 2012 Function Definition",
+  layout: "side",
+  items: [
+    {k: "AccOption", radio: [["Ss and S1 from USGS - by Lat./Long.", "Ss and S1 from USGS - by Lat./Long."], ["Ss and S1 from USGS - by Zip Code", "Ss and S1 from USGS - by Zip Code"], ["Ss and S1 User Specified", "Ss and S1 User Specified"]], def: "Ss and S1 User Specified"},
+    {k: "Latitude", label: "Site Latitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Lat./Long."},
+    {k: "Longitude", label: "Site Longitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Lat./Long."},
+    {k: "ZipCode", label: "Site Zip Code (5-Digits)", indent: true, def: "", en: v => v.AccOption === "Ss and S1 from USGS - by Zip Code"},
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss", indent: true, out: true, def: "2.29", en: v => v.AccOption === "Ss and S1 User Specified"},
+    {k: "S1", label: "1 Sec Spectral Accel, S1", indent: true, out: true, def: "0.869", en: v => v.AccOption === "Ss and S1 User Specified"},
+    {k: "TL", label: "Long-Period Transition Period", indent: true, def: "8."},
+    {sep: true},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "C", "D", "E", "F"], def: "B"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {sep: true},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true, out: true},
+    {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true, out: true},
+  ],
+  calc(v) {
+    const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), TL = RS.n(v.TL), sc = v.SiteClass;
+    const FA = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.2, 1.2, 1.1, 1.0, 1.0], D: [1.6, 1.4, 1.2, 1.1, 1.0], E: [2.5, 1.7, 1.2, 0.9, 0.9]};
+    const FV = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.7, 1.6, 1.5, 1.4, 1.3], D: [2.4, 2.0, 1.8, 1.6, 1.5], E: [3.5, 3.2, 2.8, 2.4, 2.4]};
+    const Fa = sc === "F" ? RS.n(v.Fa) : RS.interp([0.25, 0.5, 0.75, 1, 1.25].map((x, i) => [x, FA[sc][i]]), Ss);
+    const Fv = sc === "F" ? RS.n(v.Fv) : RS.interp([0.1, 0.2, 0.3, 0.4, 0.5].map((x, i) => [x, FV[sc][i]]), S1);
+    const SDS = 2 / 3 * Fa * Ss, SD1 = 2 / 3 * Fv * S1, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : t <= TL ? SD1 / t : SD1 * TL / (t * t);
+    const grid = [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2 - 1e-9), TL];
+    return {set: {Ss, S1, Fa, Fv, SDS, SD1}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Each of Site Latitude / Longitude / Zip Code has a small '?' button between the label and the box (not in the schema). " +
+    "AccOption .s2k value texts are guesses (shown text used). Lat/Long and Zip Code need SAP2000's USGS database: those options " +
+    "stay selectable, their boxes enable, Ss/S1 grey and keep their numeric values for the curve. Lat/Long/Zip defaults are blank " +
+    "(greyed, unreadable in the picture). TL editable in all modes (assumed).",
+};
+
+
+
+SAP_RS["IS 1893-2016"] = {
+  table: "Function - Response Spectrum - IS 1893:2016",
+  title: "Response Spectrum IS 1893-2016 Function Definition",
+  layout: "side",
+  items: [
+    {k: "SeismicZone", label: "Seismic Zone", choices: ["II", "III", "IV", "V"], def: "V"},
+    {k: "Z", label: "Seismic Zone Factor, Z", out: true},
+    {k: "I", label: "Importance Factor , I", def: "1."},
+    {k: "SoilType", label: "Soil Type", choices: ["I", "II", "III"], def: "II"},
+    {k: "R", label: "Response Reduction Factor, R", def: "5."},
+  ],
+  calc(v) {
+    const Z = {II: 0.10, III: 0.16, IV: 0.24, V: 0.36}[v.SeismicZone] ?? 0.36, I = RS.n(v.I), R = RS.n(v.R);
+    const f = Z / 2 * I / R;
+    const sag = (soil, t) => {
+      // IS 1893 Sa/g (5% damping), soil I/II/III; constant beyond 4 s.
+      const [Tc, c] = {I: [0.4, 1.0], II: [0.55, 1.36], III: [0.67, 1.67]}[soil] || [0.55, 1.36];
+      return t < 0.1 ? 1 + 15 * t : t <= Tc ? 2.5 : c / Math.min(t, 4);
+    };
+    const Tc = {I: 0.4, II: 0.55, III: 0.67}[v.SoilType] || 0.55;
+    const grid = [0, 0.1, Tc, ...RS.range(0.2, 10, 0.2).filter(t => t >= Tc + 0.2 - 1e-9), 4];
+    return {set: {Z}, pts: RS.curve(t => f * sag(v.SoilType, t), grid)};
+  },
+  notes: "Zone and soil lists from IS 1893(Part 1):2016 (only V and II visible). .s2k value texts for SeismicZone/SoilType are guesses " +
+    "(Roman numerals). Label 'Importance Factor , I' has a space before the comma in the picture. Ah = (Z/2)(I/R)(Sa/g).",
+};
+
+SAP_RS["IS1893 2002"] = {
+  table: "Function - Response Spectrum - IS1893:2002",
+  title: "Response Spectrum  IS1893:2002 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Z", label: "Seismic Zone Factor, Z", def: "0.36"},
+    {k: "SoilType", label: "Soil Type", choices: ["I", "II", "III"], def: "II"},
+  ],
+  calc(v) {
+    const Z = RS.n(v.Z);
+    const sag = (soil, t) => {
+      // IS 1893 Sa/g (5% damping), soil I/II/III; constant beyond 4 s.
+      const [Tc, c] = {I: [0.4, 1.0], II: [0.55, 1.36], III: [0.67, 1.67]}[soil] || [0.55, 1.36];
+      return t < 0.1 ? 1 + 15 * t : t <= Tc ? 2.5 : c / Math.min(t, 4);
+    };
+    const Tc = {I: 0.4, II: 0.55, III: 0.67}[v.SoilType] || 0.55;
+    const grid = [0, 0.1, Tc, ...RS.range(0.2, 10, 0.2).filter(t => t >= Tc + 0.2 - 1e-9), 4];
+    return {set: {}, pts: RS.curve(t => Z * sag(v.SoilType, t), grid)};
+  },
+  notes: "Title shows two spaces after 'Spectrum' in the picture (kept). Soil list from knowledge (only II visible); value text guessed. " +
+    "Curve = Z * Sa/g (matches picture); beyond 4 s the 4 s value is held (the 2002 code stops at 4 s).",
+};
+
+SAP_RS["Italian 3274"] = {
+  table: "Function - Response Spectrum - Italian 3274",
+  title: "Response Spectrum Italian Ordinanza 3274 Function Definition",
+  layout: "side",
+  items: [
+    {k: "PGA", label: "Peak Ground Acceleration", def: "0.25"},
+    {k: "SoilType", label: "Soil Type", choices: ["A", "B", "C", "D", "E"], def: "C"},
+    {k: "StructFact", label: "Structure Factor", def: "1."},
+    {k: "SpecLevel", label: "Spec Level/Direction/Structure", choices: ["SLU/H/Building", "SLU/V/Building", "SLD/H/Building", "SLD/V/Building", "SLU/H/Bridge", "SLU/V/Bridge", "SLD/H/Bridge", "SLD/V/Bridge"], def: "SLU/H/Building"},
+    // One SAP2000 drop-down writes three table fields: Direction and StructType follow it and are not drawn.
+    {k: "Direction", label: "Direction", out: true, hidden: true},
+    {k: "StructType", label: "Structure Type", out: true, hidden: true},
+  ],
+  calc(v) {
+    const [lvl, dir, st] = String(v.SpecLevel || "SLU/H/Building").split("/");
+    const ag = RS.n(v.PGA), q = RS.n(v.StructFact);
+    const soil = {A: [1.0, 0.15, 0.4, 2.0], B: [1.25, 0.15, 0.5, 2.0], C: [1.25, 0.15, 0.5, 2.0], D: [1.35, 0.2, 0.8, 2.0], E: [1.25, 0.15, 0.5, 2.0]};
+    let [S, TB, TC, TD] = soil[v.SoilType] || soil.C, amp = 2.5, a0 = ag * S;
+    if (dir === "V") { S = 1.0; TB = 0.05; TC = 0.15; TD = 1.0; amp = 3.0; a0 = 0.9 * ag; }
+    // SLU: design spectrum with q (floor 0.2 ag horizontal); SLD: elastic spectrum / 2.5.
+    const div = lvl === "SLD" ? 2.5 : q, plat = a0 * amp / div, start = lvl === "SLD" ? a0 / 2.5 : a0;
+    const floor = lvl === "SLU" && dir === "H" ? 0.2 * ag : 0;
+    const sa = t => Math.max(t < TB ? start + (plat - start) * t / TB : t <= TC ? plat : t <= TD ? plat * TC / t : plat * TC * TD / (t * t), t < TB ? 0 : floor);
+    const grid = [0, TB, TC, ...RS.range(0.1, 4, 0.1).filter(t => t >= TC + 0.1 - 1e-9), TD, ...RS.range(4.5, 10, 0.5)];
+    return {set: {Direction: dir, StructType: st}, pts: RS.curve(sa, grid)};
+  },
+  notes: "One drop-down 'Spec Level/Direction/Structure' sets three fields: its text goes to SpecLevel's split parts SpecLevel/Direction/StructType " +
+    "(k SpecLevel holds the combined text; Direction and StructType are items marked hidden:true, filled by calc — renderer should not draw them). " +
+    "Option list is from knowledge (picture shows 'SLU/H/Buil...' truncated): SLU/SLD x H/V x Building/Bridge, names and .s2k texts guessed. " +
+    "Vertical spectrum (S=1, TB 0.05, TC 0.15, TD 1.0, 0.9*ag*3.0) and SLD (= elastic / 2.5) from Ordinanza 3274, not checked against a picture. " +
+    "Bridge uses the building spectrum. Grid after 1 s is a guess (graph ends at 10 s). Plateau is exactly 0.78125: the picture shows 0.7812 (SAP rounding), RS.show gives 0.7813.",
+};
+// rs4: Italian NTC 2008/2018, JTG/T 2231-01-2020, JTG/T B02-2013, KBC 2016, KDS 41 17 00:2019, Korean KBC 2009, Mexico CFE-2008/CFE-93.
+
+// ---- Italian NTC (2008 and 2018 forms are identical; pictures 29 and 30) ----
+function NTC_ITEMS() {
+  const LL = "By Lat/Long", IS = "By Island", US = "User Specified";
+  return [
+    {k: "AccOption", radio: [[LL, "ag, F0 and Tc* - by Latitude/Longitude"], [IS, "ag, F0 and Tc* - by Island"], [US, "ag, F0 and Tc* User Specified"]], def: LL},
+    {k: "Longitude", label: "Site Longitude (degree)", indent: true, def: "12.6616", en: v => v.AccOption === LL},
+    {k: "Latitude", label: "Site Latitude (degree)", indent: true, def: "45.9572", en: v => v.AccOption === LL},
+    {k: "Island", label: "Island Name", indent: true, def: "", en: v => v.AccOption === IS,
+      choices: ["Alicudi", "Arcipelago Toscano", "Filicudi", "Isole Egadi", "Lampedusa", "Linosa", "Lipari", "Panarea", "Pantelleria", "Salina", "Sardegna", "Stromboli", "Tremiti", "Ustica", "Vulcano"]},
+    {k: "LimitState", label: "Limit State", indent: true, choices: ["SLO", "SLD", "SLV", "SLC"], def: "SLV"},
+    {k: "UsageClass", label: "Usage Class", indent: true, choices: ["I", "II", "III", "IV"], def: "II"},
+    {k: "NominalLife", label: "Nominal Life", indent: true, def: "50."},
+    {k: "agOverg", label: "Peak Ground Acc., ag/g", indent: true, out: true, def: "0.1935", en: v => v.AccOption === US},
+    {k: "F0", label: "Magnification Factor, F0", indent: true, out: true, def: "2.4438", en: v => v.AccOption === US},
+    {k: "Tcs", label: "Reference period, Tc*", indent: true, out: true, def: "0.3333", en: v => v.AccOption === US},
+    {k: "SpectrumType", label: "Spectrum Type", choices: ["Elastic Horizontal", "Elastic Vertical", "Design Horizontal", "Design Vertical"], def: "Design Horizontal"},
+    {k: "SoilType", label: "Soil Type", choices: ["A", "B", "C", "D", "E"], def: "B"},
+    {k: "Topography", label: "Topography", choices: ["T1", "T2", "T3", "T4"], def: "T1"},
+    {k: "hoverH", label: "h/H ratio", def: "1."},
+    {k: "Tb", label: "Spectrum Period, Tb", out: true, def: "0.1522"},
+    {k: "Tc", label: "Spectrum Period, Tc", out: true, def: "0.4567"},
+    {k: "Td", label: "Spectrum Period, Td", out: true, def: "2.374"},
+    {k: "Damping", label: "Damping Percentage, Xi", def: "", en: v => /^Elastic/.test(v.SpectrumType)},
+    {k: "BehaviorFactor", label: "Behavior Factor, q", def: "1.", en: v => /^Design/.test(v.SpectrumType)},
+  ];
+}
+function NTC_CALC(v, minVR) {
+  // Hazard parameters: offline only the picture's default point is known (Pordenone area, TR = 475 yr).
+  let ag = RS.n(v.agOverg), F0 = RS.n(v.F0), Tcs = RS.n(v.Tcs);
+  if (v.AccOption === "By Lat/Long") {
+    const CU = {I: 0.7, II: 1.0, III: 1.5, IV: 2.0}[v.UsageClass] ?? 1;
+    const VR = Math.max(RS.n(v.NominalLife) * CU, minVR);
+    const P = {SLO: 0.81, SLD: 0.63, SLV: 0.10, SLC: 0.05}[v.LimitState] ?? 0.1;
+    const TR = -VR / Math.log(1 - P);
+    if (Math.abs(RS.n(v.Longitude) - 12.6616) < 1e-4 && Math.abs(RS.n(v.Latitude) - 45.9572) < 1e-4 && Math.abs(TR - 475) < 1)
+      { ag = 0.1935; F0 = 2.4438; Tcs = 0.3333; }
+  }
+  const st = v.SpectrumType || "Design Horizontal", vert = /Vertical/.test(st), design = /^Design/.test(st);
+  const s = v.SoilType, x = F0 * ag;
+  const clamp = (a, lo, hi) => Math.min(hi, Math.max(lo, a));
+  // NTC Tab. 3.2.V (2008) / 3.2.IV (2018): stratigraphic amplification Ss and Cc.
+  const SS = {A: 1, B: clamp(1.40 - 0.40 * x, 1.00, 1.20), C: clamp(1.70 - 0.60 * x, 1.00, 1.50), D: clamp(2.40 - 1.50 * x, 0.90, 1.80), E: clamp(2.00 - 1.10 * x, 1.00, 1.60)}[s];
+  const CC = {A: 1, B: 1.10 * Math.pow(Tcs, -0.20), C: 1.05 * Math.pow(Tcs, -0.33), D: 1.25 * Math.pow(Tcs, -0.50), E: 1.15 * Math.pow(Tcs, -0.40)}[s];
+  const StMax = {T1: 1.0, T2: 1.2, T3: 1.2, T4: 1.4}[v.Topography] ?? 1;
+  const hH = isFinite(RS.n(v.hoverH)) ? clamp(RS.n(v.hoverH), 0, 1) : 1;
+  const St = 1 + (StMax - 1) * hH;
+  let S, Tb, Tc, Td, F;
+  if (vert) { S = St; Tb = 0.05; Tc = 0.15; Td = 1.0; F = 1.35 * F0 * Math.sqrt(ag); }
+  else { S = SS * St; Tc = CC * Tcs; Tb = Tc / 3; Td = 4 * ag + 1.6; F = F0; }
+  const xi = isFinite(RS.n(v.Damping)) ? RS.n(v.Damping) : 5;
+  const eta = design ? 1 / RS.n(v.BehaviorFactor) : Math.max(Math.sqrt(10 / (5 + xi)), 0.55);
+  const A = ag * S * eta * F;
+  const se = t => t < Tb ? A * (t / Tb + (1 / (eta * F)) * (1 - t / Tb)) : t < Tc ? A : t < Td ? A * Tc / t : A * Tc * Td / (t * t);
+  const sa = t => design && !vert ? Math.max(se(t), 0.2 * ag) : se(t);
+  const grid = [0, Tb, Tc, Td, ...RS.range(0, 4 - Tc, 0.1).map(d => Tc + d).filter(t => t <= 4 + 1e-9), 4];
+  return {set: {agOverg: ag, F0, Tcs, Tb, Tc, Td}, pts: RS.curve(sa, grid)};
+}
+const NTC_NOTES = "Hazard options: 'by Latitude/Longitude' and 'by Island' need the INGV hazard grid / island table, not available offline; " +
+  "both options stay selectable with their boxes enabled, ag/g, F0, Tc* keep the values present (SAP2000 recomputes on import). " +
+  "For the picture's default point (Lon 12.6616, Lat 45.9572, TR = 475 yr i.e. SLV, class II, VN 50) the grid values 0.1935 / 2.4438 / 0.3333 are reproduced. " +
+  "Guesses: AccOption values ('By Lat/Long', 'By Island', 'User Specified'); SpectrumType values and full list (picture shows only 'Design Horiz...'); " +
+  "Island list from NTC Allegato B Tab. 2 (picture shows an empty greyed drop-down, def left blank); Limit State / Usage Class / Soil / Topography lists from the code. " +
+  "Limit State, Usage Class, Nominal Life kept enabled in all options (unsure whether SAP2000 greys them for User Specified). " +
+  "Damping box is blank and greyed in the picture (enabled for Elastic types, blank = 5%); Behavior factor enabled for Design types. " +
+  "Topography St varies linearly with h/H (St = 1 + (Stmax-1)*h/H). Design horizontal floor Sd >= 0.2 ag applied. Period grid past 0.9567 s (0.1 s steps from Tc to 4 s, plus Td) is a guess.";
+
+SAP_RS["Italian NTC 2008"] = {
+  noHelp: true,
+  table: "Function - Response Spectrum - Italian NTC 2008",
+  title: "Response Spectrum Italian NTC2008 Function Definition",
+  layout: "side",
+  items: NTC_ITEMS(),
+  calc(v) { return NTC_CALC(v, 35); },
+  notes: NTC_NOTES + " NTC 2008: VR = VN*CU with VR >= 35 yr.",
+};
+SAP_RS["Italian NTC 2018"] = {
+  noHelp: true,
+  table: "Function - Response Spectrum - Italian NTC 2018",
+  title: "Response Spectrum Italian NTC2018 Function Definition",
+  layout: "side",
+  items: NTC_ITEMS(),
+  calc(v) { return NTC_CALC(v, 35); },
+  notes: NTC_NOTES + " Picture identical to NTC 2008 form; same spectra (NTC 2018 3.2.3).",
+};
+
+// ---- Chinese highway bridges ----
+function JTG_GRID(Tg) { return [0, ...RS.range(0.1, Math.max(Tg, 0.1), 0.1), Tg, ...RS.range(0.2, 10, 0.2).filter(t => t > Tg)]; }
+SAP_RS["JTG/T 2231-01-2020"] = {
+  listRows: 8,
+  table: "Function - Response Spectrum - JTGT2231-01-2020",
+  title: "Response Spectrum Chinese JTG/T 2231-01-2020 Function Definition",
+  layout: "top",
+  items: [
+    {k: "A", label: "Peak Acceleration, A", def: "0.1"},
+    {k: "Tg", label: "Characteristic Ground Period, Tg", def: "0.4"},
+    {k: "Ci", label: "Importance Coefficient, Ci", def: "0.43"},
+    {k: "Cs", label: "Site Soil Coefficient, Cs", def: "1."},
+  ],
+  calc(v) {
+    const A = RS.n(v.A), Tg = RS.n(v.Tg), xi = isFinite(RS.n(v.FuncDamp)) ? RS.n(v.FuncDamp) : 0.05;
+    const Cd = Math.max(1 + (0.05 - xi) / (0.08 + 1.6 * xi), 0.55), Smax = 2.5 * RS.n(v.Ci) * RS.n(v.Cs) * Cd * A;
+    const sa = t => t < 0.1 ? Smax * (0.6 * t / 0.1 + 0.4) : t <= Tg ? Smax : Smax * Tg / t;
+    return {set: {}, pts: RS.curve(sa, JTG_GRID(Tg))};
+  },
+  notes: "Smax = 2.5 Ci Cs Cd A, Cd = 1 + (0.05-xi)/(0.08+1.6xi) >= 0.55 from the Function Damping Ratio. Period grid past 1 s (0.2 s steps to 10 s) is a guess.",
+};
+SAP_RS["JTG/T B02-2013"] = {
+  listRows: 8,
+  table: "Function - Response Spectrum - JTGTB02-2013",
+  title: "Response Spectrum Chinese JTG/T B02-2013 Function Definition",
+  layout: "top",
+  items: [
+    {k: "A", label: "Peak Acceleration, A", def: "0.1"},
+    {k: "Tg", label: "Characteristic Ground Period, Tg", def: "0.4"},
+    {k: "Direction", label: "Direction", choices: ["Horizontal", "Vertical"], def: "Horizontal"},
+    {k: "Ci", label: "Importance Coefficient, Ci", def: "0.43"},
+    {k: "Cs", label: "Site Soil Coefficient, Cs", def: "1."},
+  ],
+  calc(v) {
+    const A = RS.n(v.A), Tg = RS.n(v.Tg), xi = isFinite(RS.n(v.FuncDamp)) ? RS.n(v.FuncDamp) : 0.05;
+    const Cd = Math.max(1 + (0.05 - xi) / (0.06 + 1.7 * xi), 0.55), Smax = 2.25 * RS.n(v.Ci) * RS.n(v.Cs) * Cd * A;
+    const h = t => t < 0.1 ? Smax * (5.5 * t + 0.45) : t <= Tg ? Smax : Smax * Tg / t;
+    // JTG/T B02-2013 5.2.5: vertical = horizontal x R (soil site): R = 1 (T<0.1), 1-2.5(T-0.1) (0.1..0.3), 0.5 (T>=0.3).
+    const R = t => t < 0.1 ? 1 : t < 0.3 ? 1 - 2.5 * (t - 0.1) : 0.5;
+    const sa = v.Direction === "Vertical" ? t => h(t) * R(t) : h;
+    return {set: {}, pts: RS.curve(sa, [...JTG_GRID(Tg), 0.3])};
+  },
+  notes: "Direction list ['Horizontal','Vertical'] from knowledge (picture shows Horizontal). Vertical uses the soil-site ratio R(T) of 5.2.5 (rock site R = 0.65 not offered since the form has no site-type field) - a guess at SAP2000's rule. Cd = 1 + (0.05-xi)/(0.06+1.7xi) >= 0.55 from the Function Damping Ratio. Period grid past 1 s is a guess.",
+};
+
+// ---- Korean KBC 2009 / KBC 2016 ----
+function KBC_FAFV(sc, Ss, S1) {
+  // KBC 2009 Tables 0306.3.3 / 0306.3.4.
+  const FA = {SA: [0.8, 0.8, 0.8, 0.8, 0.8], SB: [1, 1, 1, 1, 1], SC: [1.2, 1.2, 1.1, 1.0, 1.0], SD: [1.6, 1.4, 1.2, 1.1, 1.0], SE: [2.5, 1.7, 1.2, 0.9, 0.9]};
+  const FV = {SA: [0.8, 0.8, 0.8, 0.8, 0.8], SB: [1, 1, 1, 1, 1], SC: [1.7, 1.6, 1.5, 1.4, 1.3], SD: [2.4, 2.0, 1.8, 1.6, 1.5], SE: [3.5, 3.2, 2.8, 2.4, 2.4]};
+  return [RS.interp([0.25, 0.5, 0.75, 1, 1.25].map((x, i) => [x, FA[sc][i]]), Ss), RS.interp([0.1, 0.2, 0.3, 0.4, 0.5].map((x, i) => [x, FV[sc][i]]), S1)];
+}
+function KBC_CALC(v, TL) {
+  const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), sc = v.SiteClass;
+  const user = x => isFinite(RS.n(x)) && RS.n(x) > 0 ? RS.n(x) : 1;
+  const [Fa, Fv] = sc === "SF" ? [user(v.Fa), user(v.Fv)] : KBC_FAFV(sc, Ss, S1);
+  const SDS = 2 / 3 * Fa * Ss, SD1 = 2 / 3 * Fv * S1, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+  const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : t <= TL ? SD1 / t : SD1 * TL / (t * t);
+  return {set: {Fa, Fv, SDS, SD1}, pts: RS.curve(sa, [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2)])};
+}
+function KBC_ITEMS(extra) {
+  return [
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss", indent: true, def: "0.55"},
+    {k: "S1", label: "1 Sec Spectral Accel, S1", indent: true, def: "0.22"},
+    ...extra,
+    {sep: true},
+    {k: "SiteClass", label: "Site Class", choices: ["SA", "SB", "SC", "SD", "SE", "SF"], def: "SB"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, def: "1.", en: v => v.SiteClass === "SF"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, def: "1.", en: v => v.SiteClass === "SF"},
+    {sep: true},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = (2/3) * Fa * Ss", indent: true, out: true},
+    {k: "SD1", label: "SD1 = (2/3) * Fv * S1", indent: true, out: true},
+  ];
+}
+SAP_RS["KBC 2016"] = {
+  table: "Function - Response Spectrum - KBC 2016",
+  title: "Response Spectrum KBC 2016 Function Definition",
+  layout: "side",
+  items: KBC_ITEMS([{k: "SoilDepth", label: "The depth to the common rock", indent: true, choices: [">= 20 m", "< 20 m"], def: ">= 20 m"}]),
+  calc(v) { return KBC_CALC(v, 5); },
+  notes: "Depth-to-rock list: only '>= 20 m' is visible, '< 20 m' is a guess (value texts too); it does not change Fa/Fv here (KBC 2009 tables used for all) - unsure how SAP2000 uses it. Site class list SA-SF from the code; SF makes Fa/Fv editable. Long-period branch SD1*TL/T^2 with TL = 5 s assumed (beyond the visible rows). Period grid past 1.4 s is a guess.",
+};
+SAP_RS["Korean KBC 2009"] = {
+  table: "Function - Response Spectrum - Korean KBC 2009",
+  title: "Response Spectrum Korean KBC 2009 Function Definition",
+  layout: "side",
+  items: KBC_ITEMS([]),
+  calc(v) { return KBC_CALC(v, Infinity); },
+  notes: "Site class list SA-SF from the code (picture shows SB); SF makes Fa/Fv editable. No long-period branch in KBC 2009. Period grid past 1.4 s is a guess.",
+};
+
+// ---- KDS 41 17 00:2019 ----
+SAP_RS["KDS 41 17 00:2019"] = {
+  table: "Function - Response Spectrum - KDS 41 17 00-2019",
+  title: "Response Spectrum KDS 41 17 00:2019 Function Definition",
+  layout: "side",
+  items: [
+    {k: "SeismicZone", label: "Seismic Zone, Z", indent: true, choices: ["I", "II"], def: "I"},
+    {k: "S", label: "Effective Ground Accel, S", indent: true, out: true, def: "0.22"},
+    {k: "TL", label: "Long-Period Transition Period", indent: true, out: true, def: "5."},
+    {k: "SWave", check: true, label: "Depth to MR >20m and S-Wave Velocity >=360m/s", indent: true, def: "Yes"},
+    {sep: true},
+    {k: "SiteClass", label: "Site Class", choices: ["S1", "S2", "S3", "S4", "S5", "S6"], def: "S2"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, def: "1.38", en: v => v.SiteClass === "S6"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, def: "1.104", en: v => v.SiteClass === "S6"},
+    {sep: true},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = (2/3) * 2.5 * Fa * S", indent: true, out: true},
+    {k: "SD1", label: "SD1 = (2/3) * Fv * S", indent: true, out: true},
+  ],
+  calc(v) {
+    // S = Z x I, Z = 0.11 (I) / 0.07 (II), I = 2.0 (2400-yr return period).
+    const S = ({I: 0.11, II: 0.07}[v.SeismicZone] ?? 0.11) * 2.0, TL = 5, sc = v.SiteClass;
+    // KDS 41 17 00 Tables 4.2-1 / 4.2-2 at S <= 0.1, 0.2, 0.3.
+    const FA = {S1: [1.12, 1.12, 1.12], S2: [1.4, 1.4, 1.3], S3: [1.7, 1.5, 1.3], S4: [1.6, 1.4, 1.2], S5: [1.8, 1.3, 1.3]};
+    const FV = {S1: [0.84, 0.84, 0.84], S2: [1.5, 1.4, 1.3], S3: [1.7, 1.6, 1.5], S4: [2.2, 2.0, 1.8], S5: [3.0, 2.7, 2.4]};
+    let Fa, Fv;
+    if (sc === "S6") { const user = x => isFinite(RS.n(x)) && RS.n(x) > 0 ? RS.n(x) : 1; Fa = user(v.Fa); Fv = user(v.Fv); }
+    else {
+      Fa = RS.interp([0.1, 0.2, 0.3].map((x, i) => [x, FA[sc][i]]), S);
+      Fv = RS.interp([0.1, 0.2, 0.3].map((x, i) => [x, FV[sc][i]]), S) * (v.SWave === "Yes" ? 0.8 : 1);
+    }
+    const SDS = 2 / 3 * 2.5 * Fa * S, SD1 = 2 / 3 * Fv * S, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : t <= TL ? SD1 / t : SD1 * TL / (t * t);
+    return {set: {S, TL, Fa, Fv, SDS, SD1}, pts: RS.curve(sa, [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2)])};
+  },
+  notes: "SWave is a CHECKBOX in the picture (checked); the schema has no checkbox kind, so it is written as {check: true, label, def: 'Yes'} with values 'Yes'/'No' (value text a guess) - the renderer needs to support it. " +
+    "Checked applies 0.8 x Fv for every site class (reproduces the picture's Fv = 1.104 for S2; the exact class scope in SAP2000 is unknown). " +
+    "S = Z x 2.0 (2400-yr) and TL = 5 are greyed in the picture and computed. Zone list I/II and Site Class list S1-S6 from the code; S6 makes Fa/Fv editable. Period grid past 1.4 s is a guess.",
+};
+
+// ---- Mexico CFE-93 / CFE-2008 (identical forms in the pictures) ----
+function CFE_CALC(v) {
+  // CFE Manual de Diseno por Sismo 1993, Tabla 3.1: [a0, c, Ta, Tb, r].
+  const T = {
+    A: {I: [0.02, 0.08, 0.2, 0.6, 1 / 2], II: [0.04, 0.16, 0.3, 1.5, 2 / 3], III: [0.05, 0.20, 0.6, 2.9, 1]},
+    B: {I: [0.04, 0.14, 0.2, 0.6, 1 / 2], II: [0.08, 0.30, 0.3, 1.5, 2 / 3], III: [0.10, 0.36, 0.6, 2.9, 1]},
+    C: {I: [0.36, 0.36, 0.0, 0.6, 1 / 2], II: [0.64, 0.64, 0.0, 1.4, 2 / 3], III: [0.64, 0.64, 0.0, 1.9, 1]},
+    D: {I: [0.50, 0.50, 0.0, 0.6, 1 / 2], II: [0.86, 0.86, 0.0, 1.2, 2 / 3], III: [0.86, 0.86, 0.0, 1.7, 1]},
+  };
+  const [a0b, cb, Ta, Tb, r] = T[v.Zone][v.SoilType];
+  const g = v.Classification === "1" ? 1.5 : 1, a0 = a0b * g, c = cb * g;
+  const Q = RS.n(v.BehaviorFactor), I = RS.n(v.CorrectionFactor);
+  const a = t => t < Ta ? a0 + (c - a0) * t / Ta : t <= Tb ? c : c * Math.pow(Tb / t, r);
+  const Qp = t => (t < Ta ? 1 + (t / Ta) * (Q - 1) : Q) * I;
+  const sa = t => a(t) / Qp(t);
+  return {set: {}, pts: RS.curve(sa, [...RS.range(0, 1, 0.1), Ta, Tb, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 8, 10])};
+}
+function CFE_ITEMS(classLabel, irrLabel, irrChoices) {
+  return [
+    {k: "Zone", label: "Seismic Zone, Z", choices: ["A", "B", "C", "D"], def: "B"},
+    {k: "Classification", label: classLabel, choices: ["1", "2"], def: "2"},
+    {k: "SoilType", label: "Soil Type, S", choices: ["I", "II", "III"], def: "II"},
+    {k: "BehaviorFactor", label: "Seismic Behavior Factor, Q", choices: ["1", "1.5", "2", "3", "4"], def: "3"},
+    {k: "CorrectionFactor", label: irrLabel, choices: irrChoices, def: "0.8"},
+  ];
+}
+const CFE_NOTES = "Spectrum of CFE MDOC 1993 (Tabla 3.1): a = a0 + (c-a0)T/Ta, c, c(Tb/T)^r; Q' = 1+(T/Ta)(Q-1) below Ta, multiplied by the irregularity factor; reproduces all visible rows. " +
+  "Choice lists from knowledge (picture shows only the selected values): Zone A-D, Classification '1' (Group A, x1.5) / '2' (Group B), Soil I-III, Q 1/1.5/2/3/4. Period grid past 1.5 s is a guess.";
+SAP_RS["Mexico CFE-2008"] = {
+  listRows: 13,
+  table: "Function - Response Spectrum - Mexico CFE-2008",
+  title: "Mexico CFE-2008 Function Definition",
+  layout: "top",
+  items: CFE_ITEMS("Structural Calssification", "Correction Factor by Irregulartyr, I", ["1", "0.9", "0.8", "0.7"]),
+  calc: CFE_CALC,
+  notes: CFE_NOTES + " Labels keep SAP2000's typos ('Calssification', 'Irregulartyr'). The SAP2000 CFE-2008 form has the same parameters and default curve as CFE-93, so the 1993 table is used. Irregularity list 1/0.9/0.8/0.7 (MDOC 2008 factors) is a guess.",
+};
+SAP_RS["Mexico CFE-93"] = {
+  listRows: 13,
+  table: "Function - Response Spectrum - Mexico CFE-93",
+  title: "Mexico CFE-93 Function Definition",
+  layout: "top",
+  items: CFE_ITEMS("Structural Classification", "Correction Factor by Irregularity, I", ["1", "0.8"]),
+  calc: CFE_CALC,
+  notes: CFE_NOTES + " Irregularity list 1 / 0.8 (CFE-93: Q' x 0.8 for irregular structures) is a guess.",
+};
+// Codes 38-46, checked against Define/RS/38..46 pictures.
+
+// ---------------------------------------------------------------- 38 Mexico NTC-2004
+SAP_RS["Mexico NTC-2004"] = {
+  table: "Function - Response Spectrum - Mexico NTC 2004",
+  title: "Mexico NTC-2004 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Zone", label: "Seismic Zone", choices: ["I", "II", "IIIa", "IIIb", "IIIc", "IIId"], def: "II"},
+    {k: "Group", label: "Ranking by Group", choices: ["A", "B"], def: "B"},
+    {k: "Behavior", label: "Seismic Behavior Factor", choices: ["1", "1.5", "2", "3", "4"], def: "3"},
+    {k: "Correction", label: "Correction Factor by Irregularity", def: "0.7"},
+  ],
+  calc(v) {
+    // NTC-DS 2004 (Mexico City) Table 3.1: c, a0, Ta, Tb, r.
+    const Z = {I: [0.16, 0.04, 0.2, 1.35, 1.0], II: [0.32, 0.08, 0.2, 1.35, 1.33], IIIa: [0.40, 0.10, 0.53, 1.8, 2.0],
+      IIIb: [0.45, 0.11, 0.85, 3.0, 2.0], IIIc: [0.40, 0.10, 1.25, 4.2, 2.0], IIId: [0.30, 0.10, 0.85, 4.2, 2.0]};
+    const [c0, a00, Ta, Tb, r] = Z[v.Zone] || Z.II;
+    const gf = v.Group === "A" ? 1.5 : 1.0, c = c0 * gf, a0 = a00 * gf;
+    const Q = RS.n(v.Behavior), cor = RS.n(v.Correction);
+    const a = t => t < Ta ? a0 + (c - a0) * t / Ta : t <= Tb ? c : c * Math.pow(Tb / t, r);
+    const Qp = t => Math.max(1, (t < Ta ? 1 + (t / Ta) * (Q - 1) : Q) * cor);
+    const sa = t => a(t) / Qp(t);
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Choice lists are from knowledge (only the selected value is visible): zones I, II, IIIa-IIId; groups A, B (group A x1.5); Q 1, 1.5, 2, 3, 4. Q' = 1+(T/Ta)(Q-1) for T<Ta, times the irregularity correction, floored at 1 (needed to reproduce 0.08 at T=0). Period grid after 1.5 s is a guess.",
+};
+
+// ---------------------------------------------------------------- 39/40 NBCC 2005 / 2010
+SAP_RS["NBCC 2005"] = {
+  table: "Function - Response Spectrum - NBCC 2005",
+  title: "Response Spectrum NBCC 2005 Function Definition",
+  layout: "side",
+  items: [
+    {k: "PGA", label: "Peak Ground Accel.", def: "0.5"},
+    {k: "Sa02", label: "Spectral Accel, Sa(0.2)", def: "1."},
+    {k: "Sa05", label: "Spectral Accel, Sa(0.5)", def: "0.68"},
+    {k: "Sa1", label: "Spectral Accel, Sa(1.0)", def: "0.34"},
+    {k: "Sa2", label: "Spectral Accel, Sa(2.0)", def: "0.18"},
+    {heading: "\u00a0"},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "C", "D", "E", "F"], def: "C"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, en: v => v.SiteClass === "F"},
+  ],
+  calc(v) {
+    // NBCC 2005/2010 Tables 4.1.8.4.B and C.
+    const FA = {A: [0.7, 0.7, 0.8, 0.8, 0.8], B: [0.8, 0.8, 0.9, 1.0, 1.0], C: [1, 1, 1, 1, 1], D: [1.3, 1.2, 1.1, 1.1, 1.0], E: [2.1, 1.4, 1.1, 0.9, 0.9]};
+    const FV = {A: [0.5, 0.5, 0.5, 0.6, 0.6], B: [0.6, 0.7, 0.7, 0.8, 0.8], C: [1, 1, 1, 1, 1], D: [1.4, 1.3, 1.2, 1.1, 1.1], E: [2.1, 2.0, 1.9, 1.7, 1.7]};
+    const sc = v.SiteClass, Sa02 = RS.n(v.Sa02), Sa05 = RS.n(v.Sa05), Sa1 = RS.n(v.Sa1), Sa2 = RS.n(v.Sa2);
+    const Fa = sc === "F" ? RS.n(v.Fa) : RS.interp([0.25, 0.5, 0.75, 1.0, 1.25].map((x, i) => [x, FA[sc][i]]), Sa02);
+    const Fv = sc === "F" ? RS.n(v.Fv) : RS.interp([0.1, 0.2, 0.3, 0.4, 0.5].map((x, i) => [x, FV[sc][i]]), Sa1);
+    const rows = [[0, Fa * Sa02], [0.2, Fa * Sa02], [0.5, Math.min(Fv * Sa05, Fa * Sa02)], [1, Fv * Sa1], [2, Fv * Sa2], [4, Fv * Sa2 / 2], [10, Fv * Sa2 / 2]];
+    return {set: {Fa, Fv}, pts: rows};
+  },
+  notes: "Site class list A-F from knowledge; Fa/Fv editable only for F (site-specific). Fa/Fv tables are NBCC 2005 Tables 4.1.8.4.B/C (same in 2010), linear interpolation. PGA is stored but not used by the spectrum (as in the code). Rows 0, 0.2, 0.5, 1, 2, 4, 10 as in the picture.",
+};
+SAP_RS["NBCC 2010"] = {...SAP_RS["NBCC 2005"], table: "Function - Response Spectrum - NBCC 2010", title: "Response Spectrum NBCC 2010 Function Definition"};
+
+// ---------------------------------------------------------------- 41 NBCC 2015
+SAP_RS["NBCC 2015"] = {
+  table: "Function - Response Spectrum - NBCC 2015",
+  title: "Response Spectrum NBCC 2015 Function Definition",
+  layout: "side",
+  items: [
+    {k: "PGA", label: "Peak Ground Acceleration", def: "0.5"},
+    {k: "Sa02", label: "Spectral Accel, Sa(0.2)", def: "1."},
+    {k: "Sa05", label: "Spectral Accel, Sa(0.5)", def: "0.68"},
+    {k: "Sa1", label: "Spectral Accel, Sa(1.0)", def: "0.34"},
+    {k: "Sa2", label: "Spectral Accel, Sa(2.0)", def: "0.18"},
+    {k: "Sa5", label: "Spectral Accel, Sa(5.0)", def: "0.034"},
+    {k: "Sa10", label: "Spectral Accel, Sa(10.0)", def: "9.000E-03"},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "C", "D", "E", "F"], def: "C"},
+    {k: "F02", label: "Site Coefficient, F(0.2)", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "F05", label: "Site Coefficient, F(0.5)", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "F1", label: "Site Coefficient, F(1.0)", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "F2", label: "Site Coefficient, F(2.0)", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "F5", label: "Site Coefficient, F(5.0)", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "F10", label: "Site Coefficient, F(10.0)", indent: true, out: true, en: v => v.SiteClass === "F"},
+  ],
+  calc(v) {
+    // NBCC 2015 Tables 4.1.8.4.B-G, by PGAref = 0.1 .. 0.5.
+    const T = {
+      F02: {A: [0.69, 0.69, 0.69, 0.69, 0.69], B: [0.77, 0.77, 0.77, 0.77, 0.77], C: [1, 1, 1, 1, 1], D: [1.24, 1.09, 1.00, 0.94, 0.90], E: [1.64, 1.24, 1.05, 0.93, 0.85]},
+      F05: {A: [0.57, 0.57, 0.57, 0.57, 0.57], B: [0.65, 0.65, 0.65, 0.65, 0.65], C: [1, 1, 1, 1, 1], D: [1.47, 1.30, 1.20, 1.14, 1.10], E: [2.47, 1.80, 1.48, 1.30, 1.17]},
+      F1: {A: [0.57, 0.57, 0.57, 0.57, 0.57], B: [0.63, 0.63, 0.63, 0.63, 0.63], C: [1, 1, 1, 1, 1], D: [1.55, 1.39, 1.31, 1.25, 1.21], E: [2.81, 2.08, 1.74, 1.53, 1.39]},
+      F2: {A: [0.58, 0.58, 0.58, 0.58, 0.58], B: [0.63, 0.63, 0.63, 0.63, 0.63], C: [1, 1, 1, 1, 1], D: [1.57, 1.44, 1.36, 1.31, 1.27], E: [2.90, 2.24, 1.92, 1.72, 1.58]},
+      F5: {A: [0.61, 0.61, 0.61, 0.61, 0.61], B: [0.64, 0.64, 0.64, 0.64, 0.64], C: [1, 1, 1, 1, 1], D: [1.58, 1.48, 1.41, 1.37, 1.34], E: [2.93, 2.40, 2.14, 1.96, 1.84]},
+      F10: {A: [0.67, 0.67, 0.67, 0.67, 0.67], B: [0.69, 0.69, 0.69, 0.69, 0.69], C: [1, 1, 1, 1, 1], D: [1.49, 1.41, 1.37, 1.34, 1.32], E: [2.52, 2.18, 2.00, 1.88, 1.79]},
+    };
+    const sc = v.SiteClass, PGA = RS.n(v.PGA), S = {};
+    for (const k of ["Sa02", "Sa05", "Sa1", "Sa2", "Sa5", "Sa10"]) S[k] = RS.n(v[k]);
+    const PGAref = S.Sa02 / PGA < 2.0 ? 0.8 * PGA : PGA;
+    const F = {};
+    for (const k of Object.keys(T)) F[k] = sc === "F" ? RS.n(v[k]) : RS.interp([0.1, 0.2, 0.3, 0.4, 0.5].map((x, i) => [x, T[k][sc][i]]), PGAref);
+    const s02 = Math.max(F.F02 * S.Sa02, F.F05 * S.Sa05);
+    const rows = [[0, s02], [0.2, s02], [0.5, F.F05 * S.Sa05], [1, F.F1 * S.Sa1], [2, F.F2 * S.Sa2], [5, F.F5 * S.Sa5], [10, F.F10 * S.Sa10], [15, F.F10 * S.Sa10]];
+    return {set: F, pts: rows};
+  },
+  notes: "Site class list A-F from knowledge; F(T) editable only for F. F(T) tables are NBCC 2015 Tables 4.1.8.4.B-G from memory, interpolated on PGAref (0.8 PGA when Sa(0.2)/PGA < 2). S(0.2) = max(F(0.2)Sa(0.2), F(0.5)Sa(0.5)); constant S(10) beyond 10 s. Rows match the picture (0..15 s).",
+};
+
+// ---------------------------------------------------------------- 42 NBCC 2020
+SAP_RS["NBCC 2020"] = {
+  table: "Function - Response Spectrum - NBCC 2020",
+  title: "Response Spectrum NBCC 2020 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Sa02", label: "Spectral Accel, Sa(0.2)", def: "1.95"},
+    {k: "Sa05", label: "Spectral Accel, Sa(0.5)", def: "1.56"},
+    {k: "Sa1", label: "Spectral Accel, Sa(1.0)", def: "0.9"},
+    {k: "Sa2", label: "Spectral Accel, Sa(2.0)", def: "0.542"},
+    {k: "Sa5", label: "Spectral Accel, Sa(5.0)", def: "0.131"},
+    {k: "Sa10", label: "Spectral Accel, Sa(10.0)", def: "0.0502"},
+  ],
+  calc(v) {
+    const Sa02 = RS.n(v.Sa02), Sa05 = RS.n(v.Sa05);
+    const key = [[0.2, Math.max(Sa02, Sa05)], [0.5, Sa05], [1, RS.n(v.Sa1)], [2, RS.n(v.Sa2)], [5, RS.n(v.Sa5)], [10, RS.n(v.Sa10)]];
+    // Log-log interpolation between the key periods (reproduces the picture's rows), constant outside.
+    const sa = t => {
+      if (t <= key[0][0]) return key[0][1];
+      for (let i = 1; i < key.length; i++) if (t <= key[i][0] + 1e-12) {
+        const [t0, s0] = key[i - 1], [t1, s1] = key[i];
+        if (!(s0 > 0 && s1 > 0)) return s0 + (s1 - s0) * (t - t0) / (t1 - t0);
+        return s0 * Math.pow(t / t0, Math.log(s1 / s0) / Math.log(t1 / t0));
+      }
+      return key[key.length - 1][1];
+    };
+    const grid = [0, ...RS.range(0.2, 0.5, 0.05), ...RS.range(0.6, 1, 0.1), ...RS.range(1.2, 2, 0.2), ...RS.range(2.5, 5, 0.5), ...RS.range(6, 10, 1), 15];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "No site class: the Sa(T) values are the site-specific values of NBCC 2020. Log-log interpolation between key periods reproduces the picture's rows (0.2-0.5 s every 0.05 s); grid after 0.5 s and the constant S(10) to 15 s are guesses. S(0.2) = max(Sa(0.2), Sa(0.5)).",
+};
+
+// ---------------------------------------------------------------- 43 NBCC 95
+SAP_RS["NBCC 95"] = {
+  table: "Function - Response Spectrum - NBCC95",
+  title: "Response Spectrum NBCC 95 Function Definition",
+  layout: "side",
+  items: [
+    {k: "V", label: "Zonal Velocity Ratio, V", def: "0.4"},
+    {heading: "\u00a0"},
+    {k: "Za", label: "Accel. Related Seismic Zone, Za", def: "6"},
+    {k: "Zv", label: "Vel. Related Seismic Zone, Zv", def: "6"},
+  ],
+  calc(v) {
+    const V = RS.n(v.V), Za = RS.n(v.Za), Zv = RS.n(v.Zv), g = 9.80665;
+    // Plateau = S(T<=0.25) * v (NBCC 95 Table 4.1.9.1.B: 4.2 / 3.0 / 2.1 for Za >, =, < Zv); velocity branch Sv = 2 v.
+    const S0 = Za > Zv ? 4.2 : Za < Zv ? 2.1 : 3.0;
+    const plat = S0 * V, c = 2 * V * 2 * Math.PI / g, Tc = c / plat;
+    const sa = t => t <= Tc ? plat : c / t;
+    const grid = [0, Tc, ...RS.range(0.2, 10, 0.2).filter(t => t > Tc + 1e-6)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Za/Zv are text boxes in the picture (no drop-down arrow). Reproduces the picture exactly for Za = Zv: plateau 3.0 V, then Sa = 2V(2 pi / g)/T (Sv = 2V). The plateau factor 4.2 (Za > Zv) / 2.1 (Za < Zv) is a guess from NBCC 95 Table 4.1.9.1.B. Grid after 1.6 s continues every 0.2 s to 10 s (guess).",
+};
+
+// ---------------------------------------------------------------- 44 NCHRP 20-07
+SAP_RS["NCHRP20-07"] = {
+  table: "Function - Response Spectrum - NCHRP 20-07",
+  title: "Response Spectrum NCHRP Project 20-07 Function Definition",
+  layout: "side",
+  items: [
+    {k: "AccOption", radio: [["Lat/Long", "Ss and S1 from USGS - by Lat./Long."], ["Zip Code", "Ss and S1 from USGS - by Zip Code"], ["User Specified", "Ss and S1 User Specified"]], def: "User Specified"},
+    {k: "Latitude", label: "Site Latitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Lat/Long"},
+    {k: "Longitude", label: "Site Longitude (degrees)", indent: true, def: "", en: v => v.AccOption === "Lat/Long"},
+    {k: "ZipCode", label: "Site Zip Code (5-Digits)", indent: true, def: "", en: v => v.AccOption === "Zip Code"},
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss", indent: true, out: true, def: "2.29", en: v => v.AccOption === "User Specified"},
+    {k: "S1", label: "1 Sec Spectral Accel, S1", indent: true, out: true, def: "0.869", en: v => v.AccOption === "User Specified"},
+    {heading: "\u00a0"},
+    {k: "SiteClass", label: "Site Class", choices: ["A", "B", "C", "D", "E", "F"], def: "B"},
+    {k: "Fa", label: "Site Coefficient, Fa", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {k: "Fv", label: "Site Coefficient, Fv", indent: true, out: true, en: v => v.SiteClass === "F"},
+    {heading: "\u00a0"},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = Fa * Ss", indent: true, out: true},
+    {k: "SD1", label: "SD1 = Fv * S1", indent: true, out: true},
+  ],
+  calc(v) {
+    const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), sc = v.SiteClass;
+    // AASHTO Guide Spec (NCHRP 20-07) Tables 3.4.2.3-1 and -2.
+    const FA = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.2, 1.2, 1.1, 1.0, 1.0], D: [1.6, 1.4, 1.2, 1.1, 1.0], E: [2.5, 1.7, 1.2, 0.9, 0.9]};
+    const FV = {A: [0.8, 0.8, 0.8, 0.8, 0.8], B: [1, 1, 1, 1, 1], C: [1.7, 1.6, 1.5, 1.4, 1.3], D: [2.4, 2.0, 1.8, 1.6, 1.5], E: [3.5, 3.2, 2.8, 2.4, 2.4]};
+    const Fa = sc === "F" ? RS.n(v.Fa) : RS.interp([0.25, 0.5, 0.75, 1.0, 1.25].map((x, i) => [x, FA[sc][i]]), Ss);
+    const Fv = sc === "F" ? RS.n(v.Fv) : RS.interp([0.1, 0.2, 0.3, 0.4, 0.5].map((x, i) => [x, FV[sc][i]]), S1);
+    const SDS = Fa * Ss, SD1 = Fv * S1, Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : SD1 / t;
+    const grid = [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2 - 1e-9)];
+    return {set: {Ss, S1, Fa, Fv, SDS, SD1}, pts: RS.curve(sa, grid)};
+  },
+  notes: "AccOption .s2k values 'Lat/Long', 'Zip Code', 'User Specified' are guesses. Lat/Long and Zip Code boxes each have a '?' help button beside them in SAP2000 (not in the schema). By Lat/Long or Zip Code, Ss/S1 are greyed like SAP2000 but keep their values and the curve is computed from them (USGS lookup not available offline). Site class list A-F from knowledge; Fa/Fv tables from the AASHTO Guide Spec (from memory). Grid after 1.4 s continues every 0.2 s to 10 s (guess).",
+};
+
+// ---------------------------------------------------------------- 45 NEHRP 97
+SAP_RS["NEHRP 97"] = {
+  table: "Function - Response Spectrum - NEHRP97",
+  title: "Response Spectrum NEHRP 97 Function Definition",
+  layout: "side",
+  items: [
+    {heading: "Design Spectral Response Acceleration"},
+    {k: "SDS", label: "at Short Period, Sds", indent: true, def: "1."},
+    {k: "SD1", label: "at 1 Second Period,Sd1", indent: true, def: "0.4"},
+  ],
+  calc(v) {
+    const SDS = RS.n(v.SDS), SD1 = RS.n(v.SD1), Ts = SD1 / SDS, T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? SDS * (0.4 + 0.6 * t / T0) : t <= Ts ? SDS : SD1 / t;
+    const grid = [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.2 - 1e-9)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Label 'at 1 Second Period,Sd1' has no space after the comma in the picture. Grid after 1.4 s continues every 0.2 s to 10 s (guess).",
+};
+
+// ---------------------------------------------------------------- 46 NZS 1170.5-2016
+SAP_RS["NZS 1170.5-2016"] = {
+  convertUnderList: true, graphButton: "Refresh Graph",
+  table: "Function - Response Spectrum - NZS 1170.5-2016",
+  title: "Response Spectrum NZS 1170.5-2016 Function Definition",
+  layout: "top",
+  items: [
+    {k: "SpecType", label: "Spectrum Type", choices: ["Horizontal", "Vertical"], def: "Horizontal"},
+    {k: "SiteClass", label: "Site Subsoil Class", choices: ["A", "B", "C", "D", "E"], def: "C"},
+    {k: "Z", label: "Hazard Factor, Z", def: "0.4"},
+    {k: "R", label: "Return Period Factor, R", def: "1.3"},
+    {k: "D", label: "Near Fault Distance, D (km)", def: "20."},
+    {k: "ConsTSite", label: "Consider Site Period for Spectral Shape Factor", check: true, choices: ["No", "Yes"], def: "No", en: v => v.SiteClass === "D" || v.SiteClass === "E"},
+    {k: "TSite", label: "Low Amplitude Site Period", def: "1.", en: v => (v.SiteClass === "D" || v.SiteClass === "E") && v.ConsTSite === "Yes"},
+  ],
+  calc(v) {
+    const Z = RS.n(v.Z), R = RS.n(v.R), D = RS.n(v.D), Ts = RS.n(v.TSite);
+    // Site period option (classes D/E only): NZS 1170.5 cl 3.1.3 classes by low-amplitude site period;
+    // a D/E site whose site period is <= 0.6 s is given the class C spectral shape.
+    const useTs = (v.SiteClass === "D" || v.SiteClass === "E") && v.ConsTSite === "Yes" && Ts > 0;
+    const sc = useTs && Ts <= 0.6 ? "C" : v.SiteClass;
+    // NZS 1170.5 Table 3.1 spectral shape factor Ch(T) (general).
+    const ch = t => {
+      if (sc === "A" || sc === "B") return t < 0.1 ? 1.0 + 1.35 * t / 0.1 : t < 0.3 ? 2.35 : t <= 1.5 ? 1.6 * Math.pow(0.5 / t, 0.75) : t <= 3 ? 1.05 / t : 3.15 / (t * t);
+      if (sc === "D") return t < 0.1 ? 1.12 + 1.88 * t / 0.1 : t < 0.56 ? 3.0 : t <= 1.5 ? 2.4 * Math.pow(0.75 / t, 0.75) : t <= 3 ? 2.14 / t : 6.42 / (t * t);
+      if (sc === "E") return t < 0.1 ? 1.12 + 1.88 * t / 0.1 : t < 1.0 ? 3.0 : t <= 1.5 ? 3.0 / Math.pow(t, 0.75) : t <= 3 ? 3.32 / t : 9.96 / (t * t);
+      return t < 0.1 ? 1.33 + 1.60 * t / 0.1 : t < 0.3 ? 2.93 : t <= 1.5 ? 2.0 * Math.pow(0.5 / t, 0.75) : t <= 3 ? 1.32 / t : 3.96 / (t * t);
+    };
+    // Near-fault factor N(T,D), clause 3.1.6.
+    const nmax = t => RS.interp([[1.5, 1.0], [2, 1.12], [3, 1.36], [4, 1.60], [5, 1.72]], t);
+    const N = t => D <= 2 ? nmax(t) : D >= 20 ? 1 : 1 + (nmax(t) - 1) * (20 - D) / 18;
+    const ZR = Math.min(Z * R, 0.7), vf = v.SpecType === "Vertical" ? 0.7 : 1.0;
+    const sa = t => vf * ch(t) * ZR * N(t);
+    const grid = [...RS.range(0, 1.5, 0.1), 0.56, ...RS.range(1.75, 3, 0.25), ...RS.range(3.5, 10, 0.5)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Layout: Parameters top-left, Define Function top-right with the 'Convert to User Defined' button UNDER the Define Function list (not in Parameters), graph full width below with a 'Refresh Graph' button (not 'Display Graph'). ConsTSite is a check box (.s2k Yes/No guessed). It and TSite are greyed for class C in the picture; enabling them for classes D/E is a guess. Site-period option (implemented, rule is a guess from the cl 3.1.3 class definitions by low-amplitude site period): with D/E ticked and TSite <= 0.6 s, the class C spectral shape is used; otherwise the class's own Table 3.1 shape. SpecType list Horizontal/Vertical from knowledge, vertical = 0.7 C(T). Site class list A-E from knowledge. Grid after 0.56 s is a guess.",
+};
+// rs6: NZS 4203, Peru Norma E.030, Peru NTE E.030 2014, SI 413, SP 14.13330.2014, TCVN 9386:2012, TSC 2007, TSC-2018,
+// UBC 94, UBC 97, Venezuela COVENIN 1756-2. Checked against Define/RS/47..56, 58.
+
+SAP_RS["NZS 4203"] = {
+  table: "Function - Response Spectrum - NZS4203",
+  title: "Response Spectrum NZS4203 1992 Function Definition",
+  layout: "top",
+  items: [
+    {k: "ScaleFactor", label: "Scaling Factor (Sm*Sp*R*Z*L)", def: "1."},
+    {k: "SoilCat", label: "Site Subsoil Category", choices: ["A", "B", "C"], def: "B"},
+  ],
+  calc(v) {
+    const f = RS.n(v.ScaleFactor), c = v.SoilCat;
+    // NZS 4203:1992 Table 4.6.1, basic seismic hazard acceleration coefficient Ch(T,1) (mu = 1).
+    const T = {
+      A: [[0, 0.42], [0.13, 0.8], [0.2, 0.8], [0.3, 0.8], [0.4, 0.69], [0.5, 0.59], [0.6, 0.52], [0.7, 0.46], [0.8, 0.42], [0.9, 0.38], [1, 0.34], [1.5, 0.24], [2, 0.18], [2.5, 0.15], [3, 0.12], [3.5, 0.1], [4, 0.09]],
+      B: [[0, 0.42], [0.13, 0.8], [0.2, 0.8], [0.45, 0.8], [0.5, 0.77], [0.6, 0.71], [0.7, 0.65], [0.8, 0.6], [0.9, 0.55], [1, 0.51], [1.5, 0.35], [2, 0.26], [2.5, 0.21], [3, 0.17], [3.5, 0.14], [4, 0.13]],
+      C: [[0, 0.42], [0.13, 0.8], [0.2, 0.8], [0.6, 0.8], [0.7, 0.76], [0.8, 0.71], [0.9, 0.66], [1, 0.62], [1.5, 0.45], [2, 0.35], [2.5, 0.28], [3, 0.24], [3.5, 0.21], [4, 0.18]],
+    }[c] || [[0, 0]];
+    return {set: {}, pts: RS.curve(t => f * RS.interp(T, t), T.map(r => r[0]))};
+  },
+  notes: "Layout 'top' (Parameters + Define Function on top, graph full width below). Only category B rows are visible in the picture " +
+    "(0:0.42, 0.13:0.8, 0.2:0.8, 0.45:0.8, 0.5:0.77, 0.6:0.71, 0.7:0.65, 0.8:0.6) and they are matched. Ch(T,1) values for B past 0.8 s and all " +
+    "of categories A and C are from memory of NZS 4203:1992 Table 4.6.1 and are NOT verified (A/C plateau ends and decay values are guesses; the " +
+    "ramp end 0.13 s is taken from the picture for all categories). Category list A/B/C from knowledge. Curve ends at 4 s (end of the code table).",
+};
+
+SAP_RS["Peru Norma E.030"] = {
+  table: "Function - Response Spectrum - Peru Norma E.030",
+  title: "Peru Norma E.030 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Zone", label: "Seismic Zone", choices: ["Zone 1", "Zone 2", "Zone 3"], def: "Zone 3"},
+    {k: "Category", label: "Occupation Category", choices: ["A", "B", "C"], def: "C"},
+    {k: "SoilType", label: "Soil Type", choices: ["1", "2", "3"], def: "2"},
+    {k: "Configuration", label: "Structural Configuration", choices: ["Regular", "Irregular"], def: "Regular"},
+    {k: "R", label: "Response Modification Factor, R", def: "7."},
+  ],
+  calc(v) {
+    // NTE E.030 (2003): Sa = Z U C S g / R, C = 2.5 (Tp/T) <= 2.5; irregular structures use 3/4 R (SAP2000's graph applies no C/R >= 0.125 floor).
+    const Z = {"Zone 1": 0.15, "Zone 2": 0.3, "Zone 3": 0.4}[v.Zone];
+    const U = {A: 1.5, B: 1.3, C: 1.0}[v.Category];
+    const [S, Tp] = {"1": [1.0, 0.4], "2": [1.2, 0.6], "3": [1.4, 0.9]}[v.SoilType] || [NaN, NaN];
+    const R = RS.n(v.R) * (v.Configuration === "Irregular" ? 0.75 : 1);
+    const sa = t => { const C = t <= Tp ? 2.5 : 2.5 * Tp / t; return Z * U * S * C / R; };
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Rows matched. Choice lists (zones 1-3, categories A/B/C, soil 1/2/3, Regular/Irregular) from knowledge; category D (temporary, U by designer) " +
+    "not listed. Field texts guessed as shown. Irregular -> R x 0.75 from the code; no C/R >= 0.125 floor (SAP2000's graph keeps decaying); grid past 1.5 s is a guess.",
+};
+
+SAP_RS["Peru NTE E.030 2014"] = {
+  table: "Function - Response Spectrum - Peru NTE E.030 2014",
+  title: "Peru NTE E.030 2014 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Zone", label: "Seismic Zone", choices: ["Zone 1", "Zone 2", "Zone 3", "Zone 4"], def: "Zone 2"},
+    {k: "Category", label: "Occupation Category", choices: ["A1", "A2", "B", "C"], def: "B"},
+    {k: "SoilType", label: "Soil Type", choices: ["S0", "S1", "S2", "S3"], def: "S1"},
+    {k: "Ia", label: "Irregularity Factor, Ia", def: "1."},
+    {k: "Ip", label: "Irregularity Factor, Ip", def: "1."},
+    {k: "R0", label: "Basic Response Modification Factor, R0", def: "7."},
+  ],
+  calc(v) {
+    // E.030 2014/2016: Sa = Z U C S g / R, R = R0 Ia Ip; C = 2.5 (T<Tp), 2.5 Tp/T (Tp<T<TL), 2.5 Tp TL / T^2.
+    const zi = {"Zone 1": 0, "Zone 2": 1, "Zone 3": 2, "Zone 4": 3}[v.Zone];
+    const Z = [0.1, 0.25, 0.35, 0.45][zi];
+    const U = {A1: 1.5, A2: 1.5, B: 1.3, C: 1.0}[v.Category];
+    const Stab = {S0: [0.8, 0.8, 0.8, 0.8], S1: [1, 1, 1, 1], S2: [1.6, 1.2, 1.15, 1.05], S3: [2.0, 1.4, 1.2, 1.1]};
+    const S = (Stab[v.SoilType] || [])[zi];
+    const [Tp, TL] = {S0: [0.3, 3], S1: [0.4, 2.5], S2: [0.6, 2], S3: [1, 1.6]}[v.SoilType] || [NaN, NaN];
+    const R = RS.n(v.R0) * RS.n(v.Ia) * RS.n(v.Ip);
+    const sa = t => Z * U * S * (t < Tp ? 2.5 : t < TL ? 2.5 * Tp / t : 2.5 * Tp * TL / (t * t)) / R;
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Rows matched. Choice lists (zones 1-4, categories A1/A2/B/C, soils S0-S3) from knowledge; category D not listed. Field texts guessed as shown. " +
+    "A1 uses U = 1.5 (no isolation). Grid past 1.5 s is a guess.",
+};
+
+SAP_RS["SI 413"] = {
+  table: "Function - Response Spectrum - SI 413(1995)",
+  title: "SI 413(1995) Function Definition",
+  layout: "side",
+  items: [
+    {k: "Z", label: "Ground Acceleration Coefficient, Z", def: "0.4"},
+    {k: "I", label: "Importance Factor, I", def: "1."},
+    {k: "K", label: "Seismic Force Reduction Factor, K", def: "8."},
+    {k: "SoilType", label: "Soil Type", choices: ["S1", "S2", "S3", "S4"], def: "S3"},
+  ],
+  calc(v) {
+    // Sa = Z I Ra / K; Ra = 1.25 S / T^(2/3) <= 2.5 (2.0 for S3/S4 with Z >= 0.3); linear from 1.0 at T=0 to 0.1 s.
+    const Z = RS.n(v.Z), I = RS.n(v.I), K = RS.n(v.K);
+    const S = {S1: 1.0, S2: 1.2, S3: 1.5, S4: 2.0}[v.SoilType];
+    const cap = (v.SoilType === "S3" || v.SoilType === "S4") && Z >= 0.3 ? 2.0 : 2.5;
+    // Plateau ends as SAP2000 tabulates them (rounded crossovers of 1.25 S / T^(2/3) with the cap).
+    const Tc = cap === 2.5 ? {S1: 0.35, S2: 0.46, S3: 0.65, S4: 0.72}[v.SoilType] : {S3: 0.91, S4: 1.39}[v.SoilType];
+    const ra = t => t <= Tc ? cap : 1.25 * S / Math.pow(t, 2 / 3);
+    const sa = t => Z * I / K * (t < 0.1 ? 1 + (ra(0.1) - 1) * t / 0.1 : ra(t));
+    const grid = [0, 0.1, 0.15, 0.35, 0.46, 0.65, Tc, 0.91, 1, 1.39, 2, 2.5, 3, 4, 5, 6, 8, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "All 13 visible rows matched (plateau held to the tabulated end 0.91 for S3, as in the picture). The fixed period grid (0.35/0.46/0.65/0.91/1.39 = plateau ends for S1..S4) is from the picture; points after 4 s are a guess. " +
+    "Soil factors S1-S4 = 1.0/1.2/1.5/2.0 and the 2.0 plateau cap for S3/S4 when Z >= 0.3 (2.5 otherwise) are reconstructed (UBC-94 style), only S3/Z=0.4 verified. Soil list from knowledge.",
+};
+
+SAP_RS["SP 14.13330.2014"] = {
+  table: "Function - Response Spectrum - SP 14_13330_2014",
+  title: "SP 14.13330.2014 Function Definition",
+  layout: "side",
+  items: [
+    {k: "StructDir", label: "Structure Type and Direction", choices: ["Building Horiz", "Building Vert"], def: "Building Horiz"},
+    {k: "Seismicity", label: "Region Seismicity", choices: ["7", "8", "9"], def: "7"},
+    {k: "SoilCat", label: "Soil Category", choices: ["I", "II", "III"], def: "II"},
+    {k: "K0Factor", label: "K0 Factor", def: "1."},
+    {k: "K1Factor", label: "K1 Factor", def: "0.25"},
+    {k: "KPsiFactor", label: "KPsi Factor", def: "1."},
+    {k: "NonlinSoil", label: "Nonlinear Soil Deformation, a_soil", check: true, choices: ["No", "Yes"], def: "No",
+      en: v => v.SoilCat === "III" && (v.Seismicity === "8" || v.Seismicity === "9")},
+    {k: "ASoil", label: "", sameRow: true, def: "0.7",
+      en: v => v.SoilCat === "III" && (v.Seismicity === "8" || v.Seismicity === "9") && v.NonlinSoil === "Yes"},
+  ],
+  calc(v) {
+    // S = K0 K1 A beta Kpsi (in g), A = 1/2/4 m/s2 for 7/8/9; beta >= 0.8.
+    const A = {"7": 1, "8": 2, "9": 4}[v.Seismicity] / 9.81;
+    const III = v.SoilCat === "III";
+    const nl = III && (v.Seismicity === "8" || v.Seismicity === "9") && v.NonlinSoil === "Yes" ? RS.n(v.ASoil) : 1;
+    const vert = v.StructDir === "Building Vert" ? 0.75 : 1;
+    const beta = t => Math.max(0.8, III
+      ? (t <= 0.1 ? 1 + 12 * t : t <= 0.8 ? 2.2 : 2.2 * Math.sqrt(0.8 / t))
+      : (t <= 0.1 ? 1 + 15 * t : t <= 0.4 ? 2.5 : 2.5 * Math.sqrt(0.4 / t)));
+    const k = RS.n(v.K0Factor) * RS.n(v.K1Factor) * RS.n(v.KPsiFactor) * A * vert;
+    const sa = t => k * (t === 0 ? 1 : beta(t) * nl);
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Rows matched (A converted from m/s2 with g = 9.81). The 'Nonlinear Soil Deformation, a_soil' item is a CHECKBOX in SAP2000 (greyed, unchecked " +
+    "in the picture) with the a_soil box (0.7, greyed) on the same row: given here as check:true with choices No/Yes and ASoil with sameRow:true; " +
+    "the .s2k text for the checkbox (No/Yes) is a guess. Greying rule (enabled for soil III at seismicity 8/9) is from the code, not verified. " +
+    "Lists from knowledge/guessed: Structure Type and Direction (only 'Building Horiz' known; 'Building Vert' guessed, vertical = 0.75 x horizontal), " +
+    "seismicity 7/8/9, soil I/II/III; soil III beta curve (1+12T, 2.2, 2.2(0.8/T)^0.5) from knowledge. Grid past 1.5 s is a guess.",
+};
+
+SAP_RS["TCVN 9386:2012"] = {
+  table: "Function - Response Spectrum - TCVN 9386-2012",
+  title: "Response Spectrum TCVN 9386:2012 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Direction", label: "Direction", choices: ["Horizontal", "Vertical"], def: "Horizontal"},
+    {k: "Ag", label: "Horizontal Ground Accel., ag/g", def: "0.4"},
+    {k: "GroundType", label: "Ground Type", choices: ["A", "B", "C", "D", "E"], def: "B", en: v => v.Direction !== "Vertical"},
+    {k: "SoilFact", label: "Soil Factor, S", out: true},
+    {k: "AvgOverAg", label: "Acceleration Ratio, Avg/Ag", out: true},
+    {k: "Tb", label: "Spectrum Period, Tb", out: true},
+    {k: "Tc", label: "Spectrum Period, Tc", out: true},
+    {k: "Td", label: "Spectrum Period, Td", out: true},
+    {k: "LBFact", label: "Lower Bound Factor, Beta", out: true},
+    {k: "BehaveFact", label: "Behavior Factor, q", def: "2."},
+  ],
+  calc(v) {
+    // TCVN 9386:2012 (EN 1998-1 type 1) design spectrum, eqs. 3.13-3.16.
+    const vert = v.Direction === "Vertical";
+    const ag = RS.n(v.Ag), q = RS.n(v.BehaveFact), beta = 0.2;
+    let S, Tb, Tc, Td, a, avg = "";
+    if (vert) {
+      avg = 0.9;
+      S = 1; Tb = 0.05; Tc = 0.15; Td = 1; a = ag * avg;
+    } else {
+      [S, Tb, Tc, Td] = {A: [1, 0.15, 0.4, 2], B: [1.2, 0.15, 0.5, 2], C: [1.15, 0.2, 0.6, 2], D: [1.35, 0.2, 0.8, 2], E: [1.4, 0.15, 0.5, 2]}[v.GroundType];
+      a = ag;
+    }
+    const sa = t => t <= Tb ? a * S * (2 / 3 + t / Tb * (2.5 / q - 2 / 3))
+      : t <= Tc ? a * S * 2.5 / q
+      : t <= Td ? Math.max(a * S * 2.5 / q * Tc / t, beta * a)
+      : Math.max(a * S * 2.5 / q * Tc * Td / (t * t), beta * a);
+    const grid = [0, Tb / 3, 2 * Tb / 3, Tb, Tc, ...RS.range(0.25, 4, 0.25).filter(t => t > Tc + 1e-9), ...RS.range(4.5, 10, 0.5)];
+    const set = {SoilFact: S, Tb, Tc, Td, LBFact: beta};
+    set.AvgOverAg = vert ? avg : "";
+    return {set, pts: RS.curve(sa, grid)};
+  },
+  notes: "Rows and greyed boxes matched (S 1.2, Tb 0.15, Tc 0.5, Td 2, Beta 0.2). Vertical-direction behaviour is from EN 1998-1 (avg/ag 0.9 calculated, box blank for horizontal, " +
+    "S 1, Tb 0.05, Tc 0.15, Td 1, ground type greyed) and not verified. Ground Type list A-E and Direction list from knowledge. " +
+    "Label 'Acceleration Ratio, Avg/Ag' is greyed (label too) in the picture and hard to read exactly. Grid past 1.25 s is a guess.",
+};
+
+SAP_RS["TSC 2007"] = {
+  table: "Function - Response Spectrum - TSC-2007",
+  title: "Response Spectrum TSC-2007 Function Definition",
+  layout: "top",
+  items: [
+    {k: "SeismicZone", label: "Seismic Zone", choices: ["Zone 1", "Zone 2", "Zone 3", "Zone 4"], def: "Zone 1"},
+    {k: "TSC07A0", label: "Acceleration, Ao", out: true},
+    {k: "TSC07I", label: "Importance Factor , I", def: "1."},
+    {k: "SiteClass", label: "Site Class", choices: ["Z1", "Z2", "Z3", "Z4"], def: "Z2"},
+    {k: "TSC07R", label: "Seismic Load Reduction Factor, R", def: "8."},
+  ],
+  calc(v) {
+    // TSC 2007: Sa = A0 I S(T) / Ra(T); S = 1 + 1.5 T/TA, 2.5, 2.5 (TB/T)^0.8; Ra = 1.5 + (R - 1.5) T/TA for T <= TA, else R.
+    const A0 = {"Zone 1": 0.4, "Zone 2": 0.3, "Zone 3": 0.2, "Zone 4": 0.1}[v.SeismicZone];
+    const [TA, TB] = {Z1: [0.1, 0.3], Z2: [0.15, 0.4], Z3: [0.15, 0.6], Z4: [0.2, 0.9]}[v.SiteClass] || [NaN, NaN];
+    const I = RS.n(v.TSC07I), R = RS.n(v.TSC07R);
+    const s = t => t <= TA ? 1 + 1.5 * t / TA : t <= TB ? 2.5 : 2.5 * Math.pow(TB / t, 0.8);
+    const ra = t => t <= TA ? 1.5 + (R - 1.5) * t / TA : R;
+    const grid = [TA, TB, ...RS.range(0, 4, 0.1), ...RS.range(4.5, 10, 0.5)];
+    return {set: {TSC07A0: A0}, pts: RS.curve(t => A0 * I * s(t) / ra(t), grid)};
+  },
+  notes: "Layout 'top' (Convert button inside Parameters). Rows and Ao = 0.4 matched. Lists (Zone 1-4, Z1-Z4) from knowledge; field texts guessed as shown. " +
+    "Grid past 0.6 s is a guess (0.1 s steps to 4 s, then 0.5 s).",
+};
+
+SAP_RS["TSC-2018"] = {
+  table: "Function - Response Spectrum - TSC-2018",
+  title: "Response Spectrum TSC-2018 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Ss", label: "0.2 Sec Spectral Accel, Ss", indent: true, def: "0.55"},
+    {k: "S1", label: "1 Sec Spectral Accel, S1", indent: true, def: "0.22"},
+    {k: "TL", label: "Long-Period Transition Period", indent: true, def: "6."},
+    {blank: true},
+    {k: "R", label: "Response Modification, R", indent: true, def: "8."},
+    {k: "D", label: "System Overstrength, D", indent: true, def: "3."},
+    {k: "I", label: "Occupancy Importance, I", indent: true, def: "1."},
+    {blank: true},
+    {k: "SiteClass", label: "Site Class", choices: ["ZA", "ZB", "ZC", "ZD", "ZE", "ZF"], def: "ZB"},
+    {k: "Fs", label: "Site Coefficient, Fs", indent: true, out: true, en: v => v.SiteClass === "ZF"},
+    {k: "F1", label: "Site Coefficient, F1", indent: true, out: true, en: v => v.SiteClass === "ZF"},
+    {k: "SpecDir", label: "Design Spectrum Direction", indent: true, choices: ["Horizontal", "Vertical"], def: "Horizontal"},
+    {heading: "Calculated Values for Response Spectrum Curve"},
+    {k: "SDS", label: "SDS = Fs * Ss", indent: true, out: true},
+    {k: "SD1", label: "SD1 = F1 * S1", indent: true, out: true},
+  ],
+  calc(v) {
+    const Ss = RS.n(v.Ss), S1 = RS.n(v.S1), TL = RS.n(v.TL), R = RS.n(v.R), D = RS.n(v.D), I = RS.n(v.I), sc = v.SiteClass;
+    // TBDY 2018 Tables 2.1 / 2.2.
+    const TSC18 = {
+      Fs: {ZA: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ZB: [0.9, 0.9, 0.9, 0.9, 0.9, 0.9], ZC: [1.3, 1.3, 1.2, 1.2, 1.2, 1.2], ZD: [1.6, 1.4, 1.2, 1.1, 1.0, 1.0], ZE: [2.4, 1.7, 1.3, 1.1, 0.9, 0.8]},
+      F1: {ZA: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ZB: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ZC: [1.5, 1.5, 1.5, 1.5, 1.5, 1.4], ZD: [2.4, 2.2, 2.0, 1.9, 1.8, 1.7], ZE: [4.2, 3.3, 2.8, 2.4, 2.2, 2.0]},
+    };
+    const Fs = sc === "ZF" ? RS.n(v.Fs) : RS.interp([0.25, 0.5, 0.75, 1, 1.25, 1.5].map((x, i) => [x, TSC18.Fs[sc][i]]), Ss);
+    const F1 = sc === "ZF" ? RS.n(v.F1) : RS.interp([0.1, 0.2, 0.3, 0.4, 0.5, 0.6].map((x, i) => [x, TSC18.F1[sc][i]]), S1);
+    const SDS = Fs * Ss, SD1 = F1 * S1;
+    let TA = 0.2 * SD1 / SDS, TB = SD1 / SDS, TLx = TL, sae;
+    if (v.SpecDir === "Vertical") {
+      // TBDY 2018 eq. 2.4: TAD = TA/3, TBD = TB/3, TLD = TL/2.
+      TA /= 3; TB /= 3; TLx = TL / 2;
+      sae = t => t < TA ? (0.32 + 0.48 * t / TA) * SDS : t <= TB ? 0.8 * SDS : t <= TLx ? 0.8 * SDS * TB / t : 0.8 * SDS * TB * TLx / (t * t);
+    } else {
+      sae = t => t < TA ? (0.4 + 0.6 * t / TA) * SDS : t <= TB ? SDS : t <= TL ? SD1 / t : SD1 * TL / (t * t);
+    }
+    // Eq. 4.1: Ra = R/I for T > TB, D + (R/I - D) T/TB otherwise.
+    const ra = t => t > TB ? R / I : D + (R / I - D) * t / TB;
+    const grid = [0, TA, TB, ...RS.range(0.2, 10, 0.2).filter(t => t >= TB + 0.1)];
+    // (1 + 1e-9): SAP2000 shows the exact tie 0.12375 as 0.1238; binary doubles land just below it.
+    return {set: {Fs, F1, SDS, SD1}, pts: RS.curve(t => sae(t) / ra(t) * (1 + 1e-9), grid)};
+  },
+  notes: "Rows (0, 0.0711, 0.3556, 0.6 ... 1.4) and SDS 0.495 / SD1 0.176 matched. Site class list ZA-ZF from the code (ZF makes Fs/F1 editable). " +
+    "Direction list Horizontal/Vertical from knowledge; vertical spectrum per TBDY eq. 2.4 with the same Ra rule using TBD, not verified. Grid past 1.4 s is a guess.",
+};
+
+SAP_RS["UBC 94"] = {
+  table: "Function - Response Spectrum - UBC94",
+  title: "Response Spectrum UBC 94 Function Definition",
+  layout: "top",
+  items: [
+    {k: "Z", label: "Seismic Zone Factor, Z", def: "0.4"},
+    {k: "SoilType", label: "Soil Type", choices: ["1", "2", "3"], def: "2"},
+  ],
+  calc(v) {
+    // UBC 1994 Figure 16-3 normalized spectra, scaled by Z: 1.0 at T=0, 2.5 from 0.15 s to Tb, then K / T (K = 0.975 / 1.463 / 2.288).
+    const Z = RS.n(v.Z), Tb = {"1": 0.39, "2": 0.585, "3": 0.915}[v.SoilType], K = {"1": 0.975, "2": 1.463, "3": 2.288}[v.SoilType];
+    const sa = t => Z * (t < 0.15 ? 1 + 1.5 * t / 0.15 : t <= Tb ? 2.5 : K / t);
+    const grid = [0, 0.15, Tb, ...RS.range(0.2, 10, 0.2).filter(t => t >= Tb + 0.1)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Layout 'top'. Rows matched (0, 0.15, 0.585, 0.8 ... 1.6); the picture's 0.5852 at 1 s needs K = 1.463 for soil 2 (not 2.5 x 0.585), so K for soils 1/3 (0.975/2.288) are rounded the same way (guess). Soil Type list 1/2/3 from knowledge (Figure 16-3). Grid end (10 s) is a guess.",
+};
+
+SAP_RS["UBC 97"] = {
+  table: "Function - Response Spectrum - UBC97",
+  title: "Response Spectrum UBC 97 Function Definition",
+  layout: "top",
+  items: [
+    {k: "Ca", label: "Seismic Coefficient, Ca", def: "0.4"},
+    {k: "Cv", label: "Seismic Coefficient, Cv", def: "0.4"},
+  ],
+  calc(v) {
+    // UBC 1997 Figure 16-3.
+    const Ca = RS.n(v.Ca), Cv = RS.n(v.Cv), Ts = Cv / (2.5 * Ca), T0 = 0.2 * Ts;
+    const sa = t => t < T0 ? Ca * (1 + 1.5 * t / T0) : t <= Ts ? 2.5 * Ca : Cv / t;
+    const grid = [0, T0, Ts, ...RS.range(0.2, 10, 0.2).filter(t => t >= Ts + 0.1)];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Layout 'top'. Rows matched (0, 0.08, 0.4, 0.6 ... 1.4). Grid end (10 s) is a guess.",
+};
+
+SAP_RS["Venezuela COVENIN 1756-2:2019"] = {
+  table: "Function - Response Spectrum - Venezuela COVENIN 1756-2:2001",
+  title: "Venezuela COVENIN 1756-2:2001 Function Definition",
+  layout: "side",
+  items: [
+    {k: "Zone", label: "Seismic Zone", choices: ["Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5", "Zone 6", "Zone 7"], def: "Zone 3"},
+    {k: "Form", label: "Spectral form", choices: ["1", "2", "3", "4"], def: "2"},
+    {k: "Correction", label: "Correction Factor", choices: ["0.65", "0.70", "0.75", "0.80", "0.85", "0.90", "0.95", "1.00"], def: "0.80"},
+    {k: "Classification", label: "Classification by Use", choices: ["A", "B1", "B2"], def: "B2"},
+    {k: "R", label: "Response Modification Factor, R", def: "2."},
+  ],
+  calc(v) {
+    // COVENIN 1756-2001 sec. 7.2: Ad = alpha phi beta A0 / R (T+ <= T <= T*), (T*/T)^p beyond;
+    // below T+: alpha phi A0 [1 + T/T+ (beta - 1)] / [1 + (T/T+)^c (R - 1)], c = (R/beta)^(1/4).
+    const A0 = {"Zone 1": 0.1, "Zone 2": 0.15, "Zone 3": 0.2, "Zone 4": 0.25, "Zone 5": 0.3, "Zone 6": 0.35, "Zone 7": 0.4}[v.Zone];
+    const [beta, Ts, p] = {"1": [2.4, 0.4, 1], "2": [2.6, 0.7, 1], "3": [2.8, 1.0, 1], "4": [3.0, 1.3, 0.8]}[v.Form] || [NaN, NaN, NaN];
+    const phi = RS.n(v.Correction), alpha = {A: 1.3, B1: 1.15, B2: 1.0}[v.Classification], R = RS.n(v.R);
+    const Tp = Math.min(R < 5 ? 0.1 * (R - 1) : 0.4, Ts), c = Math.pow(R / beta, 0.25);
+    const sa = t => t < Tp ? alpha * phi * A0 * (1 + t / Tp * (beta - 1)) / (1 + Math.pow(t / Tp, c) * (R - 1))
+      : t <= Ts ? alpha * phi * beta * A0 / R : alpha * phi * beta * A0 / R * Math.pow(Ts / t, p);
+    const grid = [...RS.range(0, 1, 0.1), 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10];
+    return {set: {}, pts: RS.curve(sa, grid)};
+  },
+  notes: "Key: the file name is '...1756-2-2019' (so the list item is taken as 'Venezuela COVENIN 1756-2:2019'), but the window title in the picture " +
+    "reads 'Venezuela COVENIN 1756-2:2001' and SAP2000 26.3 has only the 1756-2:2001 table, which is used. Rows matched. T+ = 0.1(R-1) (R<5) or 0.4, " +
+    "NOT raised to T0 (that is what the picture's 0.208 at 0.1 s needs). Lists from knowledge: zones 1-7 (zone 0 not listed), spectral forms 1-4 (S1-S4), " +
+    "correction factor 0.65-1.00, use A/B1/B2; field texts guessed as shown. Grid past 1.5 s is a guess.",
+};
 
 // Define > Load Cases as the programs show it: a table of Load Case Name and Load Case Type, and Click to: Add New Case,
 // Add Copy of Case, Modify/Show Case, Delete Case, Show Load Case Tree.
