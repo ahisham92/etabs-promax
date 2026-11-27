@@ -320,10 +320,10 @@ static class ExtrasTests
             // The old corner-only axes must not come back: the triad stands at the global origin when it is in view.
             Check(html.Contains("const o = inside ? [at[0], at[1]] : [38, h - 38]"), "the global axes are drawn at the origin");
         });
-        yield return ("extras: the Engine is one window laid out as the program: no window menu bar above it (its items in Tools and Help), white views, collapsed Model Explorer, plan dimensions, Ready (Ahmed 2026-11-26 22:11)", () =>
+        yield return ("extras: the Engine is one window laid out as the program: no window menu bar above it (its items in Tools and Help), white views in the light theme (black in the dark one), collapsed Model Explorer, plan dimensions, Ready (Ahmed 2026-11-26 22:11)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-            foreach (var part in new[] { "function appMenuLoad()", "fetch(\"app-menu\"", "function drawDims(g, to, T, bub)", "#tools{display:none!important}", "if (!bgSaved) bg = \"white\";", "const model = node(\"model\", \"Model\", null,", ": \"Ready\";", "<option>Global</option>", "[\"run\", \"Run Analysis (F5)\", \"eng:run\"]" })
+            foreach (var part in new[] { "function appMenuLoad()", "fetch(\"app-menu\"", "function drawDims(g, to, T, bub)", "#tools{display:none!important}", "bg = bgForTheme();", "return b === \"white\" || b === \"black\" ? b : darkTheme() ? \"black\" : \"white\";", "const model = node(\"model\", \"Model\", null,", ": \"Ready\";", "<option>Global</option>", "[\"run\", \"Run Analysis (F5)\", \"eng:run\"]" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             var main = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "MainWindow.cs"));
             Check(main.Contains("if (!CsiProMax.App.Modeler) layout.Children.Add(top);") && main.Contains("internal static bool RunAppMenu(string id)"), "the Engine window has no menu bar of its own; its items run from the page");
