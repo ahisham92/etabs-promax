@@ -5241,8 +5241,38 @@ async function hmDefineTable(spec) {
   q(d, "#dtGo").onclick = () => { const n = q(d, "#dtNew").value.trim(); if (!n) return; read(); name = n; load(n); q(d, "#dtN").innerHTML = opts([...names, n], n); paint(); };
   paint();
 }
+// SAP2000 26.3's Reinforcing Bar Sizes: a Rebar frame with Bar ID, Bar Area and Bar Diameter (an entry row over three
+// linked lists), Add, Modify, Delete and Reset to Defaults; the changes are made on OK.
+const sapDefaultBars = [["#2", 3.226e-5, 6.35e-3], ["#3", 7.097e-5, 9.525e-3], ["#4", 1.29e-4, 0.0127], ["#5", 2e-4, 0.0159], ["#6", 2.839e-4, 0.019], ["#7", 3.871e-4, 0.0222], ["#8", 5.097e-4, 0.0254], ["#9", 6.452e-4, 0.0287], ["#10", 8.194e-4, 0.0323], ["#11", 1.006e-3, 0.0358], ["#14", 1.452e-3, 0.043], ["#18", 2.581e-3, 0.0573]];
+function hmSapRebarSizes(was) {
+  const u = hmU(), si = {f: "kN", l: "m"};
+  let bars = was.map(b => [b.name, +b.area, +b.diameter]), at = bars.length ? 0 : -1;
+  const lists = ["rbLN", "rbLA", "rbLD"].map(id => `<select id="${id}" size="8" style="width:100px;height:auto;background:#e8e8e8"></select>`);
+  const d = dialog("Reinforcing Bar Sizes", `<fieldset><legend>Rebar</legend><div style="display:flex;gap:16px;align-items:flex-start">
+      <div style="display:grid;grid-template-columns:repeat(3,100px);gap:2px 6px"><span>Bar ID</span><span>Bar Area</span><span>Bar Diameter</span>
+        <input id="rbN"><input id="rbA" type="number" step="any"><input id="rbD" type="number" step="any">${lists.join("")}</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:28px;align-items:center"><button id="rbAdd" style="width:80px">Add</button><button id="rbMod" style="width:80px">Modify</button><button id="rbDel" style="width:80px">Delete</button><button id="rbRes">Reset to Defaults</button></div></div></fieldset>`,
+    [["OK", async d => {
+      const keep = new Map(bars.map(b => [b[0], b]));
+      for (const b of was) if (!keep.has(b.name)) { const j = await hmRun("define_rebar_size", {name: b.name, delete: true}, true); if (!j.ok) return formError(d, j.error), false; }
+      for (const b of bars) { const o = was.find(x => x.name === b[0]); if (o && +o.area === b[1] && +o.diameter === b[2]) continue; const j = await hmRun("define_rebar_size", {name: b[0], area: b[1], diameter: b[2]}, true); if (!j.ok) return formError(d, j.error), false; }
+      d.close();
+    }, true], ["Cancel"]], {width: 520});
+  const L = ["#rbLN", "#rbLA", "#rbLD"].map(x => q(d, x));
+  const show = () => { const b = bars[at]; q(d, "#rbN").value = b ? b[0] : ""; q(d, "#rbA").value = b ? sapFmt(b[1]) : ""; q(d, "#rbD").value = b ? sapFmt(b[2]) : ""; q(d, "#rbMod").disabled = q(d, "#rbDel").disabled = !b; };
+  const paint = () => { L.forEach((l, k) => { l.innerHTML = bars.map((b, i) => `<option value="${i}">${esc(k ? sapFmt(b[k]) : b[0])}</option>`).join(""); l.selectedIndex = at; }); show(); };
+  L.forEach(l => { l.onchange = () => { at = l.selectedIndex; L.forEach(x => x.selectedIndex = at); show(); }; l.onscroll = () => L.forEach(x => { if (x !== l) x.scrollTop = l.scrollTop; }); });
+  const entry = () => { const n = q(d, "#rbN").value.trim(), a = parseFloat(q(d, "#rbA").value), di = parseFloat(q(d, "#rbD").value); if (!n || !(a > 0) || !(di > 0)) { formError(d, "A bar needs an ID, an area above 0 and a diameter above 0."); return null; } return [n, a, di]; };
+  q(d, "#rbAdd").onclick = () => { const e = entry(); if (!e) return; if (bars.some(b => b[0] === e[0])) return formError(d, "There is a bar " + e[0] + " already."); bars.push(e); at = bars.length - 1; paint(); };
+  q(d, "#rbMod").onclick = () => { const e = entry(); if (!e || at < 0) return; if (bars.some((b, i) => i !== at && b[0] === e[0])) return formError(d, "There is a bar " + e[0] + " already."); bars[at] = e; paint(); };
+  q(d, "#rbDel").onclick = () => { if (at < 0) return; bars.splice(at, 1); at = Math.min(at, bars.length - 1); paint(); };
+  q(d, "#rbRes").onclick = () => { bars = sapDefaultBars.map(([n, a, di]) => [n, sapConv(a, si, u, 0, 2, 0), sapConv(di, si, u, 0, 1, 0)]); at = 0; paint(); };
+  paint();
+  return d;
+}
 async function hmRebarSizes() {
   const dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
+  if (program === "sap2000") return hmSapRebarSizes(dd.rebar_sizes || []);
   const u = hmU();
   const d = dialog("Reinforcing Bar Sizes", `<table class="list hmgrid"><tr><th>Bar ID</th><th>Area${u.l ? " (" + esc(u.l) + "²)" : ""}</th><th>Diameter${u.l ? " (" + esc(u.l) + ")" : ""}</th><th></th></tr>
     <tr class="edit"><td><input id="rbN"></td><td><input id="rbA" type="number" step="any"></td><td><input id="rbD" type="number" step="any"></td><td><button id="rbAdd">Add / Modify</button></td></tr>
