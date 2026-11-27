@@ -77,6 +77,32 @@ internal sealed class FieldProgressWindow : Window
         }));
     }
 
+    /// <summary>
+    /// The same window for a test with no CSI ProMax window (the command line, a test started for Ahmed from a session
+    /// on his PC): Ahmed 2026-11-27, "why when we do a full test we don't see the progress". It runs on a thread of its
+    /// own, opens without taking the focus from what the engineer is doing, and closes when the test is done.
+    /// </summary>
+    public static void ShowAlone(CsiProMax.Assistant.FieldTest.Running run)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var window = new FieldProgressWindow(run) { ShowActivated = false, WindowStartupLocation = WindowStartupLocation.Manual };
+                var area = SystemParameters.WorkArea;
+                window.Left = area.Right - window.Width - 16;
+                window.Top = area.Bottom - 320;
+                window.Closed += (_, _) => Dispatcher.CurrentDispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
+                window.Show();
+                Dispatcher.Run();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { /* the console still says each step */ }
+        }) { IsBackground = true, Name = "field test progress" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+    }
+
     private void Refresh()
     {
         var p = CsiProMax.Assistant.FieldTest.ProgressLines.Of(_run);

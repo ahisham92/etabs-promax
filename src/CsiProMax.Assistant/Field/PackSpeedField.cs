@@ -201,7 +201,9 @@ public static class PackSpeedField
         var all = new JsonArray();
         var kinds = AppDomain.CurrentDomain.GetAssemblies().Where(a => !a.IsDynamic).Select(a => { try { return a.GetType("ETABSv1.eFileTypeIO"); } catch (Exception) { return null; } }).FirstOrDefault(t => t is not null);
         if (kinds is null) { all.Add((JsonNode)"ETABSv1.eFileTypeIO is not loaded in this process: not measured"); return all; }
-        foreach (var (kind, ext) in new[] { ("DBTablesXML", ".xml"), ("DBTablesText", ".txt"), ("DBTablesAccess", ".mdb") })
+        // No Access file: ETABS 23 opened Microsoft Access on Ahmed's PC after File.ExportFile(DBTablesAccess) in the
+        // 0.4.68 full test (2026-11-27), a window of its own in front of his work. Only the XML and text kinds are timed.
+        foreach (var (kind, ext) in new[] { ("DBTablesXML", ".xml"), ("DBTablesText", ".txt") })
         {
             if (!Enum.TryParse(kinds, kind, out var value)) continue;
             var file = Path.Combine(ctx.Folder, "every table" + ext);
@@ -224,7 +226,7 @@ public static class PackSpeedField
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { head = "unreadable: " + ex.Message; }
             all.Add((JsonNode)new JsonObject
             {
-                ["kind"] = kind, ["said"] = said, ["bytes"] = File.Exists(file) ? new FileInfo(file).Length : -1, ["head"] = kind == "DBTablesAccess" ? "" : head,
+                ["kind"] = kind, ["said"] = said, ["bytes"] = File.Exists(file) ? new FileInfo(file).Length : -1, ["head"] = head,
             });
         }
         return all;
