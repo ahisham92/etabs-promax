@@ -17,7 +17,7 @@ Standing rules: never change or remove anything another user added unless Ahmed 
 
 ## Releases
 
-### Merged after 0.4.76 (goes out with the next release)
+### 0.4.77 (2026-11-28, Engine run fix for real models; everything else stays on hold): PR 358
 Engine runs name the program's copy after the engineer's file ("FIXED 05-CHECK COLUMNS-00 1 (CSI ProMax run).EDB", ScratchProgram.RunMark; the run's window checks take it as their own, as cpm-field-test ones), clearing the copy an earlier run left. The run window reads only a multi-line text box of the program's run window as its log (ETABS's hidden form held "C:\Safe\MyModel.fdb", which showed as the log). Open: on Ahmed's real model ETABS sat 7+ minutes busy before writing any analysis file (building the analysis model), on 0.4.75 and 0.4.76.
 
 ### 0.4.76 (2026-11-28, on Ahmed's direct ask; everything else stays on hold): PR 355
