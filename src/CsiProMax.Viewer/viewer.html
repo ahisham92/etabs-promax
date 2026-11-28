@@ -28124,8 +28124,8 @@ const drawing = () => tool.startsWith("d:");
 const drawKind = () => tool.slice(2);
 function drawHint() {
   const k = drawKind(), p = panes[active];
-  if (p && p.mode === "3d" && program === "etabs") return draw3dHint();
-  if (!p || p.mode !== "plan") return program === "etabs" ? "Drawing is done in a plan view or the 3-D view: click one of them." : "Drawing is done in a plan view: click a Plan View window, or press the plan button on the toolbar.";
+  if (p && (p.mode === "3d" && program === "etabs" || elevDraws(p))) return draw3dHint();
+  if (!p || p.mode !== "plan") return program === "etabs" ? "Drawing is done in a plan view, an elevation of a grid line or the 3-D view: click one of them." : "Drawing is done in a plan view: click a Plan View window, or press the plan button on the toolbar.";
   const where = storiesWhere(p.story);
   return ({column: `Click a grid crossing or a point to place a column ${where}.`, beam: `Click the start, then each next point of the beams ${where}. Right click or Esc ends the line.`, qbeam: `Click a grid line between two crossings: a beam fills that span ${where}.`,
     wall: `Click the start, then each next point of the walls ${where}. Right click or Esc ends the line.`, qwall: `Click a grid line between two crossings: a wall fills that span ${where}.`,
@@ -28409,7 +28409,7 @@ async function showObjBox() {
   if (q(box, "#pobjDC")) q(box, "#pobjDC").onchange = e => { drawCtl.ang = Math.PI / 4; e.target.blur(); ctlSet(e.target.value); }; // blurred, so the keys work again
 }
 async function drawClick(p, x, y, dbl) {
-  if (p.mode === "3d" && program === "etabs") return draw3dClick(p, x, y, dbl);
+  if (p.mode === "3d" && program === "etabs" || elevDraws(p)) return draw3dClick(p, x, y, dbl);
   if (p.mode !== "plan") { hmSay(drawHint(), true); return; }
   const k = drawKind(), kind = drawKinds[k], sec = (await drawSection(kind)).now, st = drawStories(p);
   if (hm.snapOnly && etnOn() && !["qbeam", "qwall", "qfloor", "qsec", "reshape"].includes(k) && !snapAt(p, x, y).what) return hmSay("Draw Using Snap Only is on: click a grid crossing, a joint or a grid line.", true);
@@ -28488,7 +28488,7 @@ function lineSelect(p, a, b) {
   selChanged(); return got.length;
 }
 function drawPreview(p, g, M) {
-  if (!drawing() || !(p.mode === "plan" || (p.mode === "3d" && program === "etabs")) || panes[active] !== p) return;
+  if (!drawing() || !(p.mode === "plan" || (p.mode === "3d" && program === "etabs") || elevDraws(p)) || panes[active] !== p) return;
   // A plan's points are [x, y] on its story; the 3-D view's are [x, y, z].
   const z = p.mode === "plan" ? (elevationOf(p.story) ?? 0) : (hm.chain[0] && hm.chain[0][2]) ?? 0, to = q => M.to(q.length > 2 ? q : [q[0], q[1], z]), k = drawKind();
   g.save(); g.lineWidth = 2; g.strokeStyle = "#ffd83c"; g.fillStyle = "rgba(255,216,60,.18)"; g.setLineDash([6, 4]);
@@ -28503,7 +28503,8 @@ function drawPreview(p, g, M) {
     if (h && h.snap) {
       if (k === "rect") {
         const a = hm.chain[0], b = h.snap.q, za = a.length > 2 ? a[2] : z;
-        const box = p.mode === "3d" && wpOf(hm.wp) ? rectCorners(a, b) || [] : [[a[0], a[1], za], [b[0], a[1], za], [b[0], b[1], za], [a[0], b[1], za]];
+        const pw = elevDraws(p) ? elevPlane(p) : p.mode === "3d" ? wpOf(hm.wp) : null;
+        const box = pw ? rectCorners(a, b, pw) || [] : [[a[0], a[1], za], [b[0], a[1], za], [b[0], b[1], za], [a[0], b[1], za]];
         g.beginPath(); box.forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill();
       } else { const s = to(h.snap.q); g.lineTo(s[0], s[1]); }
     }
@@ -28516,6 +28517,7 @@ function drawPreview(p, g, M) {
   g.restore();
 }
 function drawMove(p, x, y) {
+  if (elevDraws(p)) { hm.hover = elevKinds.includes(drawKind()) ? {snap: elevSnap(p, x, y)} : null; draw(); return; }
   if (p.mode === "3d" && program === "etabs") { hm.hover = draw3dKinds.includes(drawKind()) ? {snap: snap3d(p, x, y)} : null; draw(); return; }
   if (p.mode !== "plan") { hm.hover = null; return; }
   const k = drawKind(); drawCtl.at = {p, x, y};
@@ -28530,6 +28532,44 @@ function drawMove(p, x, y) {
 // active (the status bar, Properties of Object, or Define > Engine Extras > Work Planes > Draw on It), only points on
 // it are offered, with the points where it crosses the grid lines at each level.
 const draw3dKinds = ["joint", "column", "beam", "wall", "brace", "floor", "rect"];
+// ---- Drawing in an elevation view: the commands ETABS marks (Plan, Elev, 3D) or (Plan, Elev) ----
+// An elevation of a grid line draws as the 3-D view does on a work plane standing on that line (the 3-D view's own work
+// plane is set aside): points at grid crossings and joints on the line, at any story levels; a frame comes out a column,
+// beam or brace by its inclination, an area a wall (Options > Tolerances). As ETABS's help says for elevations, a frame
+// or wall drawn across story levels is broken at each one, all in one change. Quick Draw, Draw Walls and Reshape stay
+// in a plan view, as their names in the menu say; joints are drawn in an elevation too.
+const elevKinds = ["joint", "beam", "brace", "floor", "rect"];
+const elevDraws = p => !!p && p.mode === "elev" && !!p.line && program === "etabs";
+function elevPlane(p) { const l = p.line, x = l.dir === "X"; return {name: "Elevation " + l.label, normal: x ? [1, 0, 0] : [0, 1, 0], points: [x ? [l.at, 0, 0] : [0, l.at, 0]]}; }
+function elevSnap(p, x, y) { const was = hm.wp; hm.wp = ""; try { return snap3d(p, x, y, wpOnly(p)); } finally { hm.wp = was; } }
+// The story levels strictly between two heights, lowest first.
+const elevLevels = (z0, z1, t) => [...new Set(stories.map(s => s.elevation))].filter(z => z > Math.min(z0, z1) + t && z < Math.max(z0, z1) - t).sort((a, b) => a - b);
+// A frame from a to b, as one frame per story it crosses.
+function elevFrames(a, b) {
+  const t = Math.max(1e-6, size * 1e-6) * 10, at = z => { const f = (z - a[2]) / (b[2] - a[2]); return [0, 1, 2].map(i => wpRound(a[i] + (b[i] - a[i]) * f)); };
+  const cuts = elevLevels(a[2], b[2], t).map(at); if (a[2] > b[2]) cuts.reverse();
+  const pts = [a, ...cuts, b]; return pts.slice(1).map((q, i) => [...pts[i], ...q]);
+}
+// An area in the elevation, cut at the story levels: the part in each story, by clipping it to that story's band.
+function elevAreas(corners) {
+  const t = Math.max(1e-6, size * 1e-6) * 10, zs = corners.map(c => c[2]), lo = Math.min(...zs), hi = Math.max(...zs), cuts = [lo, ...elevLevels(lo, hi, t), hi];
+  const clip = (poly, keep, z) => {
+    const out = [];
+    poly.forEach((c, i) => {
+      const n = poly[(i + 1) % poly.length], inC = keep(c[2]), inN = keep(n[2]);
+      if (inC) out.push(c);
+      if (inC !== inN) { const f = (z - c[2]) / (n[2] - c[2]); out.push([0, 1, 2].map(k => wpRound(c[k] + (n[k] - c[k]) * f))); }
+    });
+    return out;
+  };
+  const out = [];
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    let poly = clip(clip(corners, z => z >= cuts[i] - t, cuts[i]), z => z <= cuts[i + 1] + t, cuts[i + 1]);
+    poly = poly.filter((c, j) => { const n = poly[(j + 1) % poly.length]; return Math.hypot(c[0] - n[0], c[1] - n[1], c[2] - n[2]) > t; });
+    if (poly.length >= 3) out.push(poly);
+  }
+  return out.length ? out : [corners];
+}
 // The last planes read stay while an edit reloads the definitions, so the plane drawn on, its hint and its snap hold.
 const workPlanes = () => (hm.defs ? hm.defs.work_planes : hm.planes) || [];
 const wpOf = name => (name && workPlanes().find(w => w.name === name)) || null;
@@ -28626,8 +28666,8 @@ function snap3d(p, x, y, only) {
 function wpRound(v) { return Math.round(v * 1e5) / 1e5; }
 // A rectangle from two opposite corners. On a work plane its sides run level along the plane and straight up (or
 // across) it, so its other two corners are at the two corners' levels; on a level plane, and in World, along X and Y.
-function rectCorners(a, b) {
-  const w = wpOf(hm.wp), n = w ? w.normal : [0, 0, 1], h = Math.hypot(n[0], n[1]);
+function rectCorners(a, b, w = wpOf(hm.wp)) {
+  const n = w ? w.normal : [0, 0, 1], h = Math.hypot(n[0], n[1]);
   const u = h < 1e-9 ? [1, 0, 0] : [-n[1] / h, n[0] / h, 0];
   const v = h < 1e-9 ? [0, 1, 0] : [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
   const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], du = d[0] * u[0] + d[1] * u[1] + d[2] * u[2], dv = d[0] * v[0] + d[1] * v[1] + d[2] * v[2];
@@ -28636,7 +28676,9 @@ function rectCorners(a, b) {
   return [a, [r(a[0] + du * u[0]), r(a[1] + du * u[1]), a[2]], b, [r(a[0] + dv * v[0]), r(a[1] + dv * v[1]), b[2]]];
 }
 function draw3dHint() {
-  const k = drawKind(), plane = hm.wp && wpOf(hm.wp) ? ` on the work plane ${hm.wp}` : "";
+  const k = drawKind(), p = panes[active], elev = elevDraws(p), plane = elev ? ` on elevation ${p.line.label}` : hm.wp && wpOf(hm.wp) ? ` on the work plane ${hm.wp}` : "";
+  if (elev && !elevKinds.includes(k)) return "In an elevation, joints, beams, columns, braces, floors and walls are drawn by their points. Quick Draw, Draw Walls and Reshape work in a plan view.";
+  if (elev && k === "rect") return `Click two opposite corners${plane}: its sides run level and upright, and it is cut at the story levels it crosses.`;
   if (!draw3dKinds.includes(k)) return "In the 3-D view, joints, columns, beams, walls, braces and floors are drawn by their points. Quick Draw and Reshape work in a plan view.";
   if (k === "beam") return `Click the start, then each next point of the frames${plane}, at any story levels: ${wpInclText("frame")}. Right click or Esc ends the line.`;
   if (k === "floor") return `Click the corners${plane}, at any story levels; click the first corner again (or double click) to close it: ${wpInclText("area")}.`;
@@ -28647,14 +28689,14 @@ function draw3dHint() {
     brace: "Click the brace's two ends, on two stories next to each other.", rect: "Click two opposite corners of the floor, on one story."}[k];
 }
 async function draw3dClick(p, x, y, dbl) {
-  const k = drawKind(), kind = drawKinds[k];
-  if (!draw3dKinds.includes(k)) return hmSay(draw3dHint(), true);
-  const w = wpOf(hm.wp), s = snap3d(p, x, y);
-  if (!s) return hmSay(w ? `Click a grid crossing or joint on the work plane ${hm.wp}.` : "Click a grid crossing or joint.", true);
+  const k = drawKind(), kind = drawKinds[k], elev = elevDraws(p);
+  if (!(elev ? elevKinds : draw3dKinds).includes(k)) return hmSay(draw3dHint(), true);
+  const w = elev ? elevPlane(p) : wpOf(hm.wp), s = elev ? elevSnap(p, x, y) : snap3d(p, x, y);
+  if (!s) return hmSay(elev ? `Click a grid crossing or joint on elevation ${p.line.label}.` : w ? `Click a grid crossing or joint on the work plane ${hm.wp}.` : "Click a grid crossing or joint.", true);
   if (!s.story) return hmSay("That point is between stories: members are drawn between points at story levels.", true);
   const sec = k === "joint" ? "" : (await drawSection(kind)).now;
   if (k !== "joint" && !sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
-  const st = storiesFor(s.story), xy = q => [q[0], q[1]];
+  const st = elev ? [s.story] : storiesFor(s.story), xy = q => [q[0], q[1]]; // Similar Stories is a plan view's
   if (k === "joint") return hmRun("add_joints", {points: [xy(s.q)], stories: st});
   if (k === "column") return hmRun("add_columns", {points: [xy(s.q)], stories: st, section: sec});
   if (hm.chain.length && hm.chain[0].length !== 3) hm.chain = []; // a chain begun in a plan view
@@ -28670,15 +28712,15 @@ async function draw3dClick(p, x, y, dbl) {
     if (k === "brace") hm.chain = [];
     const j = !w && level(last, s.q)
       ? await hmRun("add_beams", {lines: [[last[0], last[1], s.q[0], s.q[1]]], stories: st, section: sec})
-      : await hmRun("add_frames_by_points", {frames: [[...last, ...s.q]], section: sec});
+      : await hmRun("add_frames_by_points", {frames: elev ? elevFrames(last, s.q) : [[...last, ...s.q]], section: sec});
     if (k === "beam" && j.ok) hm.chain = [s.q];
     draw(); return;
   }
   if (k === "floor" || (w && k === "rect")) {
-    const wall = (await drawSection("wall")).now, put = corners => hmRun("add_areas_by_points", {areas: [corners], section: sec, ...(wall ? {wall_section: wall} : {})});
+    const wall = (await drawSection("wall")).now, put = corners => hmRun("add_areas_by_points", {areas: elev ? elevAreas(corners) : [corners], section: sec, ...(wall ? {wall_section: wall} : {})});
     if (k === "rect") {
       if (!first) { hm.chain = [s.q]; draw(); return; }
-      hm.chain = []; const c = rectCorners(first, s.q);
+      hm.chain = []; const c = rectCorners(first, s.q, w);
       if (!c) { draw(); return hmSay("Click the opposite corner: away from the first both along the plane and across it.", true); }
       return put(c);
     }
