@@ -28127,12 +28127,12 @@ function drawHint() {
   if (p && p.mode === "3d" && program === "etabs") return draw3dHint();
   if (!p || p.mode !== "plan") return program === "etabs" ? "Drawing is done in a plan view or the 3-D view: click one of them." : "Drawing is done in a plan view: click a Plan View window, or press the plan button on the toolbar.";
   const where = storiesWhere(p.story);
-  return {column: `Click a grid crossing or a point to place a column ${where}.`, beam: `Click the start, then each next point of the beams ${where}. Right click or Esc ends the line.`, qbeam: `Click a grid line between two crossings: a beam fills that span ${where}.`,
+  return ({column: `Click a grid crossing or a point to place a column ${where}.`, beam: `Click the start, then each next point of the beams ${where}. Right click or Esc ends the line.`, qbeam: `Click a grid line between two crossings: a beam fills that span ${where}.`,
     wall: `Click the start, then each next point of the walls ${where}. Right click or Esc ends the line.`, qwall: `Click a grid line between two crossings: a wall fills that span ${where}.`,
     floor: `Click the floor's corners in order; click the first corner again (or double click) to close it, ${where}.`, rect: `Click two opposite corners of the floor ${where}.`, qfloor: `Click inside a grid bay: a floor fills it ${where}.`,
     brace: `Click the brace's bottom end (on the story below), then its top end ${where}.`,
     reshape: hm.chain.length ? "Click the new place of the end or corner (Esc to choose another)." : "Click the end of a beam, column or brace, or the corner of a floor or wall, to reshape it on " + p.story + ".",
-    qsec: `Click inside a grid bay: ${hm.secN} secondary beams parallel to ${hm.secDir} fill it ${where}.`, circ: hm.chain.length ? "Click a point on the floor's edge." : `Click the centre of the circular floor ${where}.`, joint: `Click a point to place a joint ${where}, for a support, spring, load or link where no member ends.`}[k] || "";
+    qsec: `Click inside a grid bay: ${hm.secN} secondary beams parallel to ${hm.secDir} fill it ${where}.`, circ: hm.chain.length ? "Click a point on the floor's edge." : `Click the centre of the circular floor ${where}.`, joint: `Click a point to place a joint ${where}, for a support, spring, load or link where no member ends.`}[k] || "") + ctlHint();
 }
 function drawStories(p) { return storiesFor(p.story); }
 // One Story, All Stories or Similar Stories (the status bar, as in ETABS): what is drawn or selected on a story in a plan
@@ -28296,6 +28296,62 @@ function applySnap(d) {
   try { localStorage.setItem("cpm-snap", JSON.stringify(snapOpt)); } catch (e) {}
   $("hint").textContent = "Snap Options applied."; draw();
 }
+// ---- Drawing constraints: ETABS's Drawing Control Type (its help: Drawing Constraints in ETABS) ----
+// In a plan, once a line has a point, X, Y, D, A, L or S locks part of the next point, as the Drawing Control Type in
+// Properties of Object does; the space bar takes the lock off, and drawing the next point ends it. A snap still
+// counts: only the part of the snapped point the lock leaves free is used. A takes the angle of the frame or edge under
+// the pointer, else 45 degrees. In a plan S and D give the same point (the last line's length and angle are its dX
+// and dY). The elevation keys (B, Z) are not here: the Modeler draws in plan and in 3-D.
+const drawCtl = {k: "", ang: Math.PI / 4, seg: null, at: null};
+const ctlKinds = ["beam", "wall", "brace", "floor", "rect", "reshape"];
+const ctlList = [["", "None <space bar>"], ["x", "Parallel to X <X>"], ["y", "Parallel to Y <Y>"], ["d", "Fixed dX and dY <D>"], ["a", "Parallel to Angle A <A>"], ["l", "Fixed Length <L>"], ["s", "Fixed Length and Angle <S>"]];
+const ctlOn = () => drawing() && ctlKinds.includes(drawKind());
+function ctlName() {
+  const n = ctlList.find(c => c[0] === drawCtl.k)[1].replace(/ <.*$/, ""), deg = ((drawCtl.ang * 180 / Math.PI) % 180 + 180) % 180;
+  return drawCtl.k === "a" ? `${n} (${+deg.toFixed(2)}°)` : n;
+}
+const ctlHint = () => drawCtl.k && ctlOn() ? ` ${ctlName()} is on (space bar: none).` : "";
+// The line before the next one: the last two points of the line being drawn, or the beam or wall drawn last when the
+// next one starts where it ended.
+function ctlSeg() {
+  const c = hm.chain, last = c[c.length - 1];
+  if (c.length > 1) return [c[c.length - 2], last];
+  const g = drawCtl.seg; return g && last && g[1][0] === last[0] && g[1][1] === last[1] ? g : null;
+}
+function ctlPoint(s) {
+  const last = hm.chain[hm.chain.length - 1], k = drawCtl.k;
+  if (!k || !s || !last || !ctlOn()) return s;
+  const pt = s.q, seg = ctlSeg(), d = seg && sub2(seg[1], seg[0]), n = d ? Math.hypot(d[0], d[1]) : 0, r = v => Math.round(v * 1000) / 1000;
+  let to = null;
+  if (k === "x") to = [pt[0], last[1]];
+  else if (k === "y") to = [last[0], pt[1]];
+  else if (k === "a") { const u = [Math.cos(drawCtl.ang), Math.sin(drawCtl.ang)], t = (pt[0] - last[0]) * u[0] + (pt[1] - last[1]) * u[1]; to = [r(last[0] + u[0] * t), r(last[1] + u[1] * t)]; }
+  else if ((k === "d" || k === "s") && n > 1e-9) to = [r(last[0] + d[0]), r(last[1] + d[1])];
+  else if (k === "l" && n > 1e-9) {
+    const v = sub2(pt, last), m = Math.hypot(v[0], v[1]), u = m > 1e-9 ? [v[0] / m, v[1] / m] : [d[0] / n, d[1] / n];
+    to = [r(last[0] + u[0] * n), r(last[1] + u[1] * n)];
+  }
+  return to ? {q: to, what: ctlName() + (s.what ? " · " + s.what : "")} : s;
+}
+function ctlShow() { const s = $("pobj") && q($("pobj"), "#pobjDC"); if (s) s.value = drawCtl.k; $("hint").textContent = hintText(); }
+function ctlSet(k) { drawCtl.k = k; ctlShow(); const at = drawCtl.at; if (at && drawing()) drawMove(at.p, at.x, at.y); else draw(); }
+function ctlKey(k) {
+  if (k === "a") {
+    // Parallel, in plan, to the frame the plan shows under the pointer (a brace from the story below too) or to a shell
+    // edge on the story; else at 45 degrees. A column, seen end on, has no direction.
+    const at = drawCtl.at, p = at && at.p; drawCtl.ang = Math.PI / 4;
+    if (p && p.M && p.mode === "plan") {
+      const z = elevationOf(p.story) ?? 0, vis = visOf(p), up = v => [v[0], v[1], v.length > 2 ? v[2] : z];
+      const lines = frames.filter(f => vis[f.id]).concat(snapSegs(p, z).filter(sg => sg.edge));
+      let bd = Math.max(2, (+snapOpt.snapTol || 12) * 2 / 3);
+      for (const l of lines) {
+        if (Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]) < 1e-9) continue;
+        const dd = segDist(at.x, at.y, p.M.to(up(l.a)), p.M.to(up(l.b))); if (dd < bd) { bd = dd; drawCtl.ang = Math.atan2(l.b[1] - l.a[1], l.b[0] - l.a[0]); }
+      }
+    }
+  }
+  ctlSet(k === " " ? "" : k);
+}
 function spanAt(p, x, y) {
   // The grid line span under the pointer: from one crossing to the next.
   const M = p.M, z = elevationOf(p.story) ?? 0, raw = M.back(x, y); let best = null, bd = 10;
@@ -28337,6 +28393,7 @@ async function showObjBox() {
   box.innerHTML = `<div class="dt"><b>Properties of Object</b></div><div class="g2" style="padding:6px 8px"><span>Type</span><b style="font-weight:400"${incl ? ` title="${esc("By its inclination: " + wpInclText(incl))}"` : ""}>${incl === "frame" ? "Column, Beam or Brace" : incl === "area" ? "Floor, Wall or Ramp" : {column: "Column", beam: "Beam", wall: "Wall", slab: "Floor", brace: "Brace", joint: "Joint"}[kind]}</b>
     ${kind === "joint" ? "" : `<span>Section</span><select id="pobjS">${s.list.length ? opts(s.list, s.now) : `<option value="">(define one first)</option>`}</select>`}
     ${ws ? `<span title="The section of an area that comes out a wall">Wall Section</span><select id="pobjWS">${ws.list.length ? opts(ws.list, ws.now) : `<option value="">(define one first)</option>`}</select>` : ""}
+    ${ctlOn() ? `<span>Drawing Control Type</span><select id="pobjDC">${opts(ctlList, drawCtl.k)}</select>` : ""}
     ${drawKind() === "qsec" ? `<span>No. of Beams</span><input id="pobjN" type="number" min="1" max="20" value="${hm.secN}"><span>Approx. Orientation</span><select id="pobjD">${opts([["X", "Parallel to X"], ["Y", "Parallel to Y"]], hm.secDir)}</select>` : ""}
     ${drawKind() === "circ" ? `<span>Sides</span><input id="pobjC" type="number" min="8" max="72" value="${hm.circN}">` : ""}
     <span>Stories</span><select id="pobjW">${opts([["one", "One Story"], ["all", "All Stories"], ["similar", "Similar Stories"]], hm.similar)}</select>
@@ -28349,6 +28406,7 @@ async function showObjBox() {
   if (q(box, "#pobjC")) q(box, "#pobjC").onchange = e => { hm.circN = Math.max(8, Math.min(72, Math.round(+e.target.value) || 24)); e.target.value = hm.circN; };
   q(box, "#pobjW").onchange = e => { hm.similar = e.target.value; $("similar").value = hm.similar; $("hint").textContent = hintText(); };
   if (q(box, "#pobjP")) q(box, "#pobjP").onchange = e => wpSet(e.target.value);
+  if (q(box, "#pobjDC")) q(box, "#pobjDC").onchange = e => { drawCtl.ang = Math.PI / 4; e.target.blur(); ctlSet(e.target.value); }; // blurred, so the keys work again
 }
 async function drawClick(p, x, y, dbl) {
   if (p.mode === "3d" && program === "etabs") return draw3dClick(p, x, y, dbl);
@@ -28359,11 +28417,11 @@ async function drawClick(p, x, y, dbl) {
   if (k === "reshape") {
     // Draw > Reshape Object: an end or corner of an object on this story, then where it goes.
     if (!hm.reshape) { const r = reshapeAt(p, x, y); if (!r) return hmSay("Click on the end of a frame or the corner of a floor or wall in this plan.", true); hm.reshape = r; hm.chain = [r.from]; draw(); $("hint").textContent = hintText(); return; }
-    const r = hm.reshape, to = snapAt(p, x, y).q; hm.reshape = null; hm.chain = []; $("hint").textContent = hintText();
+    const r = hm.reshape, to = ctlPoint(snapAt(p, x, y)).q; hm.reshape = null; hm.chain = []; drawCtl.k = ""; ctlShow();
     return hmRun("reshape_object", {object: r.name, from: r.from, to});
   }
   if (!sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
-  const s = snapAt(p, x, y);
+  const s = ctlPoint(snapAt(p, x, y)); if (drawCtl.k && hm.chain.length) { drawCtl.k = ""; ctlShow(); } // a drawing constraint ends with the point it placed
   if (k === "column") return hmRun("add_columns", {points: [s.q], stories: st, section: sec});
   if (k === "qbeam" || k === "qwall") { const sp = spanAt(p, x, y); if (!sp) return hmSay("Click on a grid line, between two crossing grid lines.", true); return hmRun(k === "qbeam" ? "add_beams" : "add_walls", {lines: [sp], stories: st, section: sec}); }
   if (k === "qsec") {
@@ -28384,7 +28442,7 @@ async function drawClick(p, x, y, dbl) {
     if (!hm.chain.length) { hm.chain = [s.q]; draw(); return; }
     const a = hm.chain[hm.chain.length - 1]; if (Math.hypot(a[0] - s.q[0], a[1] - s.q[1]) < 1e-6) return;
     const j = await hmRun(k === "beam" ? "add_beams" : "add_walls", {lines: [[a[0], a[1], s.q[0], s.q[1]]], stories: st, section: sec});
-    if (j.ok) hm.chain = [s.q]; draw(); return;
+    if (j.ok) { drawCtl.seg = [a, s.q]; hm.chain = [s.q]; } draw(); return;
   }
   if (k === "brace") {
     if (!hm.chain.length) { hm.chain = [s.q]; draw(); return; }
@@ -28460,8 +28518,8 @@ function drawPreview(p, g, M) {
 function drawMove(p, x, y) {
   if (p.mode === "3d" && program === "etabs") { hm.hover = draw3dKinds.includes(drawKind()) ? {snap: snap3d(p, x, y)} : null; draw(); return; }
   if (p.mode !== "plan") { hm.hover = null; return; }
-  const k = drawKind();
-  hm.hover = k === "qfloor" || k === "qsec" ? {bay: bayAt(p, x, y)} : k === "reshape" && !hm.chain.length ? (() => { const r = reshapeAt(p, x, y); return r ? {snap: {q: r.from, what: "reshape " + r.name.replace(/@.*$/, "")}} : null; })() : k === "qbeam" || k === "qwall" ? {span: spanAt(p, x, y)} : {snap: snapAt(p, x, y)};
+  const k = drawKind(); drawCtl.at = {p, x, y};
+  hm.hover = k === "qfloor" || k === "qsec" ? {bay: bayAt(p, x, y)} : k === "reshape" && !hm.chain.length ? (() => { const r = reshapeAt(p, x, y); return r ? {snap: {q: r.from, what: "reshape " + r.name.replace(/@.*$/, "")}} : null; })() : k === "qbeam" || k === "qwall" ? {span: spanAt(p, x, y)} : {snap: ctlPoint(snapAt(p, x, y))};
   draw();
 }
 // ---- drawing in the 3-D view, and work planes (an ETABS model) ----
@@ -28766,7 +28824,7 @@ function modelerStart() {
   document.addEventListener("keydown", e => {
     if (e.target.closest && e.target.closest("input, textarea, select") || document.querySelector(".veil")) return;
     const k = e.key, ctrl = e.ctrlKey || e.metaKey;
-    if (k === "Escape" && hm.chain.length) { e.stopImmediatePropagation(); hm.chain = []; hm.reshape = null; draw(); return; }
+    if (k === "Escape" && hm.chain.length) { e.stopImmediatePropagation(); hm.chain = []; hm.reshape = null; drawCtl.k = ""; ctlShow(); draw(); return; }
     if (ctrl && k.toLowerCase() === "z") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("undo"); }
     else if (ctrl && k.toLowerCase() === "y") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("redo"); }
     // ETABS's File shortcuts: Shift+Ctrl+S Save As, Shift+Ctrl+E Close, Ctrl+P Print Graphics.
@@ -28778,6 +28836,8 @@ function modelerStart() {
     else if (ctrl && k.toLowerCase() === "o") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("open"); }
     else if (k === "Delete" && sel.size) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("delete"); }
     else if (ctrl && !e.shiftKey && /^Arrow(Left|Right|Up|Down)$/.test(k) && sel.size && panes[active] && panes[active].mode === "plan") { e.preventDefault(); e.stopImmediatePropagation(); nudge(k); }
+    // ETABS's drawing constraints while a line is drawn in a plan: X, Y, D, A, L, S, and the space bar for none.
+    else if (!ctrl && !e.altKey && k.length === 1 && "xydals ".includes(k.toLowerCase()) && ctlOn() && panes[active] && panes[active].mode === "plan") { e.preventDefault(); e.stopImmediatePropagation(); ctlKey(k.toLowerCase()); }
   }, true);
   hmDefs().then(() => { if (hm.state && hm.state.choose_program) hmChooseProgram(); });
   setInterval(hmPendingOpen, 1000);
