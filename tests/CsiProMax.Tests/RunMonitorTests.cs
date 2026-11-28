@@ -212,5 +212,16 @@ static class RunMonitorTests
             }
             finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
         });
+        yield return ("run window: the program's status bar is shown and counts as hearing from it, before any log (Ahmed's real model, 2026-11-28)", () =>
+        {
+            var at = new DateTime(2026, 11, 28, 12, 0, 0);
+            var mon = new RunMonitor(CsiProgram.Etabs, () => at);
+            at = at.AddMinutes(5);
+            mon.Status("Creating Analysis Model - elements - shells - LVL 02-TOC");
+            var j = mon.Json();
+            Check(j["status_text"]!.GetValue<string>().StartsWith("Creating Analysis Model"), "status text");
+            Check(j["last_heard"]!.GetValue<double>() == 0, "heard when the status bar changes: " + j["last_heard"]);
+            Check(CsiProMax.Assistant.Etabs.StatusBarText.Words(["Creating Analysis Model - elements", "", "Creating Analysis Model - elements", " Global "]) == "Creating Analysis Model - elements  |  Global", "status words");
+        });
     }
 }

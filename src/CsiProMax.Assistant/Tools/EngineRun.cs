@@ -246,6 +246,8 @@ public static class EngineRun
                 return;
             }
             lock (Gate) { _starts++; _window = window; }
+            // The engineer's real model may take hours; Cancel Run stops it (the scratch link's 10 minutes gave Ahmed's run up).
+            if (window is ScratchProgram longRun) longRun.LongRuns(TimeSpan.FromHours(12));
             if (window.ModelPath.Length > 0) mon.ModelFile = window.ModelPath;
             tail.File = RunLog.FileOf(mon.ModelFile); mon.LogFile = tail.File;
             if (window is ScratchProgram sp) Say(sp.Hide() ? $"{program.Name} is running hidden" : $"{program.Name} is running (it could not be hidden)");
@@ -526,6 +528,7 @@ public static class EngineRun
             // What the program's own run window shows (ETABS's "Analyzing" window and its log box), and the windows it
             // has open: the Engine's run window shows them live (Ahmed 2026-11-28: "it is important to see what is happening").
             if (sp.RunWindow() is { } screen) mon.Screen(screen.Title, screen.Lines);
+            mon.Status(sp.StatusText());
             var shown = sp.OpenWindows();
             mon.Windows(shown.Count == 0 ? "" : string.Join(" | ", shown));
             var quiet = (DateTime.Now - mon.LastHeard).TotalSeconds;

@@ -472,6 +472,15 @@ public static class ScratchDialogs
         return SendMessageTimeoutW(child, 0x000D /* WM_GETTEXT */, new IntPtr(n + 1), text, 2, 2000, out _) == IntPtr.Zero ? "" : text.ToString();
     }
 
+    /// <summary>The program's main window: the largest titled top-level window of the process with no owner, shown or hidden (zero when none).</summary>
+    public static IntPtr MainWindow(int processId)
+    {
+        IntPtr main = IntPtr.Zero; long most = -1;
+        foreach (var (window, _, _) in AllOf(processId))
+            if (GetWindow(window, 4 /* GW_OWNER */) == IntPtr.Zero && GetWindowRect(window, out var r) && (long)(r.Right - r.Left) * (r.Bottom - r.Top) is var area && area > most) { most = area; main = window; }
+        return main;
+    }
+
     /// <summary>
     /// Puts the program's main window (the largest top-level window of the process with no owner) and its run window on
     /// the screen and in front, by Windows itself: never through the program's API, which does not answer while the
@@ -480,10 +489,8 @@ public static class ScratchDialogs
     public static bool Bring(int processId)
     {
         if (processId == 0 || !OperatingSystem.IsWindows()) return false;
-        IntPtr main = IntPtr.Zero; long most = -1;
         var all = AllOf(processId);
-        foreach (var (window, _, _) in all)
-            if (GetWindow(window, 4 /* GW_OWNER */) == IntPtr.Zero && GetWindowRect(window, out var r) && (long)(r.Right - r.Left) * (r.Bottom - r.Top) is var area && area > most) { most = area; main = window; }
+        var main = MainWindow(processId);
         if (main == IntPtr.Zero) return false;
         if (!IsWindowVisible(main)) ShowWindow(main, 5 /* SW_SHOW */);
         ShowWindow(main, 9 /* SW_RESTORE */);
@@ -1510,6 +1517,16 @@ public sealed class ScratchProgram : IScratchWindow
 
     /// <summary>Show program window was pressed: the window stays on the screen for the rest of the run.</summary>
     private volatile bool _shownByUser;
+
+    /// <summary>
+    /// An Engine run on the engineer's real model: the program may take hours (ETABS spent more than 10 minutes on
+    /// "Creating Analysis Model" for Ahmed's model before its log began, 2026-11-28, and the scratch link's 10-minute limit
+    /// gave the run up). The engineer stops it with Cancel Run.
+    /// </summary>
+    public void LongRuns(TimeSpan limit) { if (_com is not null) _com.AnalysisLimit = limit; }
+
+    /// <summary>What the program's status bar says now ("Creating Analysis Model - elements - shells - LVL 02-TOC"), "" when nothing.</summary>
+    public string StatusText() => _closed || ProcessId == 0 ? "" : CsiProMax.Assistant.Etabs.StatusBarText.Of(ProcessId);
 
     /// <summary>What the program's own run window shows now (its title and log lines), null when it has none open.</summary>
     public (string Title, List<string> Lines)? RunWindow()
