@@ -3498,7 +3498,7 @@ function wire(p) {
       const rb = docEl(cv.ownerDocument, "rubber"), l = Math.min(e.clientX, drag.sx), t = Math.min(e.clientY, drag.sy);
       rb.style.display = "block"; rb.style.left = l + "px"; rb.style.top = t + "px"; rb.style.width = Math.abs(e.clientX - drag.sx) + "px"; rb.style.height = Math.abs(e.clientY - drag.sy) + "px";
       rb.className = drag.act === "rubberzoom" ? "" : drag.act === "draw" || e.clientX >= drag.sx ? "win" : "cross";
-      if (drag.act === "draw") { hm.hover = {qd: qdIn(p, {x0: Math.min(drag.x0, x), x1: Math.max(drag.x0, x), y0: Math.min(drag.y0, y), y1: Math.max(drag.y0, y)}, qdItem(p, drawKind()))}; draw(); } // what the window will draw
+      if (drag.act === "draw") { hm.hover = {qd: qdWin(p, {x0: Math.min(drag.x0, x), x1: Math.max(drag.x0, x), y0: Math.min(drag.y0, y), y1: Math.max(drag.y0, y)}, drawKind())}; draw(); } // what the window will draw
     }
     drag.x = x; drag.y = y;
   });
@@ -28221,7 +28221,7 @@ function drawHint() {
   return ({column: `Click a grid crossing or a point to place a column ${where}.`, beam: `Click the start, then each next point of the beams ${where}. Right click, Enter or Esc ends the line.`, qbeam: `Click a grid line between two crossings: a beam fills that span ${where}.`,
     wall: `Click the start, then each next point of the walls ${where}. Right click, Enter or Esc ends the line.`, qwall: `Click a grid line between two crossings: a wall fills that span ${where}.`,
     floor: `Click the floor's corners in order round it; click the first corner again, double click or press Enter to close it, ${where}.`, rect: `Click two opposite corners of the floor ${where}.`, qfloor: `Click inside a grid bay: a floor fills it ${where}.`,
-    brace: `Click the brace's bottom end (on the story below), then its top end ${where}.`, qbrace: `Click a grid line between two crossings: ${braceName()} bracing fills the panel under it, down to the story below, ${where}.`,
+    brace: `Click the brace's bottom end (on the story below), then its top end ${where}.`, qbrace: `Click a grid line between two crossings for ${braceName()} bracing in the panel under it, down to the story below, or inside a grid bay for ${braceName()} bracing in the floor's plane, ${where}.`,
     reshape: hm.chain.length ? "Click the new place of the end or corner (Esc to choose another)." : "Click the end of a beam, column or brace, or the corner of a floor or wall, to reshape it on " + p.story + ".",
     qsec: `Click inside a grid bay: ${hm.secN} secondary beams parallel to ${hm.secDir} fill it ${where}.`, circ: hm.chain.length ? "Click a point on the floor's edge." : `Click the centre of the circular floor ${where}.`, joint: `Click a point to place a joint ${where}, for a support, spring, load or link where no member ends.`}[k] || "") + ctlHint() + winHint();
 }
@@ -28607,20 +28607,32 @@ function braceLines(c, p) {
   const mid = (a, b) => a.map((v, i) => wpRound((v + b[i]) / 2)), bm = mid(b0, b1), tm = mid(t0, t1);
   return {x: [[b0, t1], [b1, t0]], v: [[bm, t0], [bm, t1]], iv: [[b0, tm], [b1, tm]], l: [[b1, t0]], r: [[b0, t1]]}[hm.brace || "x"] || [];
 }
+// Quick Draw Braces in a plan takes a grid line (the panel under it, down to the story below) or, inside a grid bay,
+// the bay itself: bracing in the floor's plane (the user's ask, 28 Nov). A window takes the bays wholly inside it, or,
+// holding none, the panels under the grid line segments wholly inside it.
+const qdFloorBraces = (p, k) => k === "qbrace" && p.mode === "plan";
+function qdPick(p, x, y, k) {
+  if (!p.M) return null;
+  return qdAt(p, x, y, qdItem(p, k)) || (qdFloorBraces(p, k) ? qdAt(p, x, y, "bays") : null);
+}
+function qdWin(p, r, k) {
+  const bays = qdFloorBraces(p, k) ? qdIn(p, r, "bays") : [];
+  return bays.length ? bays : qdIn(p, r, qdItem(p, k));
+}
 async function qdClick(p, x, y) {
-  const k = drawKind(), what = qdItem(p, k), it = p.M && qdAt(p, x, y, what);
+  const k = drawKind(), what = qdItem(p, k), it = qdPick(p, x, y, k);
   if (it) return qdDraw(p, k, [it]);
   hmSay({segs: p.mode === "plan" ? "Click on a grid line, between two crossing grid lines." : "Click on a grid line between two crossing grid lines, or on a grid crossing's line between two story levels.",
-    bays: "Click inside a bay of the grid.", panels: p.mode === "plan" ? "Click on a grid line, between two crossing grid lines: the braces fill the panel under it." : "Click inside a panel: between two grid lines and two story levels."}[what], true);
+    bays: "Click inside a bay of the grid.", panels: p.mode === "plan" ? "Click on a grid line, between two crossing grid lines (braces in the panel under it), or inside a grid bay (braces in the floor)." : "Click inside a panel: between two grid lines and two story levels."}[what], true);
 }
 async function drawWindow(p, r) {
-  const k = drawKind(), got = qdIn(p, r, qdItem(p, k));
+  const k = drawKind(), got = qdWin(p, r, k);
   hm.hover = null; draw();
-  if (!got.length) return hmSay(`The window holds no whole grid ${winWhat(p, k)}.`, true);
+  if (!got.length) return hmSay(`The window holds no whole grid ${qdFloorBraces(p, k) ? "bay or line segment" : winWhat(p, k)}.`, true);
   return qdDraw(p, k, got);
 }
 const winWhat = (p, k) => ({pts: "crossing", segs: "line segment", bays: "bay"})[qdItem(p, k)] || (p.mode === "plan" ? "line segment" : "panel");
-const winHint = () => { const p = panes[active]; return winDraws(p) ? ` Or drag a window: ${drawKind() === "qbrace" && p.mode === "plan" ? "braces under each grid line segment" : "one at each grid " + winWhat(p, drawKind())} wholly inside it.` : ""; };
+const winHint = () => { const p = panes[active]; return winDraws(p) ? ` Or drag a window: ${qdFloorBraces(p, drawKind()) ? "braces in each bay wholly inside it, or, holding no whole bay, under each grid line segment wholly inside it" : "one at each grid " + winWhat(p, drawKind()) + " wholly inside it"}.` : ""; };
 // Draws a command's items, all in one change: in a plan on its story (and its similar ones), elsewhere by points in
 // space, whatever levels they are on.
 async function qdDraw(p, k, items) {
@@ -28633,7 +28645,12 @@ async function qdDraw(p, k, items) {
     if (k === "column") return hmRun("add_columns", {points: items.map(xy), stories: st, section: sec});
     if (k === "qbeam" || k === "qwall") return hmRun(k === "qbeam" ? "add_beams" : "add_walls", {lines: items.map(line4), stories: st, section: sec});
     if (k === "qsec") return hmRun("add_beams", {lines: items.flatMap(b => secLines(b)), stories: st, section: sec});
-    if (k === "qbrace") return hmRun("add_braces", {braces: items.flatMap(c => braceLines(c, p)).map(line4), stories: st, section: sec});
+    if (k === "qbrace") {
+      // A bay's braces lie in the floor's plane, on each story drawn on (by their points); a panel's run from the story below.
+      const flat = items.filter(c => c[0][2] === c[2][2]);
+      if (flat.length) return hmRun("add_frames_by_points", {frames: st.flatMap(s => { const z = elevationOf(s) ?? 0; return flat.flatMap(c => braceLines(c, p)).map(([a, b]) => [a[0], a[1], z, b[0], b[1], z]); }), section: sec, brace: true});
+      return hmRun("add_braces", {braces: items.flatMap(c => braceLines(c, p)).map(line4), stories: st, section: sec});
+    }
     return hmRun("add_slabs", {outlines: items.map(b => b.map(xy)), stories: st, section: sec});
   }
   if (k === "qfloor") { const wall = (await drawSection("wall")).now; return hmRun("add_areas_by_points", {areas: items, section: sec, ...(wall ? {wall_section: wall} : {})}); }
@@ -28896,7 +28913,7 @@ function drawPreview(p, g, M) {
 }
 function drawMove(p, x, y) {
   const k = drawKind(); drawCtl.at = {p, x, y};
-  if (qdClicks(p, k)) { const it = p.M && qdAt(p, x, y, qdItem(p, k)); hm.hover = {qd: it ? [it] : [], p}; draw(); return; }
+  if (qdClicks(p, k)) { const it = qdPick(p, x, y, k); hm.hover = {qd: it ? [it] : [], p}; draw(); return; }
   if (elevDraws(p)) { hm.hover = elevKinds.includes(k) ? {snap: elevSnap(p, x, y), p} : null; draw(); return; }
   if (p.mode === "3d" && program === "etabs") { hm.hover = draw3dKinds.includes(k) ? {snap: snap3d(p, x, y), p} : null; draw(); return; }
   if (p.mode !== "plan") { hm.hover = null; return; }

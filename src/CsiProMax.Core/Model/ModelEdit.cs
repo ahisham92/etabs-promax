@@ -157,7 +157,7 @@ public static class ModelEdit
 
     private static LineAssign AssignLine(this StructuralModel m, LineKind kind, PlanPoint i, PlanPoint j, int below, string prefix, string story, string section)
     {
-        m.RequireStory(story, kind == LineKind.Beam ? 0 : 1);
+        m.RequireStory(story, kind == LineKind.Beam || below == 0 ? 0 : 1); // a brace in a floor's plane stands on its story
         var line = m.Lines.Find(l => l.Kind == kind && l.StoriesBelowI == below &&
                                      ((l.PointI == i.Name && l.PointJ == j.Name) || (kind == LineKind.Beam && below == 0 && l.PointI == j.Name && l.PointJ == i.Name)));
         if (line is null)
@@ -218,13 +218,14 @@ public static class ModelEdit
 
     /// <summary>A frame between two points, each at a story level (Draw Beam/Column/Brace in the 3-D view): a column,
     /// beam or brace by its inclination (<see cref="Inclinations"/>), one on a single level a beam. One object however
-    /// many stories it spans. With <paramref name="brace"/> (Quick Draw Braces) it is a brace whatever its inclination.</summary>
+    /// many stories it spans. With <paramref name="brace"/> (Quick Draw Braces) it is a brace whatever its inclination,
+    /// one on a single level too (bracing in a floor's plane).</summary>
     public static LineAssign AddFrame(this StructuralModel m, Xyz a, Xyz b, string section, bool brace = false)
     {
         int la = m.LevelOf(a.Z), lb = m.LevelOf(b.Z);
         var plan = Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
         if (la == lb && plan <= Tolerance) throw new ArgumentException("A frame needs two different ends.");
-        if (brace && (la == lb || plan <= Tolerance)) throw new ArgumentException("A brace runs from one level to another, its ends apart in plan.");
+        if (brace && plan <= Tolerance) throw new ArgumentException("A brace's two ends are apart in plan (one above the other is a column).");
         var (low, high) = la <= lb ? (a, b) : (b, a);
         int bottom = Math.Min(la, lb), top = Math.Max(la, lb);
         var (fromVertical, fromHorizontal) = m.Inclinations();

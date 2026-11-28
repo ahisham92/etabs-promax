@@ -47,6 +47,18 @@ static class LevelDivideTests
             catch (ToolInputException ex) { Check(ex.Message.Contains("spans more than one story") && ModelFile.ToJson(m) == before, ex.Message); }
         });
 
+        yield return ("edit: Quick Draw Braces in a plan's grid bay draws braces in the floor's plane, kept as braces on their story", () =>
+        {
+            var link = new OfflineEtabs(Templates.ConcreteFrame("Levels", [6, 5], [4], 3, 3.2));
+            var m = link.Model;
+            var made = Names(Run(link, "add_frames_by_points", new { frames = new[] { new[] { 0.0, 0, 6.4, 6, 4, 6.4 }, new[] { 6.0, 0, 6.4, 0, 4, 6.4 } }, section = "C500x500", brace = true }), "frames");
+            Check(made.Count == 2 && made.All(n => Split(n).Story == "Story2"), "two braces on Story2: " + string.Join(", ", made));
+            foreach (var n in made) { var line = m.Line(Split(n).Label)!; Check(line.Kind == LineKind.Brace && line.StoriesBelowI == 0, $"{n}: a brace with both ends on its story"); }
+            // Without 'brace' the same level line is a beam, as Draw Beam/Column/Brace gives it.
+            var beam = Names(Run(link, "add_frames_by_points", new { frames = new[] { new[] { 6.0, 0, 3.2, 11, 4, 3.2 } }, section = "C500x500" }), "frames");
+            Check(m.Line(Split(beam[0]).Label)!.Kind == LineKind.Beam, "a level frame drawn without 'brace' is a beam");
+        });
+
         yield return ("edit: a wall drawn over two stories is one object; Divide Shells' Walls and Ramps at Story Levels makes it one wall per story with its section", () =>
         {
             var link = new OfflineEtabs(Templates.ConcreteFrame("Levels", [6, 5], [4], 3, 3.2));
