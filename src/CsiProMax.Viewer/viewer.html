@@ -405,8 +405,10 @@ table.hmgrid tr.on td{background:var(--sel)}
 table.hmgrid tr.edit td{background:var(--field)}
 table.hmgrid td{padding:0 2px}
 #pobj{position:absolute;left:10px;top:34px;z-index:5;background:var(--form);border:1px solid var(--formline);box-shadow:0 4px 14px rgba(0,0,0,.3);min-width:230px}
-#pobj .dt{height:24px;display:flex;align-items:center;padding:0 8px;background:var(--ftitle);border-bottom:1px solid var(--line2)}
-#pobj .dt b{font-weight:400}
+#pobj .dt{height:24px;display:flex;align-items:center;padding:0 0 0 8px;background:var(--ftitle);border-bottom:1px solid var(--line2);cursor:move;user-select:none}
+#pobj .dt b{font-weight:400;flex:1}
+#pobj .dt .x{width:34px;height:23px;border:0;background:none;border-radius:0;font-size:12px;color:var(--ink);cursor:default}
+#pobj .dt .x:hover{background:#e81123;color:#fff}
 #pobj .g2{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}
 footer select{font-size:11.5px}
 .swatch{display:inline-block;width:14px;height:12px;border:1px solid rgba(0,0,0,.3);vertical-align:-2px;margin-right:4px}
@@ -28485,13 +28487,14 @@ async function drawSection(kind) {
 }
 async function showObjBox() {
   const box = $("pobj"); if (!box) return;
-  if (!window.cpmLive || !drawing()) { box.hidden = true; return; }
+  if (tool !== hm.pobjTool) { hm.pobjTool = tool; hm.pobjShut = false; } // a draw command started again shows the box again
+  if (!window.cpmLive || !drawing() || hm.pobjShut) { box.hidden = true; return; }
   const kind = drawKinds[drawKind()], s = await drawSection(kind);
   if (kind === "reshape") { box.hidden = true; return; }
   // Draw Beam/Column/Brace and Draw Floor/Wall: the type follows the inclination (Options > Tolerances).
   const incl = program === "etabs" ? {beam: "frame", floor: "area", rect: "area"}[drawKind()] || "" : "", ws = incl === "area" ? await drawSection("wall") : null;
   box.hidden = false; $("similar").value = hm.similar;
-  box.innerHTML = `<div class="dt"><b>Properties of Object</b></div><div class="g2" style="padding:6px 8px"><span>Type</span><b style="font-weight:400"${incl ? ` title="${esc("By its inclination: " + wpInclText(incl))}"` : ""}>${incl === "frame" ? "Column, Beam or Brace" : incl === "area" ? "Floor, Wall or Ramp" : {column: "Column", beam: "Beam", wall: "Wall", slab: "Floor", brace: "Brace", joint: "Joint"}[kind]}</b>
+  box.innerHTML = `<div class="dt"><b>Properties of Object</b><button class="x" title="Close">&#10005;</button></div><div class="g2" style="padding:6px 8px"><span>Type</span><b style="font-weight:400"${incl ? ` title="${esc("By its inclination: " + wpInclText(incl))}"` : ""}>${incl === "frame" ? "Column, Beam or Brace" : incl === "area" ? "Floor, Wall or Ramp" : {column: "Column", beam: "Beam", wall: "Wall", slab: "Floor", brace: "Brace", joint: "Joint"}[kind]}</b>
     ${kind === "joint" ? "" : `<span>Section</span><select id="pobjS">${s.list.length ? opts(s.list, s.now) : `<option value="">(define one first)</option>`}</select>`}
     ${ws ? `<span title="The section of an area that comes out a wall">Wall Section</span><select id="pobjWS">${ws.list.length ? opts(ws.list, ws.now) : `<option value="">(define one first)</option>`}</select>` : ""}
     ${ctlOn() ? `<span>Drawing Control Type</span><select id="pobjDC">${opts(ctlList, drawCtl.k)}</select>` : ""}
@@ -28508,6 +28511,21 @@ async function showObjBox() {
   q(box, "#pobjW").onchange = e => { hm.similar = e.target.value; $("similar").value = hm.similar; $("hint").textContent = hintText(); };
   if (q(box, "#pobjP")) q(box, "#pobjP").onchange = e => wpSet(e.target.value);
   if (q(box, "#pobjDC")) q(box, "#pobjDC").onchange = e => { drawCtl.ang = Math.PI / 4; e.target.blur(); ctlSet(e.target.value); }; // blurred, so the keys work again
+  pobjWire(box);
+}
+// As ETABS's Properties of Object form (its help): drag its title to move it, its X closes it (until a draw command
+// starts again), and a double click on its title puts it back where it first stood.
+function pobjWire(box) {
+  const dt = q(box, ".dt");
+  q(box, ".dt .x").onclick = () => { hm.pobjShut = true; box.hidden = true; };
+  dt.ondblclick = e => { if (!e.target.closest(".x")) box.style.left = box.style.top = ""; };
+  dt.onpointerdown = e => {
+    if (e.target.closest(".x") || e.button !== 0) return;
+    const v = box.parentElement.getBoundingClientRect(), b = box.getBoundingClientRect(), dx = e.clientX - b.left, dy = e.clientY - b.top;
+    dt.setPointerCapture(e.pointerId);
+    dt.onpointermove = m => { box.style.left = Math.max(0, Math.min(v.width - b.width, m.clientX - v.left - dx)) + "px"; box.style.top = Math.max(0, Math.min(v.height - b.height, m.clientY - v.top - dy)) + "px"; };
+    dt.onpointerup = () => { dt.onpointermove = dt.onpointerup = null; };
+  };
 }
 async function drawClick(p, x, y, dbl) {
   if (p.mode === "3d" && program === "etabs" || elevDraws(p)) return draw3dClick(p, x, y, dbl);
