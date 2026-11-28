@@ -438,6 +438,11 @@ public static class ScratchDialogs
             var longest = "";
             EnumChildWindows(window, (child, _) =>
             {
+                // Only a multi-line text box is the log: a label or one-line field of the window holds other words
+                // (ETABS 23.2's hidden form holds "C:\Safe\MyModel.fdb", which showed as the log on Ahmed's run, 2026-11-28).
+                var kind = new System.Text.StringBuilder(128);
+                GetClassNameW(child, kind, kind.Capacity);
+                if (!IsLogBox(kind.ToString(), GetWindowLongW(child, -16 /* GWL_STYLE */))) return true;
                 var text = FullText(child);
                 if (text.Length > longest.Length) longest = text;
                 return true;
@@ -446,6 +451,12 @@ public static class ScratchDialogs
         }
         return null;
     }
+
+    /// <summary>A run window's log box: a multi-line edit or rich-edit control (WinForms names them "WindowsForms10.EDIT..." and "...RichEdit...").</summary>
+    public static bool IsLogBox(string className, int style) =>
+        (className.Contains("EDIT", StringComparison.OrdinalIgnoreCase) || className.Contains("RichEdit", StringComparison.OrdinalIgnoreCase)) && (style & 0x0004 /* ES_MULTILINE */) != 0;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern int GetWindowLongW(IntPtr window, int index);
 
     /// <summary>The lines of a run window's log box, blank lines left out.</summary>
     public static List<string> LogLines(string text) =>
@@ -530,6 +541,7 @@ public sealed class ScratchProgram : IScratchWindow
 
     private ScratchProgram(CsiProgram program) => _program = program;
     private bool _asIs;
+    private string? _name;
 
     /// <summary>When this test asked the program to start: a process older than that is never the test's.</summary>
     private DateTime _startedAt;
@@ -577,7 +589,14 @@ public sealed class ScratchProgram : IScratchWindow
     /// analysis (CSI ProMax Engine's design on its own): it is opened under its own name and not saved as a new scratch
     /// model, so its results stay with it.
     /// </summary>
-    public static IScratchWindow? Start(CsiProgram program, FieldContext ctx, string modelFile, bool asIs)
+    public static IScratchWindow? Start(CsiProgram program, FieldContext ctx, string modelFile, bool asIs) => Start(program, ctx, modelFile, asIs, null);
+
+    /// <summary>
+    /// <paramref name="name"/>: the name the model is saved under in the program (CSI ProMax Engine's runs: the
+    /// engineer's own file name with <see cref="RunMark"/>, Ahmed 2026-11-28); null gives a field test's
+    /// "cpm-field-test-" name of its own.
+    /// </summary>
+    public static IScratchWindow? Start(CsiProgram program, FieldContext ctx, string modelFile, bool asIs, string? name)
     {
         // SAP2000 26 refuses every table import (ApplyEditedTables answers 1, with no log, and every load pattern is
         // gone) in a process that has opened an .s2k, even a tiny one, and even after it opens an .sdb again; a new
@@ -611,7 +630,7 @@ public sealed class ScratchProgram : IScratchWindow
             text = modelFile;
             modelFile = converted;
         }
-        var scratch = new ScratchProgram(program) { _asIs = asIs, _modelerFile = modelerFile };
+        var scratch = new ScratchProgram(program) { _asIs = asIs, _modelerFile = modelerFile, _name = name };
         var ok = false;
         try
         {
@@ -833,7 +852,7 @@ public sealed class ScratchProgram : IScratchWindow
         }) is null) return false;
 
         // A name of this run's own: two tests on one PC (it happened) must never take each other's window for theirs.
-        var target = _asIs ? Path.GetFullPath(modelFile) : Path.Combine(ctx.Folder, ScratchName() + ModelExtension(_program));
+        var target = _asIs ? Path.GetFullPath(modelFile) : Path.Combine(ctx.Folder, (_name ?? ScratchName()) + ModelExtension(_program));
         var text = build ? File.ReadAllText(modelFile) : "";
         bool Blank(string why) => ctx.Step($"start a blank model in it ({why})", StartBlank) is not null;
         string StartBlank()
@@ -1052,6 +1071,19 @@ public sealed class ScratchProgram : IScratchWindow
 
     /// <summary>The scratch model's name: "cpm-field-test-" and six characters no other run has.</summary>
     public static string ScratchName() => "cpm-field-test-" + Guid.NewGuid().ToString("N")[..6];
+
+    /// <summary>
+    /// What the name of an Engine run's copy of the engineer's model ends with ("FIXED 05 (CSI ProMax run).EDB"): the
+    /// program's windows of it are the run's own, as a field test's "cpm-field-test-" ones are.
+    /// </summary>
+    public const string RunMark = " (CSI ProMax run)";
+
+    /// <summary>The Engine run's model name for the engineer's file name (no folder, no file type).</summary>
+    public static string RunCopyName(string own) => own.Trim() + RunMark;
+
+    /// <summary>True when a window title or file name is of CSI ProMax's own copy: a field test's or an Engine run's.</summary>
+    public static bool IsOwnCopy(string title) =>
+        title.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase) || title.Contains(RunMark.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>One call to the scratch window that may never come back (a message waiting in it): then it is left alone.</summary>
     /// <summary>
@@ -1285,7 +1317,7 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public static bool MayEnd(DateTime processStarted, DateTime testAsked, IEnumerable<string> titles) =>
         testAsked != default && processStarted >= testAsked.AddSeconds(-2)
-        && titles.All(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase) || OwnBlank(t));
+        && titles.All(t => IsOwnCopy(t) || OwnBlank(t));
 
     /// <summary>
     /// A window of the blank model the test itself starts in its scratch window at its end (the program's defaults,
@@ -1304,7 +1336,7 @@ public sealed class ScratchProgram : IScratchWindow
     {
         // Windows the test answers itself also count (ETABS's "Log", the file picker, its own message boxes): the 0.4.58
         // run left two ETABS on their "Log" window and the 0.4.59 run did not end them.
-        static bool Scratch(string t) => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase);
+        static bool Scratch(string t) => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase) || t.Contains(RunMark.Trim(), StringComparison.OrdinalIgnoreCase);
         static bool Answered(string t) => ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t)
             || ScratchDialogs.IsLineLog(t) || ScratchDialogs.IsOpenFileBox(t) || ScratchDialogs.IsAnalysisMessages(t)
             || t.Trim() is "ETABS" or "SAP2000" or "SAFE"; // ETABS itself: the program's own message boxes
@@ -1342,8 +1374,8 @@ public sealed class ScratchProgram : IScratchWindow
     /// was opening, or windows the test answers itself: a licence message keeps it alive.
     /// </summary>
     public static bool IsOwnLeftCopy(IEnumerable<string> titles) =>
-        titles.Any(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase)) && titles.Where(t => !string.IsNullOrWhiteSpace(t)).All(t => !t.Contains("licen", StringComparison.OrdinalIgnoreCase)
-            && (t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase) || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t)
+        titles.Any(IsOwnCopy) && titles.Where(t => !string.IsNullOrWhiteSpace(t)).All(t => !t.Contains("licen", StringComparison.OrdinalIgnoreCase)
+            && (IsOwnCopy(t) || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t)
                 || ScratchDialogs.IsLineLog(t) || ScratchDialogs.IsOpenFileBox(t) || ScratchDialogs.IsAnalysisMessages(t) || t.Trim() is "ETABS" or "SAP2000" or "SAFE" // ETABS itself
                 || t.TrimStart().StartsWith("ETABS", StringComparison.OrdinalIgnoreCase) || t.TrimStart().StartsWith("SAP2000", StringComparison.OrdinalIgnoreCase) || t.TrimStart().StartsWith("SAFE", StringComparison.OrdinalIgnoreCase))); // ETABS itself
 
@@ -1392,7 +1424,7 @@ public sealed class ScratchProgram : IScratchWindow
     /// <summary>The windows of an orphaned API copy that may be ended: an empty or scratch model, and windows the test answers itself.</summary>
     public static bool IsOrphanedCopy(IEnumerable<string> titles) =>
         titles.Where(t => !string.IsNullOrWhiteSpace(t)).All(t => !t.Contains("licen", StringComparison.OrdinalIgnoreCase)
-            && (t.Contains("(Untitled)", StringComparison.OrdinalIgnoreCase) || t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase)
+            && (t.Contains("(Untitled)", StringComparison.OrdinalIgnoreCase) || IsOwnCopy(t)
                 || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t) || ScratchDialogs.IsLineLog(t)
                 || ScratchDialogs.IsOpenFileBox(t) || ScratchDialogs.IsAnalysisMessages(t) || t.Trim() is "ETABS" or "SAP2000" or "SAFE" // ETABS itself
                 || t.Trim().StartsWith("Cancel ", StringComparison.OrdinalIgnoreCase)));
@@ -1416,7 +1448,7 @@ public sealed class ScratchProgram : IScratchWindow
                         var titles = ScratchDialogs.Of(process.Id).Select(w => w.Title).ToList();
                         var own = (Started(process.Id, process.StartTime, started) && IsOwnLeftCopy(titles)) || (orphans.Contains(process.Id) && IsOrphanedCopy(titles));
                         if (!own && !IsLeftCopy(titles)) continue;
-                        var name = titles.FirstOrDefault(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase)) ?? $"a scratch {program.Name} this test started";
+                        var name = titles.FirstOrDefault(IsOwnCopy) ?? $"a scratch {program.Name} this test started";
                         process.Kill();
                         said.Add(process.WaitForExit(15000) ? $"'{name}' (process id {process.Id}) was closed without saving" : $"'{name}' (process id {process.Id}) was told to end and is still there");
                     }

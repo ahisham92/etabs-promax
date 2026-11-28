@@ -32,7 +32,7 @@ internal static class ProgramFollow
     internal static CsiProgram? Followable(Front front, int? currentPid, CsiProgram current)
     {
         if (front.Pid == currentPid) return null;
-        if (front.Title.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase)) return null;
+        if (CsiProMax.Assistant.ScratchProgram.IsOwnCopy(front.Title)) return null;
         var program = CsiProgram.All.FirstOrDefault(p => p.Ready && string.Equals(p.ProcessName, front.ProcessName, StringComparison.OrdinalIgnoreCase));
         if (program is null) return null;
         return currentPid is null && program.Key == current.Key ? null : program;
