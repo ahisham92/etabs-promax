@@ -514,6 +514,10 @@ public static class EngineRun
     /// <summary>One look of the monitor: new log lines, the boxes answered, and a box the program waits on.</summary>
     private static int _watching;
 
+    /// <summary>The program's windows are looked at every this many seconds; its log is read every second.</summary>
+    internal const int LookEvery = 3;
+    private static int _looks = -1;
+
     private static void Watch(RunMonitor mon, LogTail tail)
     {
         // One look at a time: a look held by a slow window must not pile up behind the timer.
@@ -525,16 +529,18 @@ public static class EngineRun
             lock (Gate) window = _window;
             Notices(mon, window);
             if (window is not ScratchProgram sp) { mon.Wait(""); return; }
+            // The program's windows are looked at every few seconds, not every second: each look is answered on the
+            // program's own thread, which is busy building and running the analysis (0.4.77, Ahmed's real model).
+            if (++_looks % LookEvery != 0) return;
             // What the program's own run window shows (ETABS's "Analyzing" window and its log box), and the windows it
             // has open: the Engine's run window shows them live (Ahmed 2026-11-28: "it is important to see what is happening").
             if (sp.RunWindow() is { } screen) mon.Screen(screen.Title, screen.Lines);
             mon.Status(sp.StatusText());
-            var shown = sp.OpenWindows();
-            mon.Windows(shown.Count == 0 ? "" : string.Join(" | ", shown));
+            var open = sp.OpenWindows();
+            mon.Windows(open.Count == 0 ? "" : string.Join(" | ", open));
             var quiet = (DateTime.Now - mon.LastHeard).TotalSeconds;
             if (quiet < 30) { mon.Wait(""); return; }
             // Quiet for half a minute: what the program shows is said, so a box nobody answered is never a silent wait.
-            var open = sp.OpenWindows();
             mon.Wait(open.Count == 0 ? "" : open.Any(t => t.Contains("licen", StringComparison.OrdinalIgnoreCase))
                 ? $"{mon.Program} is showing a licence message: " + string.Join(" | ", open) + ". Press Show program window and answer it there."
                 : $"{mon.Program} has written nothing for {quiet:0} s. Its open windows: " + string.Join(" | ", open) + ". If one waits for an answer, press Show program window.");
