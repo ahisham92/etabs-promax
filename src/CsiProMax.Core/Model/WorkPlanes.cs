@@ -74,7 +74,8 @@ public static class WorkPlanes
         return [Arr(a), Arr(b), Arr(point)];
     }
 
-    /// <summary>The plane of a flat area: three of its corners as far from one line as they go. A warped area is refused.</summary>
+    /// <summary>The plane of a flat area: three of its corners as far from one line as they go. A warped area is refused;
+    /// a corner off the plane by less than a ten-thousandth of the model's size counts as on it (drawn points are rounded).</summary>
     public static List<double[]> FromCorners(IReadOnlyList<Xyz> corners)
     {
         if (corners.Count < 3) throw new ArgumentException("An area needs three corners or more.");
@@ -88,7 +89,7 @@ public static class WorkPlanes
             }
         if (bi < 0 || best <= 1e-9 * scale * scale) throw new ArgumentException("The area's corners are on one line, so they make no plane.");
         var plane = new WorkPlane { Points = [Arr(corners[0]), Arr(corners[bi]), Arr(corners[bj])] };
-        if (corners.Any(q => Distance(plane, q) > 1e-6 * scale)) throw new ArgumentException("The area is not flat (its corners are not in one plane), so it makes no work plane.");
+        if (corners.Any(q => Distance(plane, q) > 1e-4 * scale)) throw new ArgumentException("The area is not flat: its corners are not in one plane.");
         return plane.Points;
     }
 }

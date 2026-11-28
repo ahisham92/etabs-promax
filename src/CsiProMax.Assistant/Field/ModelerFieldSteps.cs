@@ -550,6 +550,20 @@ public static class ModelerFieldSteps
                         "tool add_template, Edit > Add to Model from Template > 3D Flat Slab with the model's own sections");
             }
             ctx.Tool("relabel_objects", "{}", a => FieldContext.Expect(a["relabelled"] is not null, "no count: " + a.ToJsonString()), "tool relabel_objects, Edit > Auto Relabel All");
+            // Drawing by points at story levels, as on a work plane in the 3-D view: a brace from the base to the top as
+            // one object, and a ramp up one story.
+            {
+                double x = minX - 60, y = minY - 60, z0 = m.Elevation(0), z1 = m.Elevation(1), zt = m.Elevation(stories.Count - 1);
+                var shell = floor?.Section ?? m.ShellSections[0].Name;
+                ctx.Tool("add_frames_by_points", $$"""{"frames":[[{{N(x)}},{{N(y)}},{{N(z0)}},{{N(x + 6)}},{{N(y)}},{{N(zt)}}]],"section":{{Q(section)}}}""",
+                    a => { var f = a["frames"]![0]!.GetValue<string>().Split('@'); FieldContext.Expect(m.Line(f[0]) is { Kind: CsiProMax.Model.LineKind.Brace } l && l.StoriesBelowI == stories.Count - 1 && f[1] == top, "one brace from the base to the top was expected: " + a.ToJsonString()); },
+                    "tool add_frames_by_points, a brace from the base to the top story as one object");
+                ctx.Refused("add_frames_by_points", $$"""{"frames":[[{{N(x)}},{{N(y)}},{{N(z0 + 0.37)}},{{N(x + 6)}},{{N(y)}},{{N(zt)}}]],"section":{{Q(section)}}}""", "not a story level", "tool add_frames_by_points says no to an end between story levels");
+                ctx.Tool("add_areas_by_points", $$"""{"areas":[[[{{N(x)}},{{N(y)}},{{N(z0)}}],[{{N(x + 6)}},{{N(y)}},{{N(z0)}}],[{{N(x + 6)}},{{N(y + 5)}},{{N(z1)}}],[{{N(x)}},{{N(y + 5)}},{{N(z1)}}]]],"section":{{Q(shell)}}}""",
+                    a => { var r = a["areas"]![0]!.GetValue<string>().Split('@'); FieldContext.Expect(m.Area(r[0]) is { Kind: CsiProMax.Model.AreaKind.Ramp } && r[1] == stories[1], "a ramp up to the first story was expected: " + a.ToJsonString()); },
+                    "tool add_areas_by_points, a ramp on a sloped plane");
+                ctx.Refused("add_areas_by_points", $$"""{"areas":[[[{{N(x)}},{{N(y)}},{{N(z0)}}],[{{N(x + 6)}},{{N(y)}},{{N(z0)}}],[{{N(x + 6)}},{{N(y + 5)}},{{N(z1)}}],[{{N(x)}},{{N(y + 5)}},{{N(z0)}}]]],"section":{{Q(shell)}}}""", "not flat", "tool add_areas_by_points says no to corners not in one plane");
+            }
         }
         finally
         {

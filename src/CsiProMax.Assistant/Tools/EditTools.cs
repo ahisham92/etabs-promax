@@ -34,6 +34,14 @@ public static class EditTools
             "Draw > Draw Joints: joints at plan points on each story given, for supports, springs, loads and links where no member ends.",
             """{"type":"object","required":["points","stories"],"properties":{"points":{"type":"array","items":{"type":"array","items":{"type":"number"},"description":"[x, y]"}},"stories":{"type":"array","items":{"type":"string"}}}}""",
             Ask.Changes, AddJoints, a => $"Draw {a.Items("points").Count()} joints"),
+        new("add_frames_by_points",
+            "Draw a frame between two points in space, as on a work plane in the 3-D view: each [x1, y1, z1, x2, y2, z2], both ends at story levels. Both on one level make a beam, one above the other a column, else a brace; each is one object however many stories it spans.",
+            """{"type":"object","required":["frames","section"],"properties":{"frames":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"[x1, y1, z1, x2, y2, z2]"},"section":{"type":"string"}}}""",
+            Ask.Changes, AddFramesByPoints, a => $"Draw {a.Items("frames").Count()} frames"),
+        new("add_areas_by_points",
+            "Draw an area on its corners in space, as on a work plane in the 3-D view: each [[x, y, z], ...] in order round its edge, every corner at a story level and all in one plane. All on one level make a floor, upright a wall, sloped a ramp; each is one object however many stories it spans.",
+            """{"type":"object","required":["areas","section"],"properties":{"areas":{"type":"array","items":{"type":"array","items":{"type":"array","items":{"type":"number"}}},"description":"[[x, y, z], ...], three corners or more"},"section":{"type":"string","description":"A slab section for a floor or ramp, a wall section for a wall."}}}""",
+            Ask.Changes, AddAreasByPoints, a => $"Draw {a.Items("areas").Count()} areas"),
         new("replicate_objects",
             "Edit > Replicate: copies frames, slabs and walls with their sections, assignments, loads and hinges. mode 'linear': 'number' copies, each dx, dy on from the last; mode 'radial': 'number' copies turned about (cx, cy), each 'angle' degrees on; mode 'mirror': one copy mirrored about the plan line (x1, y1)-(x2, y2); mode 'story': onto each of 'stories', in the same place. delete_original takes the originals off after (Delete Original Objects).",
             "{\"type\":\"object\",\"required\":[\"objects\",\"mode\"],\"properties\":{" + Objects + ",\"mode\":{\"type\":\"string\",\"enum\":[\"linear\",\"radial\",\"mirror\",\"story\"]},\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"dz\":{\"type\":\"number\",\"description\":\"linear: up by this each copy, to another story's level (Paste).\"},\"number\":{\"type\":\"integer\"},\"cx\":{\"type\":\"number\"},\"cy\":{\"type\":\"number\"},\"angle\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"y1\":{\"type\":\"number\"},\"x2\":{\"type\":\"number\"},\"y2\":{\"type\":\"number\"},\"stories\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"delete_original\":{\"type\":\"boolean\"},\"skip\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Replicate Assigns options left off the copies, as 'Frames:Hinges', 'Shells:Diaphragms', 'Frames:Distributed' (loads) ...\"}}}",
@@ -134,6 +142,36 @@ public static class EditTools
                     made.Add(point.Name + "@" + s);
                 }
             return (JsonNode)new JsonObject { ["joints"] = new JsonArray(made.Select(x => (JsonNode)x).ToArray()) };
+        }));
+    }
+
+    private static JsonNode AddFramesByPoints(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var frames = Numbers(a, "frames", 6);
+        var section = a.Need("section");
+        if (!link.Model.FrameSections.Exists(s => s.Name == section)) throw new ToolInputException($"There is no frame section '{section}'.");
+        return Core(() => link.Edit(m =>
+        {
+            var made = frames.Select(f => m.AddFrame(new Xyz(f[0], f[1], f[2]), new Xyz(f[3], f[4], f[5]), section)).Select(x => (JsonNode)(x.Label + "@" + x.Story)).ToArray();
+            return (JsonNode)new JsonObject { ["frames"] = new JsonArray(made) };
+        }));
+    }
+
+    private static JsonNode AddAreasByPoints(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        static Xyz Corner(JsonElement c) => c.ValueKind == JsonValueKind.Array && c.GetArrayLength() == 3
+            ? new Xyz(c[0].GetDouble(), c[1].GetDouble(), c[2].GetDouble()) : throw new ToolInputException("Each corner is [x, y, z].");
+        var areas = a.Items("areas").Select(x => x.ValueKind == JsonValueKind.Array ? x.EnumerateArray().Select(Corner).ToList() : throw new ToolInputException("Each area is a list of [x, y, z] corners.")).ToList();
+        if (areas.Count == 0) throw new ToolInputException("Give areas.");
+        var section = a.Need("section");
+        if (!link.Model.ShellSections.Exists(s => s.Name == section)) throw new ToolInputException($"There is no slab or wall section '{section}'.");
+        return Core(() => link.Edit(m =>
+        {
+            var diaphragm = m.Diaphragms.FirstOrDefault()?.Name ?? "D1"; // a floor's, as Draw Floor gives it
+            var made = areas.Select(c => m.AddArea(c, section, diaphragm)).Select(x => (JsonNode)(x.Label + "@" + x.Story)).ToArray();
+            return (JsonNode)new JsonObject { ["areas"] = new JsonArray(made) };
         }));
     }
 

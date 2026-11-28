@@ -202,6 +202,43 @@ public static class ModelEdit
         return m.AssignArea(AreaKind.Wall, [i, j, j, i], [1, 1, 0, 0], "W", story, section, null);
     }
 
+    /// <summary>A frame between two points, each at a story level, as drawn on a work plane: a beam when both are on
+    /// one level, a column when one is above the other, else a brace. One object however many stories it spans.</summary>
+    public static LineAssign AddFrame(this StructuralModel m, Xyz a, Xyz b, string section)
+    {
+        int la = m.LevelOf(a.Z), lb = m.LevelOf(b.Z);
+        var above = Math.Abs(a.X - b.X) <= Tolerance && Math.Abs(a.Y - b.Y) <= Tolerance;
+        if (la == lb)
+        {
+            if (above) throw new ArgumentException("A frame needs two different ends.");
+            return m.AddBeam(a.X, a.Y, b.X, b.Y, m.Stories[la].Name, section);
+        }
+        var (low, high) = la < lb ? (a, b) : (b, a);
+        int bottom = Math.Min(la, lb), top = Math.Max(la, lb);
+        var i = m.PointAt(low.X, low.Y); var j = m.PointAt(high.X, high.Y);
+        return above
+            ? m.AssignLine(LineKind.Column, i, i, top - bottom, "C", m.Stories[top].Name, section)
+            : m.AssignLine(LineKind.Brace, i, j, top - bottom, "D", m.Stories[top].Name, section);
+    }
+
+    /// <summary>An area on corners in one plane, each at a story level, in order round its edge, as drawn on a work
+    /// plane: a floor when all are on one level, a wall when it stands upright, else a ramp. One object however many
+    /// stories it spans.</summary>
+    public static AreaAssign AddArea(this StructuralModel m, IReadOnlyList<Xyz> corners, string section, string? diaphragm = null)
+    {
+        var levels = corners.Select(c => m.LevelOf(c.Z)).ToList();
+        var plane = new WorkPlane { Points = WorkPlanes.FromCorners(corners) }; // three or more, not on one line, flat
+        for (var k = 0; k < corners.Count; k++)
+            for (var l = k + 1; l < corners.Count; l++)
+                if (levels[k] == levels[l] && Math.Abs(corners[k].X - corners[l].X) <= Tolerance && Math.Abs(corners[k].Y - corners[l].Y) <= Tolerance)
+                    throw new ArgumentException("Two of the area's corners are at one place.");
+        if (levels.All(l => l == levels[0])) return m.AddSlab(corners.Select(c => (c.X, c.Y)).ToList(), m.Stories[levels[0]].Name, section, diaphragm);
+        var kind = Math.Abs(WorkPlanes.Normal(plane)[2]) < 1e-4 ? AreaKind.Wall : AreaKind.Ramp;
+        var top = levels.Max();
+        var names = corners.Select(c => m.PointAt(c.X, c.Y).Name).ToList();
+        return m.AssignArea(kind, names, levels.Select(l => top - l).ToList(), kind == AreaKind.Wall ? "W" : "F", m.Stories[top].Name, section, null);
+    }
+
     private static AreaAssign AssignArea(this StructuralModel m, AreaKind kind, List<string> names, List<int> below, string prefix, string story, string section, string? diaphragm)
     {
         var area = m.Areas.Find(a => a.Kind == kind && a.PointNames.SequenceEqual(names) && a.StoriesBelow.SequenceEqual(below));
@@ -293,6 +330,15 @@ public static class ModelEdit
         var index = m.StoryIndex(story);
         if (index < 0) throw new ArgumentException($"There is no story named '{story}'. Stories: {string.Join(", ", m.Stories.Select(s => s.Name))}.");
         if (index < levelsBelowNeeded) throw new ArgumentException($"'{story}' is the base level: nothing can hang below it.");
+    }
+
+    /// <summary>The story whose level is at elevation z (to 1e-4 of the model's length unit).</summary>
+    private static int LevelOf(this StructuralModel m, double z)
+    {
+        for (var i = 0; i < m.Stories.Count; i++)
+            if (Math.Abs(m.Elevation(i) - z) <= 1e-4) return i;
+        string N(double v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        throw new ArgumentException($"Elevation {N(z)} is not a story level: members join at story levels. The levels are: {string.Join(", ", m.Stories.Select((s, i) => $"{s.Name} {N(m.Elevation(i))}"))}.");
     }
 
     /// <summary>The next free name: prefix plus the smallest number above every name of that form in use.</summary>
