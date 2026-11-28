@@ -8998,13 +8998,210 @@ async function eteShellEdit(a) {
 }
 // Add to Model from Template, Interactive Database and the curve types: first versions here; the thread that builds
 // them in full replaces these function bodies (the menu calls them by name).
-function eteTplChooser(title, legend, kinds, open) {
-  const d = dialog(title, `<fieldset><legend>${esc(legend)}</legend><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">${kinds.map(k => `<button type="button" data-tk="${esc(k)}" style="width:96px;height:88px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:6px">${esc(k)}</button>`).join("")}</div></fieldset>`, [["Close"]], {width: kinds.length > 3 ? 470 : 360, float: true});
-  d.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => open(b.dataset.tk, d));
+// ETABS 23.2 Edit > Add to Model from Template, read from the pictures in reference-forms/etabs/Edit/Template: the 2D and
+// 3D chooser windows stay open (modeless) while a type's form is open; each form adds through the add_template tool.
+function eteTplChooser(title, legend, kinds, open, extra) {
+  const d = dialog(title, `<fieldset><legend>${esc(legend)}</legend><div class="nmobj">${kinds.map(([k, l, ic]) => `<button type="button" data-tk="${esc(k)}">${ic}<span>${esc(l)}</span></button>`).join("")}</div></fieldset>${extra ? extra.html : ""}`,
+    extra ? extra.buttons : [["Close"]], {width: kinds.length > 3 ? 470 : 380, float: true});
+  d.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => open(b.dataset.tk, d, b));
   return d;
 }
-function eteTpl2d() { return eteTplChooser("Add to Model - 2D Structure", "Click to Choose 2D Structure Type:", ["2D Frame", "2D Truss", "2D Wall"], k => hmSay(`${k}: its form comes with the next update.`)); }
-function eteTpl3d() { return eteTplChooser("Add to Model - 3D Structure", "Click to Choose 3D Structure Type:", ["Steel Deck", "Staggered Truss", "Flat Slab", "Flat Slab with Perimeter Beams", "Waffle Slab", "Two Way or Ribbed Slab"], k => hmSay(`${k}: its form comes with the next update.`)); }
+const eteIcon2d = k => {
+  const g = "#3b4b63", s = `stroke="${g}" fill="none" stroke-width="2"`;
+  return `<svg viewBox="0 0 60 56" width="52" height="48">${{
+    portal: `<path ${s} d="M10 50V8M30 50V8M50 50V8M10 8h40M10 29h40"/>`,
+    concentric: `<path ${s} d="M10 50V8M30 50V8M50 50V8M10 8h40M10 29h40M10 50l10-21 10 21M30 50l10-21 10 21M10 29l10-21 10 21M30 29l10-21 10 21"/>`,
+    eccentric: `<path ${s} d="M10 50V8M30 50V8M50 50V8M10 8h40M10 29h40M10 50l7-21M30 50l-7-21M30 50l7-21M50 50l-7-21M10 29l7-21M30 29l-7-21M30 29l7-21M50 29l-7-21"/>`,
+    sloped: `<path ${s} d="M6 14h48M14 42h32M6 14l8 28 8-28 8 28 8-28 8 28 8-28"/>`,
+    vertical: `<path ${s} d="M6 14h48M6 42h48M6 14v28M18 14v28M30 14v28M42 14v28M54 14v28M6 14l12 28M18 42l12-28M30 14l12 28M42 42l12-28"/>`,
+    pratt: `<path ${s} d="M6 14h48M6 42h48M6 14v28M18 14v28M30 14v28M42 14v28M54 14v28M6 14l12 28M18 14l12 28M42 14l-12 28M54 14l-12 28"/>`,
+    wall: `<rect x="8" y="8" width="44" height="40" fill="#b9c6d6" ${s}/><path ${s} d="M8 28h44M30 8v40"/>`,
+    openings: `<rect x="8" y="8" width="44" height="40" fill="#b9c6d6" ${s}/>${[[12, 13], [34, 13], [12, 33], [34, 33]].map(([x, y]) => `<rect x="${x}" y="${y}" width="14" height="9" fill="#eef2f6" ${s}/>`).join("")}`,
+  }[k]}</svg>`;
+};
+// A length the forms show in feet, in the model's own unit.
+const eteFt = ft => { const k = {in: 12, ft: 1, mm: 304.8, cm: 30.48, m: 0.3048}[hmU().l] ?? 1; return +(ft * k).toPrecision(4); };
+async function eteTplData() {
+  hm.defs = null; const d = await hmDefs();
+  const stories = (d.stories || []).map(s => s.name), top = stories.length ? stories[stories.length - 1] : "", bottom = stories[0] || "";
+  const frames = (d.frame_sections || []).map(s => s.name), shells = d.shell_sections || [];
+  const slabs = shells.filter(s => s.kind !== "wall").map(s => s.name), walls = shells.filter(s => s.kind === "wall").map(s => s.name);
+  const patterns = (d.load_patterns || []).map(p => p.name);
+  return {stories, top, bottom, frames, shells, slabs, walls, patterns, systems: [(d.grid_system && d.grid_system.name) || "G1"], grids: d.grids || []};
+}
+const eteTplPick = (list, ...want) => { for (const w of want) if (list.includes(w)) return w; return list[0] || ""; };
+async function eteTpl2d() {
+  return eteTplChooser("Add to Model - 2D Structure", "Click to Choose 2D Structure Type:", [["frame", "2D Frame", eteIcon2d("portal")], ["truss", "2D Truss", eteIcon2d("sloped")], ["wall", "2D Wall", eteIcon2d("wall")]],
+    async k => { const t = await eteTplData(); if (!t.stories.length) return hmSay("The model has no story above the base: add one with Edit > Edit Stories and Grid Systems.", true); return k === "frame" ? eteTplFrame(t) : k === "truss" ? eteTplTruss(t) : eteTplWall(t); });
+}
+// The rows of a 2D form: [label, html] pairs laid out as the program's Geometry boxes.
+const eteRows = rows => `<div class="g2">${rows.map(([l, h, id]) => `<span${id ? ` id="${id}"` : ""}>${l}</span><span style="white-space:nowrap">${h}</span>`).join("")}</div>`;
+const eteIn = (id, v, unit) => `<input id="${id}" value="${v}" style="width:110px">${unit ? " " + esc(unit) : ""}`;
+const eteSel = (id, list, v) => `<select id="${id}" style="width:130px">${opts(list, v)}</select>`;
+function eteLocation(title) {
+  const U = esc(hmU().l);
+  return `<fieldset><legend>${title}</legend>${eteRows([["X Coordinate", eteIn("tpX", 0, U)], ["Y Coordinate", eteIn("tpY", 0, U)], ["Rotation Angle About Z", eteIn("tpA", 0, "deg")]])}
+    <div style="margin-top:6px"><button type="button" id="tpPick">Pick Two Points to Specify Location...</button> <span title="The first point places the structure's start; the second gives its direction." style="cursor:help">&#9432;</span></div></fieldset>`;
+}
+function eteLocationWire(d) {
+  q(d, "#tpPick").onclick = () => etePick(d, 2, pts => {
+    q(d, "#tpX").value = num(pts[0][0]); q(d, "#tpY").value = num(pts[0][1]);
+    q(d, "#tpA").value = num(Math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0]) * 180 / Math.PI);
+  });
+}
+const eteRestr = () => `<fieldset><legend>Restraints at Bottom</legend>${[["none", "None"], ["pinned", "Pinned"], ["fixed", "Fixed"]].map(([v, l]) => `<label style="display:block"><input type="radio" name="tpR" value="${v}"${v === "pinned" ? " checked" : ""}> ${l}</label>`).join("")}</fieldset>`;
+function eteTplPlace(d) {
+  const v = ["#tpX", "#tpY", "#tpA"].map(s => fnum(d, s));
+  return v.every(isFinite) ? {x: v[0], y: v[1], angle: v[2]} : null;
+}
+function eteTplGo(d, args, close) {
+  const at = eteTplPlace(d); if (!at) return formError(d, "Enter numbers for the X and Y coordinates and the rotation angle.");
+  return eteApply(d, "add_template", {...args, ...at}, close);
+}
+function eteTplFrame(t) {
+  const U = esc(hmU().l), types = [["portal", "Portal"], ["concentric", "Braced (Concentric)"], ["eccentric", "Braced (Eccentric)"]];
+  const d = dialog("Add to Model - 2D Frame", `<div class="nmcols"><div><fieldset><legend>Geometry</legend>${eteRows([["Grid System", eteSel("tpG", t.systems, t.systems[0])], ["Top Story", eteSel("tpT", t.stories, t.top)], ["Bottom Story", eteSel("tpB", t.stories, t.bottom)],
+      ["Number of Bays", eteIn("tpN", 2)], ["Bay Width", eteIn("tpW", eteFt(24), U)], ["Gap Width", eteIn("tpGap", "", U), "tpGapL"]])}</fieldset>
+    <fieldset><legend>Section Properties</legend>${eteRows([["Columns", eteSel("tpC", t.frames, eteTplPick(t.frames, "A-LatCol", "ConcCol"))], ["Beams", eteSel("tpBm", t.frames, eteTplPick(t.frames, "A-LatBm", "ConcBm"))], ["Braces", eteSel("tpBr", t.frames, eteTplPick(t.frames, "A-LatBm", "ConcBm")), "tpBrL"]])}</fieldset>
+    ${eteLocation("Location and Orientation in Plan")}</div>
+    <div><fieldset><legend>2D Frame Type</legend><select id="tpK" style="width:150px">${opts(types, "portal")}</select><div id="tpPic" style="text-align:center;margin:8px auto 0;width:96px;padding:6px;border:1px solid #c8d0da;background:#fff"></div></fieldset>${eteRestr()}</div></div>`,
+    [["OK", d => { go(d, true); return false; }], ["Cancel"], ["Apply", d => { go(d, false); return false; }, true]], {width: 620});
+  const sync = () => { const k = q(d, "#tpK").value; q(d, "#tpPic").innerHTML = eteIcon2d(k);
+    q(d, "#tpGap").disabled = k !== "eccentric"; if (k === "eccentric" && q(d, "#tpGap").value === "") q(d, "#tpGap").value = eteFt(4); if (k !== "eccentric") q(d, "#tpGap").value = "";
+    q(d, "#tpBr").disabled = k === "portal"; q(d, "#tpGapL").classList.toggle("dis", k !== "eccentric"); q(d, "#tpBrL").classList.toggle("dis", k === "portal"); };
+  q(d, "#tpK").onchange = sync; sync(); eteLocationWire(d);
+  function go(d, close) {
+    const k = q(d, "#tpK").value, n = parseInt(q(d, "#tpN").value), w = fnum(d, "#tpW"), gap = k === "eccentric" ? fnum(d, "#tpGap") : 0;
+    if (!(n >= 1) || !isFinite(w) || !isFinite(gap)) return formError(d, "Enter the number of bays and the bay width" + (k === "eccentric" ? " and gap width." : "."));
+    return eteTplGo(d, {kind: "2d_frame", type: k, top_story: q(d, "#tpT").value, bottom_story: q(d, "#tpB").value, bays: n, bay_width: w, gap_width: gap,
+      columns: q(d, "#tpC").value, beams: q(d, "#tpBm").value, braces: k === "portal" ? "" : q(d, "#tpBr").value, restraints: q(d, "[name=tpR]:checked").value}, close);
+  }
+  return d;
+}
+function eteTplTruss(t) {
+  const U = esc(hmU().l), types = [["sloped", "Sloped Truss"], ["vertical", "Vertical Truss"], ["pratt", "Pratt Truss"]];
+  const d = dialog("Add to Model - 2D Truss", `<div class="nmcols"><div><fieldset><legend>Geometry</legend>${eteRows([["Grid System", eteSel("tpG", t.systems, t.systems[0])], ["Story", eteSel("tpS", t.stories, t.top)],
+      ["Number of Divisions", eteIn("tpN", 3)], ["Division Length", eteIn("tpL", eteFt(12), U)], ["Height", eteIn("tpH", eteFt(12), U)]])}</fieldset>${eteLocation("Location in Plan")}</div>
+    <div><fieldset><legend>2D Truss Type</legend><select id="tpK" style="width:150px">${opts(types, "sloped")}</select><div id="tpPic" style="text-align:center;margin:8px auto 0;width:96px;padding:6px;border:1px solid #c8d0da;background:#fff"></div></fieldset>
+    <fieldset><legend>Section Properties</legend>${eteRows([["Chords", eteSel("tpC", t.frames, eteTplPick(t.frames, "SteelCol", "A-TrChdW10"))], ["Diagonals", eteSel("tpD", t.frames, eteTplPick(t.frames, "SteelCol", "A-TrWebW10"))], ["Verticals", eteSel("tpV", t.frames, eteTplPick(t.frames, "SteelCol", "A-TrWebW10")), "tpVL"]])}</fieldset></div></div>`,
+    [["OK", d => { go(d, true); return false; }], ["Cancel"], ["Apply", d => { go(d, false); return false; }, true]], {width: 620});
+  const sync = () => { const k = q(d, "#tpK").value; q(d, "#tpPic").innerHTML = eteIcon2d(k); q(d, "#tpV").disabled = k === "sloped"; q(d, "#tpVL").classList.toggle("dis", k === "sloped"); };
+  q(d, "#tpK").onchange = sync; sync(); eteLocationWire(d);
+  function go(d, close) {
+    const k = q(d, "#tpK").value, n = parseInt(q(d, "#tpN").value), l = fnum(d, "#tpL"), h = fnum(d, "#tpH");
+    if (!(n >= 1) || !isFinite(l) || !isFinite(h)) return formError(d, "Enter the number of divisions, the division length and the height.");
+    return eteTplGo(d, {kind: "2d_truss", type: k, story: q(d, "#tpS").value, divisions: n, length: l, height: h, chords: q(d, "#tpC").value, diagonals: q(d, "#tpD").value, verticals: k === "sloped" ? "" : q(d, "#tpV").value}, close);
+  }
+  return d;
+}
+function eteTplWall(t) {
+  const U = esc(hmU().l), types = [["wall", "Wall without Openings"], ["openings", "Wall with Openings"]];
+  const d = dialog("Add to Model - 2D Wall", `<div class="nmcols"><div><fieldset><legend>Geometry</legend>${eteRows([["Grid System", eteSel("tpG", t.systems, t.systems[0])], ["Top Story", eteSel("tpT", t.stories, t.top)], ["Bottom Story", eteSel("tpB", t.stories, t.bottom)],
+      ["Number of Bays", eteIn("tpN", 1)], ["Bay Width", eteIn("tpW", eteFt(24), U)], ["Opening Location, L", eteIn("tpOL", "", U), "tpOLl"], ["Opening Location, H", eteIn("tpOH", "", U), "tpOHl"], ["Opening Width, B", eteIn("tpOB", "", U), "tpOBl"], ["Opening Height, D", eteIn("tpOD", "", U), "tpODl"]])}</fieldset>${eteLocation("Location in Plan")}</div>
+    <div><fieldset><legend>2D Wall Type</legend><select id="tpK" style="width:170px">${opts(types, "wall")}</select><div id="tpPic" style="text-align:center;margin:8px auto 0;width:96px;padding:6px;border:1px solid #c8d0da;background:#fff"></div></fieldset>${eteRestr()}
+    <fieldset><legend>Section Properties</legend>${eteRows([["Wall Section", eteSel("tpS", t.walls, eteTplPick(t.walls, "Wall1"))]])}</fieldset></div></div>`,
+    [["OK", d => { go(d, true); return false; }], ["Cancel"], ["Apply", d => { go(d, false); return false; }, true]], {width: 620});
+  const sync = () => { const k = q(d, "#tpK").value, on = k === "openings";
+    q(d, "#tpPic").innerHTML = eteIcon2d(k) + (on ? ` <span title="L and H place the opening from the panel's bottom left corner; B and D are its width and height. Each panel of each story gets one." style="cursor:help">&#9432;</span>` : "");
+    ["OL", "OH", "OB", "OD"].forEach(s => { const x = q(d, "#tp" + s); x.disabled = !on; if (on && x.value === "") x.value = 0; if (!on) x.value = ""; q(d, `#tp${s}l`).classList.toggle("dis", !on); }); };
+  q(d, "#tpK").onchange = sync; sync(); eteLocationWire(d);
+  function go(d, close) {
+    const n = parseInt(q(d, "#tpN").value), w = fnum(d, "#tpW"), on = q(d, "#tpK").value === "openings";
+    if (!(n >= 1) || !isFinite(w)) return formError(d, "Enter the number of bays and the bay width.");
+    if (!q(d, "#tpS").value) return formError(d, "The model has no wall section: add one with Define > Section Properties > Wall Sections.");
+    const args = {kind: "2d_wall", top_story: q(d, "#tpT").value, bottom_story: q(d, "#tpB").value, bays: n, bay_width: w, section: q(d, "#tpS").value, restraints: q(d, "[name=tpR]:checked").value};
+    if (on) { const o = ["#tpOL", "#tpOH", "#tpOB", "#tpOD"].map(s => fnum(d, s)); if (!o.every(isFinite)) return formError(d, "Enter numbers for the opening."); args.opening = {l: o[0], h: o[1], b: o[2], d: o[3]}; }
+    return eteTplGo(d, args, close);
+  }
+  return d;
+}
+async function eteTpl3d() {
+  const t = await eteTplData();
+  const kinds = nmTemplates.filter(([k]) => !["blank", "grid_only"].includes(k)).map(([k, l]) => [k, l, nmIcon(k)]);
+  let chosen = null;
+  const d = eteTplChooser("Add to Model - 3D Structure", "Click to Choose Structural Floor Types:", kinds, (k, d, b) => {
+    chosen = k; d.querySelectorAll("[data-tk]").forEach(x => x.classList.toggle("on", x === b));
+    d.querySelectorAll(".df button").forEach(x => { if (x.textContent === "OK" || x.textContent === "Apply") x.disabled = false; });
+  }, {html: `<fieldset><legend>Tower and Grid System</legend>${eteRows([["Grid System", eteSel("tpG", t.systems, t.systems[0]) + ` <span title="The template's members go on this grid system's lines, from the bottom story up to the top story." style="cursor:help">&#9432;</span>`], ["Top Story", eteSel("tpT", t.stories, t.top)], ["Bottom Story", eteSel("tpB", t.stories, t.bottom)]])}</fieldset>`,
+    buttons: [["OK", d => { if (chosen) eteTpl3dForm(d, t, chosen, true); return false; }], ["Cancel"], ["Apply", d => { if (chosen) eteTpl3dForm(d, t, chosen, false); return false; }, true]]});
+  d.querySelectorAll(".df button").forEach(x => { if (x.textContent === "OK" || x.textContent === "Apply") x.disabled = true; });
+  if (!t.stories.length) formError(d, "The model has no story above the base: add one with Edit > Edit Stories and Grid Systems.");
+  return d;
+}
+function eteTpl3dForm(chooser, t, kind, closeChooser) {
+  const U = esc(hmU().l), F = hmU().f, Q = esc(`${F}/${hmU().l}²`), label = nmTemplates.find(x => x[0] === kind)[1];
+  const ov = {flat_slab: 1, flat_slab_perimeter_beams: 0.5, waffle_slab: 1, two_way_or_ribbed_slab: 0.5, steel_deck: 0.5, staggered_truss: 0}[kind];
+  const num = (k, v, unit, dis) => `<input data-k="${k}" value="${v}" style="width:110px"${dis ? " disabled" : ""}>${unit ? " " + unit : ""}`;
+  const chk = (k, l, on) => `<label style="display:block"><input type="checkbox" data-k="${k}"${on ? " checked" : ""}> ${l}</label>`;
+  const radios = (k, list, v) => `<div class="nmrow">${list.map(([val, l]) => `<label><input type="radio" name="${k}" value="${val}"${val === v ? " checked" : ""}> ${l}</label>`).join(" ")}</div>`;
+  const overhangs = (legend) => `<fieldset><legend>${legend}</legend><div class="nmsub">Along X Direction</div>${eteRows([["Left Edge Distance", num("left_edge", eteFt(ov), U)], ["Right Edge Distance", num("right_edge", eteFt(ov), U)]])}
+    <div class="nmsub">Along Y Direction</div>${eteRows([["Top Edge Distance", num("top_edge", eteFt(ov), U)], ["Bottom Edge Distance", num("bottom_edge", eteFt(ov), U)]])}</fieldset>`;
+  const sec = (k, l, list, ...want) => [l, `<select data-u="${k}" style="width:150px">${opts(list, eteTplPick(list, ...want))}</select> <button type="button" class="nmdots" data-def="${t.frames.includes(eteTplPick(list, ...want)) || list === t.frames ? "frameSections" : "shellSections"}">...</button>`];
+  const load = `<fieldset><legend>Load</legend>${eteRows([["Dead Load Pattern", `<select data-k="dead_pattern" style="width:150px">${opts(t.patterns.length ? t.patterns : ["Dead"], eteTplPick(t.patterns, "Dead"))}</select>`], ["Dead Load (Additional)", num("dead_load", 0, Q)],
+    ["Live Load Pattern", `<select data-k="live_pattern" style="width:150px">${opts(t.patterns.length ? t.patterns : ["Live"], eteTplPick(t.patterns, "Live"))}</select>`], ["Live Load", num("live_load", 0, Q)]])}</fieldset>`;
+  const restr = `<fieldset><legend>Restraints at Bottom</legend>${radios("restraints", [["none", "None"], ["pinned", "Pinned"], ["fixed", "Fixed"]], "pinned")}</fieldset>`;
+  const dia = `<fieldset><legend>Floor Diaphragm Rigidity</legend>${radios("diaphragm", [["rigid", "Rigid"], ["semi-rigid", "Semi-Rigid"], ["none", "No Diaphragm"]], "rigid")}</fieldset>`;
+  const stiff = chk("stiff_at_columns", "Model Column Intersection as Stiff Slab", false);
+  const drops = (legend, size) => `<fieldset><legend>${legend}</legend>${chk("drop_panels", "Drop Panels", true)}${eteRows([["Size", num("drop_size", eteFt(size), U)]])}</fieldset>`;
+  const system = rows => `<fieldset><legend>Structural System Properties</legend>${eteRows(rows)}`;
+  const F_ = t.frames, S_ = t.slabs;
+  let left = "", right = "", legend = label;
+  if (kind === "flat_slab") {
+    left = overhangs("Overhangs") + drops("Drop Panels", 8) + `<fieldset class="dis"><legend>Post Tensioning</legend><div class="nmrow"><label class="dis"><input type="checkbox" disabled> Add P/T</label> <button type="button" disabled>P/T Data ...</button></div></fieldset>` + restr;
+    right = system([sec("column", "Column", F_, "ConcCol"), sec("slab", "Slab", S_, "Slab1"), sec("drop", "Drop", S_, "Drop1")]) + stiff + `</fieldset>` + load + dia;
+  } else if (kind === "flat_slab_perimeter_beams") {
+    legend = "Slab with Edge";
+    left = overhangs("Overhangs") + drops("Drop Panels", 8) + restr;
+    right = system([sec("column", "Column", F_, "ConcCol"), sec("beam", "Beam", F_, "ConcBm"), sec("slab", "Slab", S_, "Slab1"), sec("drop", "Drop", S_, "Drop1")]) + stiff + `</fieldset>` + load + dia;
+  } else if (kind === "waffle_slab") {
+    left = overhangs("Overhangs") + drops("Drop Panels and Ribs", 6) + restr;
+    right = system([sec("column", "Column", F_, "ConcCol"), sec("slab", "Waffle Slab", S_, "SlabWaffle", "Waffle1"), sec("drop", "Drop", S_, "Drop1")]) + `</fieldset>` + load + dia;
+  } else if (kind === "two_way_or_ribbed_slab") {
+    legend = "Ribbed Slab";
+    left = overhangs("Overhangs") + `<fieldset><legend>Ribs</legend>${chk("ribbed", "Ribs", true)}</fieldset>` + restr;
+    right = system([sec("column", "Column", F_, "ConcCol"), sec("beam", "Beam", F_, "ConcBm"), sec("slab", "Ribbed Slab", S_, "Ribbed1")]) + `</fieldset>` + load + dia;
+  } else if (kind === "steel_deck") {
+    left = overhangs("Overhangs") + `<fieldset><legend>Secondary Beams</legend>${chk("secondary_beams", "Secondary Beams", true)}${eteRows([["Direction", `<select data-k="secondary_direction" style="width:110px">${opts(["X", "Y"], "X")}</select>`],
+        [`<label><input type="radio" name="secN" value="max" checked> Max Spacing</label>`, num("secondary_max_spacing", eteFt(8), U)], [`<label><input type="radio" name="secN" value="num"> Number</label>`, `<input data-k="secondary_number" style="width:110px" disabled>`]])}</fieldset>
+      <fieldset><legend>Moment Frame Type</legend>${radios("moment_frame", [["none", "None"], ["perimeter", "Perimeter"], ["intersecting", "Intersecting"]], "intersecting")}<div class="nmrow">${chk("special_moment_beams", "Special Moment Beams", false)} <button type="button" id="tSpec" disabled>Specify Type...</button></div></fieldset>`;
+    right = system([sec("lat_col", "Lateral Column", F_, "A-LatCol"), sec("lat_bm", "Lateral Beam", F_, "A-LatBm"), sec("grav_col", "Gravity Column", F_, "SteelCol", "A-GravCol"), sec("grav_bm", "Gravity Beam", F_, "SteelBm", "A-GravBm"), sec("sec_bm", "Secondary Beam", F_, "A-CompBm"), sec("deck", "Deck/Floor", S_, "Deck1")]) + `</fieldset>` + load + restr + dia;
+  } else if (kind === "staggered_truss") {
+    left = `<fieldset><legend>Truss Location</legend>${eteRows([["Vierendeel Panel Width", num("vierendeel_width", eteFt(7), U)], ["No. of Panels Before Vierendeel", num("panels_before", 3)], ["No. of Panels After Vierendeel", num("panels_after", 3)]])}${chk("first_bay_truss_at_top", "First Bay has Truss at Top Level", true)}</fieldset>`
+      + overhangs("Deck Overhangs") + restr + dia;
+    const ts = [["t1", "Top Truss Chord Typical"], ["t2", "Top Chord at Vierendeel"], ["t3", "Bot Truss Chord Typical"], ["t4", "Bot Chord at Vierendeel"], ["t5", "Truss Diagonals"], ["t6", "Truss Verticals"], ["t7", "Truss  Hangers"], ["t8", "Truss  Posts"], ["t9", "Truss Knee Braces at Bot"]];
+    right = system([...ts.map(([k, l]) => sec(k, l, F_, "SteelCol", k < "t5" && k.length === 2 ? "A-TrChdW10" : "A-TrWebW10")), sec("t10", "Columns", F_, "A-LatCol"), sec("t11", "Spandrels", F_, "A-LatBm"), sec("t12", "Decks/Planks", S_, "Plank1")]) + `</fieldset>` + load;
+  }
+  const f = dialog("Structural Geometry and Properties for " + label, `<fieldset class="nmouter"><legend>${esc(legend)}</legend><div class="nmcols"><div>${left}</div><div>${right}</div></div></fieldset>`,
+    [["OK", f => { go(f); return false; }, true], ["Cancel"]], {width: 780});
+  f.querySelectorAll("[data-def]").forEach(b => b.onclick = () => act("m:" + b.dataset.def));
+  const sync = () => {
+    const on = k => { const x = q(f, `[data-k="${k}"]`); return !!(x && x.checked); };
+    if (q(f, '[data-k="drop_panels"]')) { q(f, '[data-k="drop_size"]').disabled = !on("drop_panels"); const dr = q(f, '[data-u="drop"]'); if (dr) dr.disabled = !on("drop_panels"); }
+    if (q(f, '[data-k="secondary_beams"]')) { const s = on("secondary_beams"), n = (q(f, "[name=secN]:checked") || {}).value === "num";
+      q(f, '[data-k="secondary_direction"]').disabled = !s; f.querySelectorAll("[name=secN]").forEach(x => x.disabled = !s); q(f, '[data-k="secondary_max_spacing"]').disabled = !s || n; q(f, '[data-k="secondary_number"]').disabled = !s || !n; }
+    if (q(f, "#tSpec")) q(f, "#tSpec").disabled = !on("special_moment_beams");
+  };
+  f.addEventListener("change", sync); sync();
+  async function go(f) {
+    formError(f, "");
+    const quick = {}, use = {};
+    for (const x of f.querySelectorAll("[data-k]")) {
+      const k = x.dataset.k;
+      if (x.type === "checkbox") { quick[k] = x.checked; continue; }
+      if (x.tagName === "SELECT") { quick[k] = x.value; continue; }
+      if (x.disabled) continue;
+      const n = parseFloat(x.value); if (!isFinite(n)) return formError(f, "Give a number in every box.");
+      quick[k] = n;
+    }
+    for (const x of f.querySelectorAll("[data-u]")) if (!x.disabled && x.value) use[x.dataset.u] = x.value;
+    for (const k of ["restraints", "diaphragm", "moment_frame"]) { const r = q(f, `[name=${k}]:checked`); if (r) quick[k] = r.value; }
+    if ((q(f, "[name=secN]:checked") || {}).value === "num") delete quick.secondary_max_spacing; else delete quick.secondary_number;
+    if (kind !== "two_way_or_ribbed_slab") delete quick.ribbed;
+    const ok = await eteApply(f, "add_template", {kind, top_story: q(chooser, "#tpT").value, bottom_story: q(chooser, "#tpB").value, quick, use}, true);
+    if (ok && closeChooser) chooser.close();
+  }
+  return f;
+}
 function eteIdb() { if (typeof etrChooseTables === "function" && P) return etrChooseTables(); return act("tables"); }
 function eteCurveForm(title, legendInfo, label, objName, types, ends) {
   const U = esc(hmU().l), row = (t, v) => `<span>${t}</span><span><input value="${esc(v)}" readonly style="width:90px"> ${U}</span>`;

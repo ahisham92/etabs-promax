@@ -124,16 +124,17 @@ public static class ModelerTools
         return Summary(o);
     }
 
-    private static QuickTemplate Quick(JsonElement a, string title, string kind)
+    internal static QuickTemplate Quick(JsonElement a, string title, string kind)
     {
-        static List<QuickGrid> Grids(JsonElement a, string key) => a.Items(key).Select(g => new QuickGrid(
+        // Edit > Add to Model from Template gives no grids or stories: it builds over the model's own.
+        static List<QuickGrid> Grids(JsonElement a, string key) => !a.TryGetProperty(key, out _) ? [] : a.Items(key).Select(g => new QuickGrid(
             g.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "", g.GetProperty("at").GetDouble(),
             !g.TryGetProperty("visible", out var v) || v.ValueKind != JsonValueKind.False,
             g.TryGetProperty("bubble", out var b) ? b.GetString() : null)).ToList();
         var t = new QuickTemplate
         {
             Kind = kind, Title = title, XGrids = Grids(a, "x_grids"), YGrids = Grids(a, "y_grids"),
-            Stories = a.Items("story_data").Select(s => (s.GetProperty("name").GetString() ?? "", s.GetProperty("height").GetDouble())).ToList(),
+            Stories = !a.TryGetProperty("story_data", out _) ? [] : a.Items("story_data").Select(s => (s.GetProperty("name").GetString() ?? "", s.GetProperty("height").GetDouble())).ToList(),
         };
         if (!a.TryGetProperty("quick", out var q) || q.ValueKind != JsonValueKind.Object) return t;
         double N(string k, double d) => q.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : d;

@@ -62,6 +62,10 @@ public static class EditTools
             "Edit > Auto Relabel All: frames, floors and walls get the program's labels again (B, C, D, F, W by kind, from the lowest plan point up). An object something else names by its label (a group, an overwrite, a kept table row) keeps its label.",
             """{"type":"object","properties":{}}""",
             Ask.Changes, RelabelObjects, _ => "Auto Relabel All"),
+        new("add_template",
+            "Edit > Add to Model from Template: adds a 2D Frame (type portal, concentric or eccentric), 2D Truss (sloped, vertical or pratt), 2D Wall (with 'opening' {l,h,b,d} or without) laid along a line from x, y at 'angle' degrees about Z, or a 3D structure (steel_deck, staggered_truss, flat_slab, flat_slab_perimeter_beams, waffle_slab, two_way_or_ribbed_slab) over the model's grid lines, on the stories from 'bottom_story' up to 'top_story' ('story' for a truss). Sections are the model's own: 2D columns/beams/braces, chords/diagonals/verticals or section; 3D 'use' maps column, beam, slab, drop (steel deck: lat_col, lat_bm, grav_col, grav_bm, sec_bm, deck; staggered truss t1..t12) to sections, with the rest in 'quick' as new_model takes it. Lengths in model units.",
+            """{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["2d_frame","2d_truss","2d_wall","steel_deck","staggered_truss","flat_slab","flat_slab_perimeter_beams","waffle_slab","two_way_or_ribbed_slab"]},"type":{"type":"string"},"top_story":{"type":"string"},"bottom_story":{"type":"string"},"story":{"type":"string"},"bays":{"type":"integer"},"bay_width":{"type":"number"},"gap_width":{"type":"number"},"divisions":{"type":"integer"},"length":{"type":"number"},"height":{"type":"number"},"columns":{"type":"string"},"beams":{"type":"string"},"braces":{"type":"string"},"chords":{"type":"string"},"diagonals":{"type":"string"},"verticals":{"type":"string"},"section":{"type":"string"},"opening":{"type":"object"},"restraints":{"type":"string","enum":["none","pinned","fixed"]},"x":{"type":"number"},"y":{"type":"number"},"angle":{"type":"number"},"use":{"type":"object"},"quick":{"type":"object"}}}""",
+            Ask.Changes, AddTemplate, a => $"Add a {a.Text("kind")} from a template"),
         new("merge_joints",
             "Edit > Merge Joints: the joints named that lie within 'tolerance' of each other in plan become one; frames, slabs, walls, joint assignments and loads follow it, and a frame left with both ends at one joint is taken off.",
             """{"type":"object","required":["joints","tolerance"],"properties":{"joints":{"type":"array","items":{"type":"string"},"description":"Joint (point) names."},"tolerance":{"type":"number"}}}""",
@@ -245,6 +249,55 @@ public static class EditTools
         {
             var (n, kept) = ModelOps.Relabel(m);
             return (JsonNode)new JsonObject { ["relabelled"] = n, ["kept"] = new JsonArray(kept.Select(k => (JsonNode)k).ToArray()) };
+        }));
+    }
+
+    private static JsonNode AddTemplate(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var kind = a.Need("kind").ToLowerInvariant();
+        return Core(() => link.Edit(m =>
+        {
+            List<string> Range()
+            {
+                var top = m.StoryIndex(a.Need("top_story")); var bottom = m.StoryIndex(a.Need("bottom_story"));
+                if (top < 1 || bottom < 1) throw new ArgumentException("Pick a top and a bottom story above the base.");
+                if (bottom > top) throw new ArgumentException("The bottom story is above the top story.");
+                return m.Stories.Skip(bottom).Take(top - bottom + 1).Select(s => s.Name).ToList();
+            }
+            var at = new AddTemplates2D.Place { X = a.Number("x", 0), Y = a.Number("y", 0), Angle = a.Number("angle", 0) };
+            AddTemplates2D.Made made;
+            switch (kind)
+            {
+                case "2d_frame":
+                    made = AddTemplates2D.Frame(m, a.Text("type", "portal"), Range(), a.Whole("bays", 1), a.Number("bay_width"), a.Number("gap_width", 0),
+                        a.Need("columns"), a.Need("beams"), a.Text("braces"), a.Text("restraints", "pinned"), at);
+                    break;
+                case "2d_truss":
+                    made = AddTemplates2D.Truss(m, a.Text("type", "sloped"), a.Need("story"), a.Whole("divisions", 1), a.Number("length"), a.Number("height"),
+                        a.Need("chords"), a.Need("diagonals"), a.Text("verticals"), at);
+                    break;
+                case "2d_wall":
+                    AddTemplates2D.Opening? op = null;
+                    if (a.TryGetProperty("opening", out var o) && o.ValueKind == JsonValueKind.Object)
+                        op = new(o.Number("l", 0), o.Number("h", 0), o.Number("b", 0), o.Number("d", 0));
+                    made = AddTemplates2D.Wall(m, Range(), a.Whole("bays", 1), a.Number("bay_width"), a.Need("section"), op, a.Text("restraints", "pinned"), at);
+                    break;
+                default:
+                {
+                    var t = ModelerTools.Quick(a, m.Title, kind);
+                    if (a.TryGetProperty("use", out var u) && u.ValueKind == JsonValueKind.Object)
+                        foreach (var p in u.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.String && p.Value.GetString() is { Length: > 0 } v) t.Use[p.Name] = v;
+                    var areas = m.AreaAssigns.Count; var frames = m.LineAssigns.Count;
+                    QuickTemplates.AddTo(m, t, Range(), m.Grids.Where(g => g.Direction == "X").Select(g => g.Coordinate).ToArray(), m.Grids.Where(g => g.Direction == "Y").Select(g => g.Coordinate).ToArray());
+                    return (JsonNode)new JsonObject { ["frames"] = m.LineAssigns.Count - frames, ["floors"] = m.AreaAssigns.Count - areas };
+                }
+            }
+            return (JsonNode)new JsonObject
+            {
+                ["frames"] = new JsonArray(made.Frames.Select(f => (JsonNode)f).ToArray()),
+                ["walls"] = new JsonArray(made.Walls.Select(f => (JsonNode)f).ToArray()), ["supports"] = made.Supports,
+            };
         }));
     }
 
