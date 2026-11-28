@@ -35,9 +35,9 @@ public static class EditTools
             """{"type":"object","required":["points","stories"],"properties":{"points":{"type":"array","items":{"type":"array","items":{"type":"number"},"description":"[x, y]"}},"stories":{"type":"array","items":{"type":"string"}}}}""",
             Ask.Changes, AddJoints, a => $"Draw {a.Items("points").Count()} joints"),
         new("add_frames_by_points",
-            "Draw Beam/Column/Brace in the 3-D view: a frame between two points in space, each [x1, y1, z1, x2, y2, z2], both ends at story levels. Its type follows its inclination, by Options > Tolerances (within 1 degree of vertical a column, within 20 degrees of horizontal a beam, else a brace, by default); each is one object however many stories it spans.",
-            """{"type":"object","required":["frames","section"],"properties":{"frames":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"[x1, y1, z1, x2, y2, z2]"},"section":{"type":"string"}}}""",
-            Ask.Changes, AddFramesByPoints, a => $"Draw {a.Items("frames").Count()} frames"),
+            "Draw Beam/Column/Brace in the 3-D view: a frame between two points in space, each [x1, y1, z1, x2, y2, z2], both ends at story levels. Its type follows its inclination, by Options > Tolerances (within 1 degree of vertical a column, within 20 degrees of horizontal a beam, else a brace, by default); each is one object however many stories it spans. With 'brace' (Quick Draw Braces) each is a brace whatever its inclination.",
+            """{"type":"object","required":["frames","section"],"properties":{"frames":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"[x1, y1, z1, x2, y2, z2]"},"section":{"type":"string"},"brace":{"type":"boolean"}}}""",
+            Ask.Changes, AddFramesByPoints, a => a.TryGetProperty("brace", out var b) && b.ValueKind == JsonValueKind.True ? $"Draw {a.Items("frames").Count()} braces" : $"Draw {a.Items("frames").Count()} frames"),
         new("add_areas_by_points",
             "Draw Floor/Wall in the 3-D view: an area on its corners in space, each [[x, y, z], ...] in order round its edge, every corner at a story level and all in one plane. Its type follows its inclination, by Options > Tolerances (within 20 degrees of level a floor, within 1 degree of upright a wall, else a ramp, by default); each is one object however many stories it spans.",
             """{"type":"object","required":["areas","section"],"properties":{"areas":{"type":"array","items":{"type":"array","items":{"type":"array","items":{"type":"number"}}},"description":"[[x, y, z], ...], three corners or more"},"section":{"type":"string","description":"The section, for a floor or ramp (and a wall when no wall_section is given)."},"wall_section":{"type":"string","description":"The section an area that comes out a wall takes."}}}""",
@@ -83,9 +83,9 @@ public static class EditTools
             "{\"type\":\"object\",\"required\":[\"object\",\"from\",\"to\"],\"properties\":{\"object\":{\"type\":\"string\",\"description\":\"label@story\"},\"from\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"to\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}",
             Ask.Changes, Reshape, a => $"Reshape {a.Text("object")}"),
         new("divide_frames",
-            "Edit > Edit Frames > Divide Frames: beams into 'parts' equal beams (2 to 20), or, with 'points', broken at each plan point [x, y] that lies on a beam between its ends (Break at Intersections); each part keeps the section and assignments; uniform loads go on every part, end releases and offsets stay at the beam's ends.",
-            "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + ",\"parts\":{\"type\":\"integer\"},\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}}",
-            Ask.Changes, Divide, a => $"Divide {a.Texts("objects").Count} beams into {a.Text("parts")}"),
+            "Edit > Edit Frames > Divide Frames: beams into 'parts' equal beams (2 to 20), or, with 'points', broken at each plan point [x, y] that lies on a beam between its ends (Break at Intersections); with 'levels', each column or brace that spans more than one story broken at every story level between its ends (Break at Intersections with Story Levels); each part keeps the section and assignments; uniform loads go on every part, end releases and offsets stay at the frame's ends.",
+            "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + ",\"parts\":{\"type\":\"integer\"},\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"levels\":{\"type\":\"boolean\"}}}",
+            Ask.Changes, Divide, a => a.TryGetProperty("levels", out var l) && l.ValueKind == JsonValueKind.True ? $"Divide {a.Texts("objects").Count} frames at story levels" : $"Divide {a.Texts("objects").Count} beams into {a.Text("parts")}"),
     ];
 
     private static List<double[]> Numbers(JsonElement a, string name, int count)
@@ -150,10 +150,11 @@ public static class EditTools
         var link = Offline(e);
         var frames = Numbers(a, "frames", 6);
         var section = a.Need("section");
+        var brace = a.TryGetProperty("brace", out var b) && b.ValueKind == JsonValueKind.True;
         if (!link.Model.FrameSections.Exists(s => s.Name == section)) throw new ToolInputException($"There is no frame section '{section}'.");
         return Core(() => link.Edit(m =>
         {
-            var made = frames.Select(f => m.AddFrame(new Xyz(f[0], f[1], f[2]), new Xyz(f[3], f[4], f[5]), section)).Select(x => (JsonNode)(x.Label + "@" + x.Story)).ToArray();
+            var made = frames.Select(f => m.AddFrame(new Xyz(f[0], f[1], f[2]), new Xyz(f[3], f[4], f[5]), section, brace)).Select(x => (JsonNode)(x.Label + "@" + x.Story)).ToArray();
             return (JsonNode)new JsonObject { ["frames"] = new JsonArray(made) };
         }));
     }
@@ -372,6 +373,14 @@ public static class EditTools
     {
         var link = Offline(e);
         var objects = Find(a, link.Model);
+        if (a.TryGetProperty("levels", out var lv) && lv.ValueKind == JsonValueKind.True)
+            return Core(() => link.Edit(m =>
+            {
+                // Only the frames that span more than one story are broken; one selected with them that does not stays.
+                var many = objects.Where(o => o.Line && m.Line(o.Label)!.StoriesBelowI > 1).ToList();
+                if (many.Count == 0) throw new ArgumentException("None of the selected frames spans more than one story: no story level lies between their ends.");
+                return (JsonNode)new JsonObject { ["parts"] = Names(many.SelectMany(o => ModelOps.DivideAtLevels(m, o)).ToList()) };
+            }));
         if (a.TryGetProperty("points", out var pv) && pv.ValueKind == JsonValueKind.Array)
         {
             var pts = Numbers(a, "points", 2);

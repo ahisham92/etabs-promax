@@ -218,17 +218,18 @@ public static class ModelEdit
 
     /// <summary>A frame between two points, each at a story level (Draw Beam/Column/Brace in the 3-D view): a column,
     /// beam or brace by its inclination (<see cref="Inclinations"/>), one on a single level a beam. One object however
-    /// many stories it spans.</summary>
-    public static LineAssign AddFrame(this StructuralModel m, Xyz a, Xyz b, string section)
+    /// many stories it spans. With <paramref name="brace"/> (Quick Draw Braces) it is a brace whatever its inclination.</summary>
+    public static LineAssign AddFrame(this StructuralModel m, Xyz a, Xyz b, string section, bool brace = false)
     {
         int la = m.LevelOf(a.Z), lb = m.LevelOf(b.Z);
         var plan = Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
         if (la == lb && plan <= Tolerance) throw new ArgumentException("A frame needs two different ends.");
+        if (brace && (la == lb || plan <= Tolerance)) throw new ArgumentException("A brace runs from one level to another, its ends apart in plan.");
         var (low, high) = la <= lb ? (a, b) : (b, a);
         int bottom = Math.Min(la, lb), top = Math.Max(la, lb);
         var (fromVertical, fromHorizontal) = m.Inclinations();
         var tilt = Math.Atan2(plan, Math.Abs(b.Z - a.Z)) * 180 / Math.PI; // 0 upright, 90 level
-        var (kind, prefix) = la == lb || 90 - tilt <= fromHorizontal + 1e-9 ? (LineKind.Beam, "B") : tilt <= fromVertical + 1e-9 ? (LineKind.Column, "C") : (LineKind.Brace, "D");
+        var (kind, prefix) = brace ? (LineKind.Brace, "D") : la == lb || 90 - tilt <= fromHorizontal + 1e-9 ? (LineKind.Beam, "B") : tilt <= fromVertical + 1e-9 ? (LineKind.Column, "C") : (LineKind.Brace, "D");
         var i = m.PointAt(low.X, low.Y); var j = plan <= Tolerance ? i : m.PointAt(high.X, high.Y);
         return m.AssignLine(kind, i, j, top - bottom, prefix, m.Stories[top].Name, section);
     }
