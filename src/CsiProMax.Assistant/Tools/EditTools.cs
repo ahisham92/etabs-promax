@@ -83,9 +83,9 @@ public static class EditTools
             "{\"type\":\"object\",\"required\":[\"object\",\"from\",\"to\"],\"properties\":{\"object\":{\"type\":\"string\",\"description\":\"label@story\"},\"from\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"to\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}",
             Ask.Changes, Reshape, a => $"Reshape {a.Text("object")}"),
         new("divide_frames",
-            "Edit > Edit Frames > Divide Frames: beams into 'parts' equal beams (2 to 20), or, with 'points', broken at each plan point [x, y] that lies on a beam between its ends (Break at Intersections); with 'levels', each column or brace that spans more than one story broken at every story level between its ends (Break at Intersections with Story Levels); each part keeps the section and assignments; uniform loads go on every part, end releases and offsets stay at the frame's ends.",
+            "Edit > Edit Frames > Divide Frames: beams into 'parts' equal beams (2 to 20), or, with 'points', broken at each plan point [x, y] that lies on a beam between its ends (Break at Intersections); with 'levels', each column, brace, wall or ramp named that spans more than one story broken at every story level between its ends (Divide Frames' Break at Intersections with Story Levels, Divide Shells' Walls and Ramps at Story Levels); each part keeps the section and assignments; uniform loads go on every part, end releases and offsets stay at the frame's ends.",
             "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + ",\"parts\":{\"type\":\"integer\"},\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"levels\":{\"type\":\"boolean\"}}}",
-            Ask.Changes, Divide, a => a.TryGetProperty("levels", out var l) && l.ValueKind == JsonValueKind.True ? $"Divide {a.Texts("objects").Count} frames at story levels" : $"Divide {a.Texts("objects").Count} beams into {a.Text("parts")}"),
+            Ask.Changes, Divide, a => a.TryGetProperty("levels", out var l) && l.ValueKind == JsonValueKind.True ? $"Divide {a.Texts("objects").Count} objects at story levels" : $"Divide {a.Texts("objects").Count} beams into {a.Text("parts")}"),
     ];
 
     private static List<double[]> Numbers(JsonElement a, string name, int count)
@@ -376,10 +376,11 @@ public static class EditTools
         if (a.TryGetProperty("levels", out var lv) && lv.ValueKind == JsonValueKind.True)
             return Core(() => link.Edit(m =>
             {
-                // Only the frames that span more than one story are broken; one selected with them that does not stays.
-                var many = objects.Where(o => o.Line && m.Line(o.Label)!.StoriesBelowI > 1).ToList();
-                if (many.Count == 0) throw new ArgumentException("None of the selected frames spans more than one story: no story level lies between their ends.");
-                return (JsonNode)new JsonObject { ["parts"] = Names(many.SelectMany(o => ModelOps.DivideAtLevels(m, o)).ToList()) };
+                // Only the frames, walls and ramps that span more than one story are broken; one selected with them that does not stays.
+                bool Many(ModelOps.Obj o) => o.Line ? m.Line(o.Label)!.StoriesBelowI > 1 : m.Area(o.Label)!.StoriesBelow is { Count: > 0 } b && b.Max() - b.Min() > 1;
+                var many = objects.Where(Many).ToList();
+                if (many.Count == 0) throw new ArgumentException("None of the selected objects spans more than one story: no story level lies between their ends.");
+                return (JsonNode)new JsonObject { ["parts"] = Names(many.SelectMany(o => o.Line ? ModelOps.DivideAtLevels(m, o) : ModelOps.DivideAreaAtLevels(m, o)).ToList()) };
             }));
         if (a.TryGetProperty("points", out var pv) && pv.ValueKind == JsonValueKind.Array)
         {

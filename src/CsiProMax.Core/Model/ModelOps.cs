@@ -252,7 +252,7 @@ public static class ModelOps
             var part = m.Lines.Find(l => l.Kind == line.Kind && l.StoriesBelowI == 1 && l.PointI == pi.Name && l.PointJ == pj.Name);
             if (part is null)
             {
-                part = new LineObject { Label = ModelEdit.NextName(m.Lines.Select(l => l.Label), Prefix(line.Label, line.Kind == LineKind.Column ? "C" : "D")), Kind = line.Kind, PointI = pi.Name, PointJ = pj.Name, StoriesBelowI = 1 };
+                part = new LineObject { Label = ModelEdit.NextName(m.Lines.Select(l => l.Label), Prefix(line.Label, line.Kind == LineKind.Column ? "C" : "D")), Kind = line.Kind, PointI = pi.Name, PointJ = pj.Name, StoriesBelowI = 1, Extra = [.. line.Extra] };
                 m.Lines.Add(part);
             }
             if (m.LineAssigns.Exists(a => a.Label == part.Label && a.Story == story)) throw new ArgumentException($"{part.Label}@{story} already stands where a part of {o} would go.");
@@ -265,6 +265,66 @@ public static class ModelOps
             foreach (var l in loads) { var c = Clone(l); c.Object = part.Label; c.Story = story; m.LineLoads.Add(c); }
             made.Add(new Obj(true, part.Label, story));
         }
+        Remove(m, o);
+        return made;
+    }
+
+    /// <summary>
+    /// Edit > Edit Shells > Divide Shells, Walls and Ramps at Story Levels: a wall or ramp that spans more than one
+    /// story becomes one per story, the part of it between each level and the next (its corners on the levels),
+    /// keeping the section, assignments and loads. A part takes the object already standing on its story with the
+    /// same corners, as ETABS keeps one object over many stories.
+    /// </summary>
+    public static List<Obj> DivideAreaAtLevels(StructuralModel m, Obj o)
+    {
+        if (o.Line) throw new ArgumentException($"{o} is a frame; Divide Shells divides walls and ramps at the levels.");
+        var area = m.Area(o.Label)!;
+        var top = m.StoryIndex(o.Story);
+        var levels = area.StoriesBelow.Select(b => top - b).ToList();
+        int lo = levels.Min(), hi = levels.Max();
+        if (hi - lo < 2) throw new ArgumentException($"{o} spans one story: no story level lies between its corners.");
+        var corners = area.PointNames.Select((n, k) => { var p = m.Point(n)!; return (p.X, p.Y, Z: m.Elevation(levels[k])); }).ToList();
+        var assign = m.AreaAssigns.First(a => a.Label == o.Label && a.Story == o.Story);
+        var loads = m.AreaLoads.Where(l => l.Object == o.Label && l.Story == o.Story).ToList();
+        // The outline's part on one side of a level (Sutherland-Hodgman), a new corner where an edge crosses it.
+        static List<(double X, double Y, double Z)> Side(List<(double X, double Y, double Z)> poly, double z, bool above)
+        {
+            var kept = new List<(double X, double Y, double Z)>();
+            for (var i = 0; i < poly.Count; i++)
+            {
+                var (a, b) = (poly[i], poly[(i + 1) % poly.Count]);
+                bool ina = above ? a.Z >= z - 1e-6 : a.Z <= z + 1e-6, inb = above ? b.Z >= z - 1e-6 : b.Z <= z + 1e-6;
+                if (ina) kept.Add(a);
+                if (ina != inb) { var t = (z - a.Z) / (b.Z - a.Z); kept.Add((a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t, z)); }
+            }
+            return kept.Where((c, i) => { var n = kept[(i + 1) % kept.Count]; return Math.Abs(c.X - n.X) + Math.Abs(c.Y - n.Y) + Math.Abs(c.Z - n.Z) > 1e-6; }).ToList();
+        }
+        var made = new List<Obj>();
+        for (var k = lo; k < hi; k++)
+        {
+            var (z0, z1) = (m.Elevation(k), m.Elevation(k + 1));
+            var part = Side(Side(corners, z0, true), z1, false);
+            if (part.Count < 3) continue;
+            // Each part starts at the first corner of its bottom edge, as a wall's outline does (i j j i, 1 1 0 0).
+            bool Low(int i) => Math.Abs(part[(i + part.Count) % part.Count].Z - z1) > 1e-6;
+            var first = Enumerable.Range(0, part.Count).FirstOrDefault(i => Low(i) && !Low(i - 1));
+            part = [.. part.Skip(first), .. part.Take(first)];
+            var names = part.Select(c => m.PointAt(c.X, c.Y).Name).ToList();
+            var below = part.Select(c => Math.Abs(c.Z - z1) <= 1e-6 ? 0 : 1).ToList();
+            var story = m.Stories[k + 1].Name;
+            var obj = m.Areas.Find(a => a.Kind == area.Kind && a.PointNames.SequenceEqual(names) && a.StoriesBelow.SequenceEqual(below));
+            if (obj is null)
+            {
+                obj = new AreaObject { Label = ModelEdit.NextName(m.Areas.Select(a => a.Label), Prefix(area.Label, area.Kind == AreaKind.Wall ? "W" : "F")), Kind = area.Kind, PointNames = names, StoriesBelow = below, Extra = [.. area.Extra] };
+                m.Areas.Add(obj);
+            }
+            if (m.AreaAssigns.Exists(a => a.Label == obj.Label && a.Story == story)) throw new ArgumentException($"{obj.Label}@{story} already stands where a part of {o} would go.");
+            var aa = Clone(assign); aa.Label = obj.Label; aa.Story = story;
+            m.AreaAssigns.Add(aa);
+            foreach (var l in loads) { var c = Clone(l); c.Object = obj.Label; c.Story = story; m.AreaLoads.Add(c); }
+            made.Add(new Obj(false, obj.Label, story));
+        }
+        if (made.Count < 2) throw new ArgumentException($"{o} has no part on more than one story: it stays whole.");
         Remove(m, o);
         return made;
     }

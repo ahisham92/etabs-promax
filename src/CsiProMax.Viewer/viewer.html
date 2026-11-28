@@ -9592,11 +9592,18 @@ function eteDivShells() {
     <label style="display:block;margin:4px 0"><input type="radio" name="dsO" value="joints"> Cookie Cut Floor Objects at Selected Joints at <input id="dsAng" value="" style="width:70px" disabled> Degrees</label>
     <label style="display:block;margin:4px 0"><input type="radio" name="dsO" value="n" checked> Divide Quadrilaterals/Triangles into <input id="dsN1" value="2" style="width:70px"> by <input id="dsN2" value="2" style="width:70px"> Areas</label>
     <label style="display:block;margin:4px 0"><input type="radio" name="dsO" value="at"> Divide Quadrilaterals/Triangles at</label>
-    <div style="margin-left:24px"><label style="display:block"><input type="checkbox" id="dsG" disabled> Intersections with Visible Grids</label><label style="display:block"><input type="checkbox" id="dsJ" disabled> Selected Joint Objects on Edges</label><label style="display:block"><input type="checkbox" id="dsF" disabled> Intersections with Selected Frame Objects</label></div></fieldset>`,
+    <div style="margin-left:24px"><label style="display:block"><input type="checkbox" id="dsG" disabled> Intersections with Visible Grids</label><label style="display:block"><input type="checkbox" id="dsJ" disabled> Selected Joint Objects on Edges</label><label style="display:block"><input type="checkbox" id="dsF" disabled> Intersections with Selected Frame Objects</label></div>
+    <label style="display:block;margin:4px 0"><input type="radio" name="dsO" value="lv"> Divide Walls and Ramps at Story Levels</label></fieldset>`,
     [["OK", d => { go(d, true); return false; }], ["Close"], ["Apply", d => { go(d, false); return false; }, true]], {width: 520});
   const sync = () => { const v = q(d, "[name=dsO]:checked").value; q(d, "#dsExt").disabled = v !== "frames"; q(d, "#dsAng").disabled = v !== "joints"; q(d, "#dsN1").disabled = q(d, "#dsN2").disabled = v !== "n"; ["#dsG", "#dsJ", "#dsF"].forEach(s => q(d, s).disabled = v !== "at"); };
   d.querySelectorAll("[name=dsO]").forEach(r => r.onchange = sync);
   async function go(d, close) {
+    // Walls and ramps drawn over several stories stay one object; this breaks each at the story levels between.
+    if (q(d, "[name=dsO]:checked").value === "lv") {
+      const objects = [...sel].map(objOf).filter(o => o && o.type === "a").map(fullName);
+      if (!objects.length) { formError(d, "Select the walls or ramps to divide."); return; }
+      return eteApply(d, "divide_frames", {objects, levels: true}, close, () => { sel.clear(); selChanged(); });
+    }
     const fl = eteFloors(); if (!fl.length) { formError(d, "Select the floors to divide."); return; }
     const v = q(d, "[name=dsO]:checked").value, fr = [...sel].map(objOf).filter(o => o && o.type === "f"), pairs = [];
     const js = [...selJ].map(n => pointXyz.get(String(n))).filter(Boolean);
@@ -28830,7 +28837,7 @@ async function floorClose(p) {
   const elev = elevDraws(p), w = elev ? elevPlane(p) : wpOf(hm.wp), t = 1e-6 * Math.max(1, size), st = stories.find(v => Math.abs(v.elevation - corners[0][2]) <= t);
   if (!w && st && corners.every(c => Math.abs(c[2] - corners[0][2]) <= t)) return hmRun("add_slabs", {outlines: [corners.map(c => [c[0], c[1]])], stories: storiesFor(st.name), section: sec});
   const wall = (await drawSection("wall")).now;
-  return hmRun("add_areas_by_points", {areas: elev ? elevAreas(corners) : [corners], section: sec, ...(wall ? {wall_section: wall} : {})});
+  return hmRun("add_areas_by_points", {areas: [corners], section: sec, ...(wall ? {wall_section: wall} : {})});
 }
 const circleOutline = (c, r, n) => Array.from({length: n}, (_, i) => { const t = i / n * Math.PI * 2; return [Math.round((c[0] + r * Math.cos(t)) * 1e4) / 1e4, Math.round((c[1] + r * Math.sin(t)) * 1e4) / 1e4]; });
 function reshapeAt(p, x, y) {
@@ -28907,9 +28914,9 @@ const draw3dKinds = ["joint", "column", "beam", "wall", "brace", "floor", "rect"
 // ---- Drawing in an elevation view: the commands ETABS marks (Plan, Elev, 3D) or (Plan, Elev) ----
 // An elevation of a grid line draws as the 3-D view does on a work plane standing on that line (the 3-D view's own work
 // plane is set aside): points at grid crossings and joints on the line, at any story levels; a frame comes out a column,
-// beam or brace by its inclination, an area a wall (Options > Tolerances). A frame drawn across story levels stays one
-// object (Edit > Edit Frames > Divide Frames breaks it at the levels, when wanted); a wall is broken at each level, as
-// ETABS's help says, all in one change. Quick Draw Beams/Columns, Braces and Floor/Wall work on the elevation's own grid
+// beam or brace by its inclination, an area a wall (Options > Tolerances). A frame or wall drawn across story levels
+// stays one object (the user's choice, 28 Nov): Edit > Edit Frames > Divide Frames and Edit > Edit Shells > Divide
+// Shells break them at the levels when wanted. Quick Draw Beams/Columns, Braces and Floor/Wall work on the elevation's own grid
 // (qdGrid, by click or window); Quick Draw Columns, Secondary Beams and Walls, Draw Walls and Reshape stay in a plan
 // view, as their names in the menu say. Joints are drawn here too.
 const elevKinds = ["joint", "beam", "brace", "floor", "rect", "qbeam", "qfloor", "qbrace"];
@@ -28931,28 +28938,6 @@ function elevSnap(p, x, y) {
   for (const z of g.levels) { const d = Math.abs(M.to(g.at(raw[g.ax], z))[1] - y); if (d < ld) { ld = d; lz = z; } }
   const u = Math.round(raw[g.ax] * 1000) / 1000;
   return lz === null || u < g.along[0] || u > g.along[g.along.length - 1] ? null : {q: g.at(u, lz).map(wpRound), what: "on " + name(lz), story: name(lz)};
-}
-// The story levels strictly between two heights, lowest first.
-const elevLevels = (z0, z1, t) => [...new Set(stories.map(s => s.elevation))].filter(z => z > Math.min(z0, z1) + t && z < Math.max(z0, z1) - t).sort((a, b) => a - b);
-// An area in the elevation, cut at the story levels: the part in each story, by clipping it to that story's band.
-function elevAreas(corners) {
-  const t = Math.max(1e-6, size * 1e-6) * 10, zs = corners.map(c => c[2]), lo = Math.min(...zs), hi = Math.max(...zs), cuts = [lo, ...elevLevels(lo, hi, t), hi];
-  const clip = (poly, keep, z) => {
-    const out = [];
-    poly.forEach((c, i) => {
-      const n = poly[(i + 1) % poly.length], inC = keep(c[2]), inN = keep(n[2]);
-      if (inC) out.push(c);
-      if (inC !== inN) { const f = (z - c[2]) / (n[2] - c[2]); out.push([0, 1, 2].map(k => wpRound(c[k] + (n[k] - c[k]) * f))); }
-    });
-    return out;
-  };
-  const out = [];
-  for (let i = 0; i + 1 < cuts.length; i++) {
-    let poly = clip(clip(corners, z => z >= cuts[i] - t, cuts[i]), z => z <= cuts[i + 1] + t, cuts[i + 1]);
-    poly = poly.filter((c, j) => { const n = poly[(j + 1) % poly.length]; return Math.hypot(c[0] - n[0], c[1] - n[1], c[2] - n[2]) > t; });
-    if (poly.length >= 3) out.push(poly);
-  }
-  return out.length ? out : [corners];
 }
 // The last planes read stay while an edit reloads the definitions, so the plane drawn on, its hint and its snap hold.
 const workPlanes = () => (hm.defs ? hm.defs.work_planes : hm.planes) || [];
@@ -29063,7 +29048,7 @@ function draw3dHint() {
   const k = drawKind(), p = panes[active], elev = elevDraws(p), plane = elev ? ` on elevation ${p.line.label}` : hm.wp && wpOf(hm.wp) ? ` on the work plane ${hm.wp}` : "";
   if (qdClicks(p, k)) return qdHint(p, k, plane);
   if (elev && !elevKinds.includes(k)) return "In an elevation, joints, beams, columns, braces, floors and walls are drawn by their points, and Quick Draw Beams/Columns, Quick Draw Braces and Quick Draw Floor/Wall work. Quick Draw Columns, Secondary Beams and Walls, Draw Walls and Reshape work in a plan view.";
-  if (elev && k === "rect") return `Click two opposite corners${plane}: its sides run level and upright, and it is cut at the story levels it crosses.`;
+  if (elev && k === "rect") return `Click two opposite corners${plane}: its sides run level and upright; one object however many stories it spans.`;
   if (!draw3dKinds.includes(k)) return "In the 3-D view, joints, columns, beams, walls, braces and floors are drawn by their points, and Quick Draw Beams/Columns, Columns, Secondary Beams and Braces work. Quick Draw Floor/Wall, Quick Draw Walls and Reshape work in a plan view.";
   if (k === "beam") return `Click the start, then each next point of the frames${plane}, at any story levels: ${wpInclText("frame")}. Right click, Enter or Esc ends the line.`;
   if (k === "floor") return `Click the corners${plane} in order round it, at any story levels; click the first corner again, double click or press Enter to close it: ${wpInclText("area")}.`;
@@ -29102,7 +29087,7 @@ async function draw3dClick(p, x, y, dbl) {
     draw(); return;
   }
   if (k === "floor" || (w && k === "rect")) {
-    const wall = (await drawSection("wall")).now, put = corners => hmRun("add_areas_by_points", {areas: elev ? elevAreas(corners) : [corners], section: sec, ...(wall ? {wall_section: wall} : {})});
+    const wall = (await drawSection("wall")).now, put = corners => hmRun("add_areas_by_points", {areas: [corners], section: sec, ...(wall ? {wall_section: wall} : {})});
     if (k === "rect") {
       if (!first) { hm.chain = [s.q]; draw(); return; }
       hm.chain = []; const c = rectCorners(first, s.q, w);
