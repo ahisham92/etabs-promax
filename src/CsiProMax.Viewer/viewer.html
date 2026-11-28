@@ -482,7 +482,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><select id="csys" title="Coordinate system" style="height:19px;padding:0 2px"><option>Global</option></select><select id="wpMode" hidden title="Drawing plane: World, or a work plane to draw on in the 3-D view (Define > Engine Extras > Work Planes)" style="height:19px;padding:0 2px"></select><select id="unitsSap" hidden title="Units" style="height:19px;padding:0 2px"></select><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><select id="csys" title="Coordinate system" style="height:19px;padding:0 2px"><option>Global</option></select><span id="wpWrap" hidden style="margin-left:4px"><select id="wpMode" title="Drawing plane: World, or a work plane to draw on in the 3-D view (Define > Engine Extras > Work Planes)" style="height:19px;padding:0 2px"></select></span><select id="unitsSap" hidden title="Units" style="height:19px;padding:0 2px"></select><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
 <div id="rubber"></div><div id="tip"></div><div id="dockHint"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -27136,7 +27136,13 @@ function drawPreview(p, g, M) {
     if (r > 1e-6) { g.beginPath(); circleOutline(c, r, hm.circN).forEach((q, i) => { const s = to(q); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); g.stroke(); }
   } else if (hm.chain.length) {
     g.beginPath(); hm.chain.forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); });
-    if (h && h.snap) { if (k === "rect") { const a = hm.chain[0], b = h.snap.q, za = a.length > 2 ? a[2] : z; g.beginPath(); [[a[0], a[1], za], [b[0], a[1], za], [b[0], b[1], za], [a[0], b[1], za]].forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); } else { const s = to(h.snap.q); g.lineTo(s[0], s[1]); } }
+    if (h && h.snap) {
+      if (k === "rect") {
+        const a = hm.chain[0], b = h.snap.q, za = a.length > 2 ? a[2] : z;
+        const box = p.mode === "3d" && wpOf(hm.wp) ? rectCorners(a, b) || [] : [[a[0], a[1], za], [b[0], a[1], za], [b[0], b[1], za], [a[0], b[1], za]];
+        g.beginPath(); box.forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill();
+      } else { const s = to(h.snap.q); g.lineTo(s[0], s[1]); }
+    }
     g.stroke();
   }
   if (h && h.snap) {
@@ -27153,20 +27159,22 @@ function drawMove(p, x, y) {
   draw();
 }
 // ---- drawing in the 3-D view, and work planes (an ETABS model) ----
-// In the 3-D view, members are drawn by their points at story levels: grid crossings at every level, and joints. A
-// beam, wall or floor has its points on one story; a brace runs from a story to the next one up. With a work plane
-// active (Properties of Object, or Define > Engine Extras > Work Planes > Draw on It), only points on it are offered,
-// with the points where it crosses the grid lines at each level, so a sloped or skew plane can be drawn on too.
+// In the 3-D view, members are drawn by their points at story levels: grid crossings at every level, and joints. In
+// World a beam, wall or floor has its points on one story, and a brace runs from a story to the next one up. With a
+// work plane active (the status bar, Properties of Object, or Define > Engine Extras > Work Planes > Draw on It), only
+// points on it are offered, with the points where it crosses the grid lines at each level, and frames and areas take
+// their points on any levels: each is one object however many stories it spans.
 const draw3dKinds = ["joint", "column", "beam", "wall", "brace", "floor", "rect"];
-const workPlanes = () => (hm.defs && hm.defs.work_planes) || [];
+// The last planes read stay while an edit reloads the definitions, so the plane drawn on, its hint and its snap hold.
+const workPlanes = () => (hm.defs ? hm.defs.work_planes : hm.planes) || [];
 const wpOf = name => (name && workPlanes().find(w => w.name === name)) || null;
 // The drawing plane: World (any story level) or one work plane. The status bar's combo, next to Units..., and
 // Properties of Object both show it and both change it; a plane deleted (or renamed away) leaves World.
 function wpSync() {
   const box = $("wpMode"); if (!box) return;
-  const live = !!window.cpmLive && program === "etabs", planes = workPlanes();
+  const live = !!window.cpmLive && program === "etabs", planes = hm.planes = workPlanes();
   if (hm.wp && !planes.some(w => w.name === hm.wp)) hm.wp = "";
-  box.hidden = !live;
+  $("wpWrap").hidden = !live; // a status bar cell of its own, clear of the coordinate system box
   if (!live) return;
   box.innerHTML = opts([["", "World"], ...planes.map(w => [w.name, w.name])], hm.wp); box.value = hm.wp || "";
   const pp = document.getElementById("pobjP"); if (pp) { pp.innerHTML = box.innerHTML; pp.value = box.value; }
@@ -27237,11 +27245,29 @@ function snap3d(p, x, y, only) {
   }
   if (!best) return null;
   const st = stories.find(s => Math.abs(s.elevation - best.q[2]) <= tol * 10);
-  return {q: best.q.map(v => Math.round(v * 1e4) / 1e4), what: best.what, story: st ? st.name : ""};
+  // At the page's own resolution (the model's points come to it with five decimals), so a point drawn on again is
+  // the very same point; a sloped plane's points stay on it far closer than the flatness an area is checked to.
+  return {q: best.q.map(wpRound), what: best.what, story: st ? st.name : ""};
+}
+function wpRound(v) { return Math.round(v * 1e5) / 1e5; }
+// A rectangle from two opposite corners. On a work plane its sides run level along the plane and straight up (or
+// across) it, so its other two corners are at the two corners' levels; on a level plane, and in World, along X and Y.
+function rectCorners(a, b) {
+  const w = wpOf(hm.wp), n = w ? w.normal : [0, 0, 1], h = Math.hypot(n[0], n[1]);
+  const u = h < 1e-9 ? [1, 0, 0] : [-n[1] / h, n[0] / h, 0];
+  const v = h < 1e-9 ? [0, 1, 0] : [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], du = d[0] * u[0] + d[1] * u[1] + d[2] * u[2], dv = d[0] * v[0] + d[1] * v[1] + d[2] * v[2];
+  if (Math.abs(du) < 1e-6 || Math.abs(dv) < 1e-6) return null;
+  const r = wpRound;
+  return [a, [r(a[0] + du * u[0]), r(a[1] + du * u[1]), a[2]], b, [r(a[0] + dv * v[0]), r(a[1] + dv * v[1]), b[2]]];
 }
 function draw3dHint() {
   const k = drawKind(), plane = hm.wp && wpOf(hm.wp) ? ` on the work plane ${hm.wp}` : "";
   if (!draw3dKinds.includes(k)) return "In the 3-D view, joints, columns, beams, walls, braces and floors are drawn by their points. Quick Draw and Reshape work in a plan view.";
+  if (plane && ["beam", "brace", "floor", "rect"].includes(k)) return {beam: `Click the start, then each next point of the frames${plane}, at any story levels: a beam on one level, a column upright, else a brace. Right click or Esc ends the line.`,
+    brace: `Click the brace's two ends${plane}, at any story levels.`,
+    floor: `Click the corners${plane}, at any story levels; click the first corner again (or double click) to close it: a floor on one level, a wall upright, else a ramp.`,
+    rect: `Click two opposite corners${plane}: its sides run along the plane and across it.`}[k];
   return {joint: `Click a grid crossing or joint${plane} to place a joint there.`, column: `Click a grid crossing or joint${plane}: a column runs down to it from the story below.`,
     beam: `Click the start, then each next point of the beams${plane}, all on one story. Right click or Esc ends the line.`, wall: `Click the start, then each next point of the walls${plane}, on one story: each runs down to the story below.`,
     brace: `Click the brace's two ends${plane}, on two stories next to each other.`, floor: `Click the floor's corners${plane}, on one story; click the first corner again (or double click) to close it.`,
@@ -27250,16 +27276,43 @@ function draw3dHint() {
 async function draw3dClick(p, x, y, dbl) {
   const k = drawKind(), kind = drawKinds[k];
   if (!draw3dKinds.includes(k)) return hmSay(draw3dHint(), true);
-  const s = snap3d(p, x, y);
-  if (!s) return hmSay(hm.wp && wpOf(hm.wp) ? `Click a grid crossing or joint on the work plane ${hm.wp}.` : "Click a grid crossing or joint.", true);
+  const w = wpOf(hm.wp), s = snap3d(p, x, y);
+  if (!s) return hmSay(w ? `Click a grid crossing or joint on the work plane ${hm.wp}.` : "Click a grid crossing or joint.", true);
   if (!s.story) return hmSay("That point is between stories: members are drawn between points at story levels.", true);
-  const sec = k === "joint" ? "" : (await drawSection(kind)).now;
-  if (k !== "joint" && !sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
+  // A floor drawn on an upright work plane is a wall, so it takes a wall section.
+  const secKind = w && (k === "floor" || k === "rect") && Math.abs(w.normal[2]) < 1e-4 ? "wall" : kind;
+  const sec = k === "joint" ? "" : (await drawSection(secKind)).now;
+  if (k !== "joint" && !sec) return hmSay(`Define a ${secKind === "slab" ? "slab" : secKind} section first (Define menu).`, true);
   const st = hm.similar === "all" ? stories.slice(1).map(v => v.name) : [s.story], xy = q => [q[0], q[1]];
   if (k === "joint") return hmRun("add_joints", {points: [xy(s.q)], stories: st});
   if (k === "column") return hmRun("add_columns", {points: [xy(s.q)], stories: st, section: sec});
   if (hm.chain.length && hm.chain[0].length !== 3) hm.chain = []; // a chain begun in a plan view
-  const first = hm.chain[0], last = hm.chain[hm.chain.length - 1];
+  const first = hm.chain[0], last = hm.chain[hm.chain.length - 1], same = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-6;
+  if (w && k !== "wall") {
+    // On a work plane the points may be on any story levels: a frame from each point to the next (a beam on one
+    // level, a column upright, else a brace, however many stories it spans), an area on its corners (a floor on one
+    // level, a wall upright, else a ramp).
+    if (k === "beam" || k === "brace") {
+      if (!first) { hm.chain = [s.q]; draw(); return; }
+      if (same(last, s.q)) return;
+      if (k === "brace") hm.chain = [];
+      const j = await hmRun("add_frames_by_points", {frames: [[...last, ...s.q]], section: sec});
+      if (k === "beam" && j.ok) hm.chain = [s.q];
+      draw(); return;
+    }
+    if (k === "rect") {
+      if (!first) { hm.chain = [s.q]; draw(); return; }
+      hm.chain = []; const c = rectCorners(first, s.q);
+      if (!c) { draw(); return hmSay("Click the opposite corner: away from the first both along the plane and across it.", true); }
+      return hmRun("add_areas_by_points", {areas: [c], section: sec});
+    }
+    const close = hm.chain.length >= 3 && (dbl || same(first, s.q));
+    if (!close) { if (!dbl && !(last && same(last, s.q))) hm.chain.push(s.q); draw(); return; }
+    const corners = hm.chain.slice(); hm.chain = [];
+    return hmRun("add_areas_by_points", {areas: [corners], section: sec});
+  }
+  if (w && first && Math.abs(first[2] - s.q[2]) > 1e-6 * Math.max(1, size))
+    return hmSay(`A wall's line is on one story, and the wall runs down from it to the story below: this point is on ${s.story}, the first is not. An area across levels on the plane is drawn by its corners (Draw Floor/Wall).`, true);
   if (k === "brace") {
     if (!first) { hm.chain = [s.q]; draw(); return; }
     hm.chain = [];
@@ -27365,7 +27418,7 @@ function wpPreview(p, g, M) {
 function hmDrawHelp() {
   dialog("Drawing in the Modeler", `<table class="list">${[["Snap", "Clicks snap to grid crossings and joints (12 px), then to grid lines (8 px). The point it snaps to shows a yellow square and its name."],
     ["In 3-D", "In the 3-D view of an ETABS model, joints, columns, beams, walls, braces and floors are drawn by their points at story levels: grid crossings at every level, and joints. A beam, wall or floor has its points on one story; a brace runs to the next story up."],
-    ["Work planes", "Define > Engine Extras > Work Planes: a plane by three points, two frames, a frame and a point, or an area. Pick World or a plane in the status bar, next to Units... (or Properties of Object > Work Plane). On a plane, the 3-D view shows it in translucent blue and offers only the points on it, and where it crosses the grid lines."],
+    ["Work planes", "Define > Engine Extras > Work Planes: a plane by three points, two frames, a frame and a point, or an area. Pick World or a plane in the status bar, next to Units... (or Properties of Object > Work Plane). On a plane, the 3-D view shows it in translucent blue and offers only the points on it, and where it crosses the grid lines. Frames and floors drawn on it take their points on any story levels: a frame is a beam, column or brace by how it lies, an area a floor, wall or ramp, each one object across the stories it spans."],
     ["Stories", "One Story draws on the plan's story; All Stories draws the same object on every story (ETABS's All Stories). Pick it in the status bar or in Properties of Object."],
     ["Columns, walls", "A column or wall on a story runs from the story below up to it."], ["Beams, floors", "A beam or floor sits at the story's level."],
     ["Quick draw", "Quick Draw Beams and Walls fill one grid span per click; Quick Draw Floors fill one bay."],
