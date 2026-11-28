@@ -3458,17 +3458,17 @@ function wire(p) {
     else if (drag.act === "pan") panBy(p, dx, dy);
     else if (drag.act === "walk") etvWalk(p, dx, dy);
     else if (drag.act === "orbit") orbitBy(p, dx, dy);
-    else if (drag.act === "box" || drag.act === "rubberzoom") {
+    else if (drag.act === "box" || drag.act === "rubberzoom" || (drag.act === "draw" && winDraws(p))) {
       const rb = docEl(cv.ownerDocument, "rubber"), l = Math.min(e.clientX, drag.sx), t = Math.min(e.clientY, drag.sy);
       rb.style.display = "block"; rb.style.left = l + "px"; rb.style.top = t + "px"; rb.style.width = Math.abs(e.clientX - drag.sx) + "px"; rb.style.height = Math.abs(e.clientY - drag.sy) + "px";
-      rb.className = drag.act === "rubberzoom" ? "" : e.clientX < drag.sx ? "cross" : "win";
+      rb.className = drag.act === "rubberzoom" ? "" : drag.act === "draw" || e.clientX >= drag.sx ? "win" : "cross";
     }
     drag.x = x; drag.y = y;
   });
   cv.addEventListener("pointerup", e => {
     const [x, y] = local(e), d = drag; drag = null; docEl(cv.ownerDocument, "rubber").style.display = "none";
     if (!d || !P) return;
-    if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); return; }
+    if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); else if (winDraws(p)) drawWindow(p, {x0: Math.min(d.x0, x), x1: Math.max(d.x0, x), y0: Math.min(d.y0, y), y1: Math.max(d.y0, y)}); return; }
     if (d.act === "wppick") { if (!d.moved) wpPickClick(p, x, y); return; }
     if (d.act === "measure") { if (!d.moved && d.button === 0) etvMeasureClick(p, x, y, false); else if (d.button === 2) { if (etv.measure && etv.measure.cancel) etv.measure.cancel(); etv.measure = null; } return; }
     if (d.act === "walk") return;
@@ -28132,7 +28132,7 @@ function drawHint() {
     floor: `Click the floor's corners in order; click the first corner again (or double click) to close it, ${where}.`, rect: `Click two opposite corners of the floor ${where}.`, qfloor: `Click inside a grid bay: a floor fills it ${where}.`,
     brace: `Click the brace's bottom end (on the story below), then its top end ${where}.`,
     reshape: hm.chain.length ? "Click the new place of the end or corner (Esc to choose another)." : "Click the end of a beam, column or brace, or the corner of a floor or wall, to reshape it on " + p.story + ".",
-    qsec: `Click inside a grid bay: ${hm.secN} secondary beams parallel to ${hm.secDir} fill it ${where}.`, circ: hm.chain.length ? "Click a point on the floor's edge." : `Click the centre of the circular floor ${where}.`, joint: `Click a point to place a joint ${where}, for a support, spring, load or link where no member ends.`}[k] || "") + ctlHint();
+    qsec: `Click inside a grid bay: ${hm.secN} secondary beams parallel to ${hm.secDir} fill it ${where}.`, circ: hm.chain.length ? "Click a point on the floor's edge." : `Click the centre of the circular floor ${where}.`, joint: `Click a point to place a joint ${where}, for a support, spring, load or link where no member ends.`}[k] || "") + ctlHint() + winHint();
 }
 function drawStories(p) { return storiesFor(p.story); }
 // One Story, All Stories or Similar Stories (the status bar, as in ETABS): what is drawn or selected on a story in a plan
@@ -28372,6 +28372,37 @@ function bayAt(p, x, y) {
     if (raw[0] > xs[i] && raw[0] < xs[i + 1] && raw[1] > ys[j] && raw[1] < ys[j + 1]) return [[xs[i], ys[j]], [xs[i + 1], ys[j]], [xs[i + 1], ys[j + 1]], [xs[i], ys[j + 1]]];
   return null;
 }
+// Quick Draw Secondary Beams in one bay: N beams spread evenly across it, parallel to X or Y, as ETABS draws them.
+function secLines(bay) {
+  const [x0, y0] = bay[0], [x1, y1] = bay[2], n = hm.secN, lines = [];
+  for (let i = 1; i <= n; i++) { const t = i / (n + 1); lines.push(hm.secDir === "X" ? [x0, y0 + (y1 - y0) * t, x1, y0 + (y1 - y0) * t] : [x0 + (x1 - x0) * t, y0, x0 + (x1 - x0) * t, y1]); }
+  return lines.map(l => l.map(v => Math.round(v * 1e4) / 1e4));
+}
+// ETABS's rubber band for Draw Joint Objects and the Quick Draw commands, in a plan (its help: "drag the mouse to
+// rubber band a window around" grid line intersections, grid line segments or grid line spaces): a window dragged in
+// the draw tool draws the object at each grid crossing, grid line segment or bay wholly inside it, all in one change.
+const winKinds = ["joint", "column", "qbeam", "qwall", "qsec", "qfloor"];
+const winDraws = p => drawing() && p.mode === "plan" && winKinds.includes(drawKind());
+const winWhat = k => ({joint: "crossing", column: "crossing", qbeam: "line segment", qwall: "line segment"})[k] || "bay";
+const winHint = () => winKinds.includes(drawKind()) ? ` Or drag a window: one at each grid ${winWhat(drawKind())} wholly inside it.` : "";
+async function drawWindow(p, r) {
+  const k = drawKind(), kind = drawKinds[k], z = elevationOf(p.story) ?? 0, M = p.M; if (!M) return;
+  const inR = q => { const s = M.to([q[0], q[1], z]); return s[0] >= r.x0 && s[0] <= r.x1 && s[1] >= r.y0 && s[1] <= r.y1; };
+  const xs = grids.X.map(g => g.at).sort((a, b) => a - b), ys = grids.Y.map(g => g.at).sort((a, b) => a - b), pts = [], spans = [], bays = [];
+  for (const x of xs) for (const y of ys) if (inR([x, y])) pts.push([x, y]);
+  for (const x of xs) for (let i = 0; i + 1 < ys.length; i++) if (inR([x, ys[i]]) && inR([x, ys[i + 1]])) spans.push([x, ys[i], x, ys[i + 1]]);
+  for (const y of ys) for (let i = 0; i + 1 < xs.length; i++) if (inR([xs[i], y]) && inR([xs[i + 1], y])) spans.push([xs[i], y, xs[i + 1], y]);
+  for (let i = 0; i + 1 < xs.length; i++) for (let j = 0; j + 1 < ys.length; j++) { const b = [[xs[i], ys[j]], [xs[i + 1], ys[j]], [xs[i + 1], ys[j + 1]], [xs[i], ys[j + 1]]]; if (b.every(inR)) bays.push(b); }
+  const got = {joint: pts, column: pts, qbeam: spans, qwall: spans}[k] || bays;
+  if (!got.length) return hmSay(`The window holds no whole grid ${winWhat(k)}.`, true);
+  const st = drawStories(p), sec = (await drawSection(kind)).now;
+  if (k !== "joint" && !sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
+  if (k === "joint") return hmRun("add_joints", {points: pts, stories: st});
+  if (k === "column") return hmRun("add_columns", {points: pts, stories: st, section: sec});
+  if (k === "qbeam" || k === "qwall") return hmRun(k === "qbeam" ? "add_beams" : "add_walls", {lines: spans, stories: st, section: sec});
+  if (k === "qsec") return hmRun("add_beams", {lines: bays.flatMap(secLines), stories: st, section: sec});
+  return hmRun("add_slabs", {outlines: bays, stories: st, section: sec});
+}
 async function drawSection(kind) {
   if (kind === "joint" || kind === "reshape") return {list: [], now: ""};
   const defs = await hmDefs(), list = kind === "slab" || kind === "wall" ? defs.shell_sections.filter(s => s.kind === kind || (kind === "slab" && s.kind === "deck") || (program === "sap2000" && s.kind !== "deck")).map(s => s.name) : defs.frame_sections.map(s => s.name);
@@ -28427,9 +28458,7 @@ async function drawClick(p, x, y, dbl) {
   if (k === "qsec") {
     // Quick Draw Secondary Beams: N beams spread evenly across the bay, parallel to X or Y, as ETABS draws them.
     const bay = bayAt(p, x, y); if (!bay) return hmSay("Click inside a bay of the grid.", true);
-    const [x0, y0] = bay[0], [x1, y1] = bay[2], n = hm.secN, lines = [];
-    for (let i = 1; i <= n; i++) { const t = i / (n + 1); lines.push(hm.secDir === "X" ? [x0, y0 + (y1 - y0) * t, x1, y0 + (y1 - y0) * t] : [x0 + (x1 - x0) * t, y0, x0 + (x1 - x0) * t, y1]); }
-    return hmRun("add_beams", {lines: lines.map(l => l.map(v => Math.round(v * 1e4) / 1e4)), stories: st, section: sec});
+    return hmRun("add_beams", {lines: secLines(bay), stories: st, section: sec});
   }
   if (k === "circ") {
     if (!hm.chain.length) { hm.chain = [s.q]; draw(); $("hint").textContent = hintText(); return; }
