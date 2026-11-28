@@ -3356,7 +3356,7 @@ function pickNow(p) {
 function idAt(p, x, y, r) {
   if (!gl) return idAt2D(p, x, y);
   const data = pickRender(p); if (!data) return 0;
-  const R = p.R, dpr = R.d || window.devicePixelRatio || 1, cx = Math.round(x * dpr), cy = R.H - 1 - Math.round(y * dpr), rad = Math.round((r ?? 5) * dpr);
+  const R = p.R, dpr = R.d || window.devicePixelRatio || 1, cx = Math.round(x * dpr), cy = R.H - 1 - Math.round(y * dpr), rad = Math.round((r ?? snapOpt.selTol) * dpr); // Snap Options' Screen Selection Tolerance
   let best = 0, bd = 1e9;
   for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
     const px = cx + dx, py = cy + dy; if (px < 0 || py < 0 || px >= R.W || py >= R.H) continue;
@@ -8008,7 +8008,7 @@ function etnDrawMenu() {
     ["Draw Floor/Wall Objects", [["Draw Floor/Wall (Plan, Elev, 3D)", "d:floor"], ["Draw Rectangular Floor/Wall (Plan, Elev)", "d:rect"], ["Quick Draw Floor/Wall (Plan, Elev, 3D)", "d:qfloor"], ["Quick Draw Area Around Point (Plan)", "d:qfloor"], ["Draw Walls (Plan)", "d:wall"], ["Quick Draw Walls (Plan)", "d:qwall"], ["Draw Wall Openings (Plan, Elev, 3D)", "m:ex:openings"]]], 0,
     ["Draw Grids", "m:storyGrid"], 0,
     ["Draw Section Cut...", "m:st:cut", "", !engine.res], 0,
-    ["Snap Options...", "m:drawHelp"], ["Draw Using Snap Only", "m:etn:snapOnly"], 0,
+    ["Snap Options...", "m:snapOpts"], ["Draw Using Snap Only", "m:etn:snapOnly"], 0,
     ["Engine Extras", [["Draw Circular Floors (centre, then edge)", "d:circ"], 0, ["Design Strips...", "m:ex:strips"], ["Tendons...", "m:ex:tendons"], ["Slab Rebar...", "m:ex:slabrebar"]]]];
 }
 // ---- ETABS 23.2's Detailing menu and its Bar Selection and Curtailment Rule forms, from the pictures in
@@ -9957,6 +9957,7 @@ async function modelAct(a) {
     case "asgFrameLoad": return hmAssignLoad("f");
     case "asgShellLoad": return hmAssignLoad("a");
     case "drawHelp": return hmDrawHelp();
+    case "snapOpts": return snapOptionsForm();
     case "replicate": return hmReplicate();
     case "move": return hmMove();
     case "divide": return hmDivide();
@@ -28170,21 +28171,130 @@ function jointsOnSimilar(p, names) {
   for (const n of names) { const label = n.replace(/@[^@]*$/, ""); if (label !== n) for (const st of where) if (pointXyz.has(label + "@" + st)) out.add(label + "@" + st); }
   return [...out];
 }
+// ---- Draw > Snap Options (ETABS 23.2's form, its items as ETABS's help lists them: Draw menu > Snap Options) ----
+// Which snaps are on, the snap increments and the settings, kept between visits. In a plan view the pointer snaps to the
+// first kind in ETABS's order that finds something within the snap tolerance: joints and grid intersections, line ends
+// and midpoints, intersections, perpendicular projections, lines and edges (then their extensions), and the fine grid.
+// With none, a line drawn from a point takes the length and angle increments.
+const snapDef = {joints: true, ends: true, grid: true, lines: true, edges: true, perp: true, inter: true, fine: false, ext: false, par: false, smart: false, arch: false,
+  incIn: false, lenIn: "", incMm: false, lenMm: "", incDeg: false, deg: "", fineM: 0.3048, nudgeM: 0.3048, selTol: 3, snapTol: 12, scale: false, follow: false};
+let snapOpt = {...snapDef};
+try { Object.assign(snapOpt, JSON.parse(localStorage.getItem("cpm-snap") || "{}")); } catch (e) {}
+// A length in the model's unit (a metre is lenK[unit] of them), and back.
+const perM = () => lenK[String(modelU().length).toLowerCase()] || 1;
+// The frames and shell edges a plan shows at its story's level, as lines in plan.
+function snapSegs(p, z) {
+  const t = tol() * 10, at = q => Math.abs(q[2] - z) <= t, out = [], vis = visOf(p), lab = o => o.name.replace(/@.*$/, "");
+  for (const f of frames) if (vis[f.id] && at(f.a) && at(f.b)) out.push({a: [f.a[0], f.a[1]], b: [f.b[0], f.b[1]], name: lab(f)});
+  for (const a of areas) {
+    if (!vis[a.id]) continue;
+    const ring = a.pts.filter(at), closed = ring.length === a.pts.length && ring.length > 2;
+    for (let i = 0; i + (closed ? 0 : 1) < ring.length; i++) out.push({a: ring[i].slice(0, 2), b: ring[(i + 1) % ring.length].slice(0, 2), name: lab(a), edge: true});
+  }
+  return out;
+}
+// Where two lines in plan cross, within both (null if they don't or run parallel).
+function segCross(A, B) {
+  const r = sub2(A.b, A.a), q = sub2(B.b, B.a), d = r[0] * q[1] - r[1] * q[0]; if (Math.abs(d) < 1e-12) return null;
+  const w = sub2(B.a, A.a), t = (w[0] * q[1] - w[1] * q[0]) / d, u = (w[0] * r[1] - w[1] * r[0]) / d;
+  return t >= -1e-9 && t <= 1 + 1e-9 && u >= -1e-9 && u <= 1 + 1e-9 ? [A.a[0] + r[0] * t, A.a[1] + r[1] * t] : null;
+}
+const sub2 = (a, b) => [a[0] - b[0], a[1] - b[1]];
+// The point of a line (or its extension) nearest to q, with how far along it is (0 at a, 1 at b).
+function segFoot(s, q) { const r = sub2(s.b, s.a), l = r[0] * r[0] + r[1] * r[1], t = l ? ((q[0] - s.a[0]) * r[0] + (q[1] - s.a[1]) * r[1]) / l : 0; return {q: [s.a[0] + r[0] * t, s.a[1] + r[1] * t], t}; }
 function snapAt(p, x, y) {
-  // Screen distance decides: a grid crossing or a joint within 12 px, else a point on a grid line within 8 px, else where the pointer is.
   const M = p.M; if (!M) return null;
-  const z = elevationOf(p.story) ?? 0, raw = M.back(x, y), cand = [];
-  for (const gx of grids.X) for (const gy of grids.Y) cand.push({q: [gx.at, gy.at], what: `grid ${gx.label}-${gy.label}`});
-  for (const pt of points) if (Math.abs(pt[3] - z) < 1e-6) cand.push({q: [pt[1], pt[2]], what: "joint"});
-  if (hm.chain.length) cand.push({q: hm.chain[0], what: "first point"});
-  let best = null, bd = 12;
-  for (const c of cand) { const s = M.to([c.q[0], c.q[1], z]), dd = Math.hypot(s[0] - x, s[1] - y); if (dd < bd) { bd = dd; best = c; } }
-  if (best) return {q: best.q.slice(), what: best.what};
-  bd = 8; let onLine = null;
-  for (const g of grids.X) { const s = M.to([g.at, raw[1], z]), dd = Math.abs(s[0] - x); if (dd < bd) { bd = dd; onLine = {q: [g.at, raw[1]], what: "grid " + g.label}; } }
-  for (const g of grids.Y) { const s = M.to([raw[0], g.at, z]), dd = Math.abs(s[1] - y); if (dd < bd) { bd = dd; onLine = {q: [raw[0], g.at], what: "grid " + g.label}; } }
-  if (onLine) { onLine.q = onLine.q.map(v => Math.round(v * 1000) / 1000); return onLine; }
-  return {q: [Math.round(raw[0] * 1000) / 1000, Math.round(raw[1] * 1000) / 1000], what: ""};
+  const z = elevationOf(p.story) ?? 0, raw = M.back(x, y), tolPx = Math.max(2, +snapOpt.snapTol || 12), lineTol = Math.max(2, tolPx * 2 / 3);
+  const px = q => { const s = M.to([q[0], q[1], z]); return Math.hypot(s[0] - x, s[1] - y); };
+  const nearest = (list, within) => { let best = null, bd = within; for (const c of list) { const d = px(c.q); if (d < bd) { bd = d; best = c; } } return best; };
+  const exact = c => c && {q: c.q.slice(), what: c.what}, round = c => c && {q: c.q.map(v => Math.round(v * 1000) / 1000), what: c.what};
+  const last = hm.chain.length ? hm.chain[hm.chain.length - 1] : null;
+  // Joints and grid intersections (and the first point, which closes a floor).
+  const pts = [];
+  if (snapOpt.grid) for (const gx of grids.X) for (const gy of grids.Y) pts.push({q: [gx.at, gy.at], what: `grid ${gx.label}-${gy.label}`});
+  if (snapOpt.joints) for (const pt of points) if (Math.abs(pt[3] - z) < 1e-6) pts.push({q: [pt[1], pt[2]], what: "joint"});
+  if (hm.chain.length) pts.push({q: hm.chain[0], what: "first point"});
+  let hit = nearest(pts, tolPx); if (hit) return exact(hit);
+  const segs = snapOpt.ends || snapOpt.inter || snapOpt.perp || snapOpt.lines || snapOpt.edges || snapOpt.ext ? snapSegs(p, z) : [];
+  const segPx = sg => segDist(x, y, M.to([sg.a[0], sg.a[1], z]), M.to([sg.b[0], sg.b[1], z]));
+  const kinds = sg => sg.edge ? snapOpt.edges : snapOpt.lines;
+  // Line ends and midpoints.
+  if (snapOpt.ends) { hit = nearest(segs.flatMap(sg => [{q: sg.a, what: "end of " + sg.name}, {q: sg.b, what: "end of " + sg.name}, {q: [(sg.a[0] + sg.b[0]) / 2, (sg.a[1] + sg.b[1]) / 2], what: "midpoint of " + sg.name}]), tolPx); if (hit) return round(hit); }
+  // Intersections of frames with frames and with shell edges (not of two edges).
+  const near = segs.filter(sg => segPx(sg) <= tolPx * 2);
+  if (snapOpt.inter) {
+    const cross = [];
+    for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { if (near[i].edge && near[j].edge) continue; const q = segCross(near[i], near[j]); if (q) cross.push({q, what: `intersection of ${near[i].name} and ${near[j].name}`}); }
+    hit = nearest(cross, tolPx); if (hit) return round(hit);
+  }
+  // Perpendicular from the last point to the frame or edge under the pointer.
+  const under = near.filter(sg => segPx(sg) <= lineTol).sort((a, b) => segPx(a) - segPx(b) + (a.edge - b.edge) * 0.5)[0]; // a frame before an edge that lies on it, as ETABS lists them
+  if (snapOpt.perp && last && under) { const f = segFoot(under, last); if (f.t >= 0 && f.t <= 1 && Math.hypot(f.q[0] - last[0], f.q[1] - last[1]) > 1e-9) return round({q: f.q, what: "perpendicular to " + under.name}); }
+  // Lines and edges: frames, shell edges and grid lines.
+  if (under && kinds(under)) { const f = segFoot(under, raw); if (f.t >= 0 && f.t <= 1) return round({q: f.q, what: (under.edge ? "edge of " : "on ") + under.name}); }
+  if (snapOpt.lines) {
+    let bd = lineTol, onLine = null;
+    for (const g of grids.X) { const sx = M.to([g.at, raw[1], z]), dd = Math.abs(sx[0] - x); if (dd < bd) { bd = dd; onLine = {q: [g.at, raw[1]], what: "grid " + g.label}; } }
+    for (const g of grids.Y) { const sy = M.to([raw[0], g.at, z]), dd = Math.abs(sy[1] - y); if (dd < bd) { bd = dd; onLine = {q: [raw[0], g.at], what: "grid " + g.label}; } }
+    if (onLine) return round(onLine);
+  }
+  // Extensions of frames and shell edges beyond their ends.
+  if (snapOpt.ext) for (const sg of segs) { const f = segFoot(sg, raw); if ((f.t < 0 || f.t > 1) && px(f.q) <= lineTol) return round({q: f.q, what: "extension of " + sg.name}); }
+  // The fine grid.
+  const fine = (+snapOpt.fineM || 0) * perM();
+  if (snapOpt.fine && fine > 0) { const q = [Math.round(raw[0] / fine) * fine, Math.round(raw[1] / fine) * fine]; if (px(q) <= tolPx) return round({q, what: "fine grid"}); }
+  // From the last point: lengths at the increments, angles at the increment.
+  if (last && (snapOpt.incIn || snapOpt.incMm || snapOpt.incDeg)) {
+    const v = sub2(raw, last); let len = Math.hypot(v[0], v[1]), ang = Math.atan2(v[1], v[0]);
+    const step = +snapOpt.deg; if (snapOpt.incDeg && step > 0) ang = Math.round(ang * 180 / Math.PI / step) * step * Math.PI / 180;
+    const incs = [...(snapOpt.incIn ? String(snapOpt.lenIn).split(";").map(n => +n / 39.37008 * perM()) : []), ...(snapOpt.incMm ? String(snapOpt.lenMm).split(";").map(n => +n / 1000 * perM()) : [])].filter(n => n > 0);
+    if (incs.length) len = incs.map(n => Math.round(len / n) * n).reduce((a, b) => Math.abs(b - len) < Math.abs(a - len) ? b : a);
+    if (len > 0) return round({q: [last[0] + Math.cos(ang) * len, last[1] + Math.sin(ang) * len], what: "increment"});
+  }
+  return round({q: raw, what: ""});
+}
+// The form: Snap To (Select All, Deselect All), Snap Increments and Settings; Apply keeps it open, as ETABS's does. The
+// items the Modeler doesn't do yet (Parallels, Intelligent Snaps, Arch Layer, Drawing Scale) are greyed.
+function snapOptionsForm() {
+  const o = snapOpt, ul = String(modelU().length || "m"), lenOf = m => +(+m * perM()).toPrecision(6), dis = ' disabled title="Not in the Modeler yet"';
+  const cb = (k, l, off) => `<label${off ? ' class="dis"' : ""}><input type="checkbox" data-s="${k}" ${o[k] ? "checked" : ""}${off ? dis : ""}>${l}</label>`;
+  const d = dialog("Snap Options", `<fieldset><legend>Snap To</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 16px">
+      ${cb("joints", "Joints")}${cb("inter", "Intersections")}${cb("ends", "Line Ends and Midpoints")}${cb("fine", "Fine Grid")}${cb("grid", "Grid Intersections")}${cb("ext", "Extensions")}
+      ${cb("lines", "Lines and Frames")}${cb("par", "Parallels", true)}${cb("edges", "Edges")}${cb("smart", "Intelligent Snaps", true)}${cb("perp", "Perpendicular Projections")}${cb("arch", "Arch Layer", true)}</div>
+      <div class="row" style="margin-top:6px"><button id="snAll">Select All</button><button id="snNone">Deselect All</button></div></fieldset>
+    <fieldset><legend>Snap Increments</legend><div class="g2">
+      <label><input type="checkbox" data-s="incIn" ${o.incIn ? "checked" : ""}>Imperial (in): Snap at length increments of</label><input id="snIn" value="${esc(o.lenIn)}" placeholder="6;12">
+      <label><input type="checkbox" data-s="incMm" ${o.incMm ? "checked" : ""}>Metric (mm): Snap at length increments of</label><input id="snMm" value="${esc(o.lenMm)}" placeholder="100;250;500">
+      <label><input type="checkbox" data-s="incDeg" ${o.incDeg ? "checked" : ""}>Degree: Snap at angle increments of</label><input id="snDeg" type="number" step="any" value="${esc(o.deg)}" placeholder="15"></div></fieldset>
+    <fieldset><legend>Settings</legend><div class="g2">
+      <span>Plan Fine Grid Spacing (${esc(ul)})</span><input id="snFine" type="number" step="any" value="${lenOf(o.fineM)}">
+      <span>Plan Nudge Value (${esc(ul)})</span><input id="snNudge" type="number" step="any" value="${lenOf(o.nudgeM)}">
+      <span>Screen Selection Tolerance (pixels)</span><input id="snSel" type="number" min="1" step="1" value="${o.selTol}">
+      <span>Screen Snap To Tolerance (pixels)</span><input id="snTol" type="number" min="1" step="1" value="${o.snapTol}"></div>
+      ${cb("scale", "Drawing Scale", true)}${cb("follow", "Move Draft Helper Controls with Mouse", true)}</fieldset>`,
+    [["Apply", t => { applySnap(t); return false; }, true], ["Close"]], {width: 520, float: true});
+  q(d, "#snAll").onclick = () => d.querySelectorAll("[data-s]:not([disabled])").forEach(x => { if (!x.dataset.s.startsWith("inc")) x.checked = true; });
+  q(d, "#snNone").onclick = () => d.querySelectorAll("[data-s]:not([disabled])").forEach(x => { if (!x.dataset.s.startsWith("inc")) x.checked = false; });
+}
+// ETABS's nudge: in a plan view, Ctrl and an arrow key move the selection by Snap Options' Plan Nudge Value along
+// global X or Y (never Z), as Edit > Move does; the selection stays, to nudge again.
+function nudge(k) {
+  const n = (+snapOpt.nudgeM || 0) * perM(); if (!(n > 0)) return;
+  const dx = k === "ArrowRight" ? n : k === "ArrowLeft" ? -n : 0, dy = k === "ArrowUp" ? n : k === "ArrowDown" ? -n : 0;
+  // The moved objects come back under labels of their own: they stay selected by those.
+  eteApply(null, "move_objects", {objects: eteObjects(), dx, dy, dz: 0}, false, j => {
+    const moved = new Set(((j && j.result) || {}).moved || []); if (!moved.size) return;
+    sel.clear(); for (const o of frames.concat(areas)) if (moved.has(o.name)) sel.add(o.id); selChanged();
+  });
+}
+function applySnap(d) {
+  const n = (id, min) => { const v = parseFloat(q(d, id).value); return isFinite(v) && v >= min ? v : null; };
+  d.querySelectorAll("[data-s]:not([disabled])").forEach(x => snapOpt[x.dataset.s] = x.checked);
+  snapOpt.lenIn = q(d, "#snIn").value.trim(); snapOpt.lenMm = q(d, "#snMm").value.trim(); snapOpt.deg = q(d, "#snDeg").value.trim();
+  const fine = n("#snFine", 0), step = n("#snNudge", 0), selPx = n("#snSel", 1), snapPx = n("#snTol", 1);
+  if (fine !== null) snapOpt.fineM = fine / perM(); if (step !== null) snapOpt.nudgeM = step / perM(); if (selPx !== null) snapOpt.selTol = Math.round(selPx); if (snapPx !== null) snapOpt.snapTol = Math.round(snapPx);
+  try { localStorage.setItem("cpm-snap", JSON.stringify(snapOpt)); } catch (e) {}
+  $("hint").textContent = "Snap Options applied."; draw();
 }
 function spanAt(p, x, y) {
   // The grid line span under the pointer: from one crossing to the next.
@@ -28667,6 +28777,7 @@ function modelerStart() {
     else if (ctrl && k.toLowerCase() === "n") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("new"); }
     else if (ctrl && k.toLowerCase() === "o") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("open"); }
     else if (k === "Delete" && sel.size) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("delete"); }
+    else if (ctrl && !e.shiftKey && /^Arrow(Left|Right|Up|Down)$/.test(k) && sel.size && panes[active] && panes[active].mode === "plan") { e.preventDefault(); e.stopImmediatePropagation(); nudge(k); }
   }, true);
   hmDefs().then(() => { if (hm.state && hm.state.choose_program) hmChooseProgram(); });
   setInterval(hmPendingOpen, 1000);
