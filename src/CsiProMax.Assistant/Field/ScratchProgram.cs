@@ -389,6 +389,98 @@ public static class ScratchDialogs
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr window, System.Text.StringBuilder text, int most);
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message, IntPtr w, System.Text.StringBuilder l, uint flags, uint timeout, out IntPtr result);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr window, uint message, IntPtr w, IntPtr l);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW")] private static extern IntPtr SendMessageTimeoutLength(IntPtr window, uint message, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect rect);
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
+
+    /// <summary>Every titled top-level window of one process, shown or hidden (the Engine's program runs hidden).</summary>
+    private static List<(IntPtr Window, string Title, bool Visible)> AllOf(int processId)
+    {
+        var found = new List<(IntPtr, string, bool)>();
+        if (processId == 0 || !OperatingSystem.IsWindows()) return found;
+        EnumWindows((window, _) =>
+        {
+            GetWindowThreadProcessId(window, out var owner);
+            if (owner != (uint)processId) return true;
+            var text = new System.Text.StringBuilder(300);
+            if (GetWindowTextW(window, text, text.Capacity) > 0) found.Add((window, text.ToString(), IsWindowVisible(window)));
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    /// <summary>
+    /// True for the program's own run window: ETABS 23.2's "Analyzing ( 95%): Case ( 51%) MODAL" (picture "Run Analysis 1
+    /// Analyzing window"), and its "Analysis Complete" / "Analysis Incomplete" after; SAP2000's and SAFE's alike. Never
+    /// the "Analysis Messages" box, which the run answers itself.
+    /// </summary>
+    public static bool IsRunWindow(string title)
+    {
+        var t = title.Trim();
+        return !IsAnalysisMessages(t) && (t.StartsWith("Analyzing", StringComparison.OrdinalIgnoreCase) || t.StartsWith("Analysis Monitor", StringComparison.OrdinalIgnoreCase)
+            || t.StartsWith("Analysis Complete", StringComparison.OrdinalIgnoreCase) || t.StartsWith("Analysis Incomplete", StringComparison.OrdinalIgnoreCase)
+            || t.StartsWith("Designing", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// What the program's run window shows: its title and the lines of its log box (the longest text in it, read to its
+    /// end, at most 4 MB). Read whether the window is shown or not. Null when the program has no run window open.
+    /// </summary>
+    public static (string Title, List<string> Lines)? RunWindow(int processId)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        foreach (var (window, title, _) in AllOf(processId))
+        {
+            if (!IsRunWindow(title)) continue;
+            var longest = "";
+            EnumChildWindows(window, (child, _) =>
+            {
+                var text = FullText(child);
+                if (text.Length > longest.Length) longest = text;
+                return true;
+            }, IntPtr.Zero);
+            return (title.Trim(), LogLines(longest));
+        }
+        return null;
+    }
+
+    /// <summary>The lines of a run window's log box, blank lines left out.</summary>
+    public static List<string> LogLines(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Select(l => l.TrimEnd()).Where(l => l.Trim().Length > 0).ToList();
+
+    /// <summary>A control's whole text (WM_GETTEXTLENGTH, then WM_GETTEXT of that size), "" when it does not answer within 2 s.</summary>
+    private static string FullText(IntPtr child)
+    {
+        if (SendMessageTimeoutLength(child, 0x000E /* WM_GETTEXTLENGTH */, IntPtr.Zero, IntPtr.Zero, 2 /* SMTO_ABORTIFHUNG */, 2000, out var length) == IntPtr.Zero) return "";
+        var n = (int)Math.Min(4_000_000, Math.Max(0, length.ToInt64()));
+        if (n == 0) return "";
+        var text = new System.Text.StringBuilder(n + 1);
+        return SendMessageTimeoutW(child, 0x000D /* WM_GETTEXT */, new IntPtr(n + 1), text, 2, 2000, out _) == IntPtr.Zero ? "" : text.ToString();
+    }
+
+    /// <summary>
+    /// Puts the program's main window (the largest top-level window of the process with no owner) and its run window on
+    /// the screen and in front, by Windows itself: never through the program's API, which does not answer while the
+    /// program is busy in its analysis (Ahmed 2026-11-28: Show program window did nothing during a run). True when shown.
+    /// </summary>
+    public static bool Bring(int processId)
+    {
+        if (processId == 0 || !OperatingSystem.IsWindows()) return false;
+        IntPtr main = IntPtr.Zero; long most = -1;
+        var all = AllOf(processId);
+        foreach (var (window, _, _) in all)
+            if (GetWindow(window, 4 /* GW_OWNER */) == IntPtr.Zero && GetWindowRect(window, out var r) && (long)(r.Right - r.Left) * (r.Bottom - r.Top) is var area && area > most) { most = area; main = window; }
+        if (main == IntPtr.Zero) return false;
+        if (!IsWindowVisible(main)) ShowWindow(main, 5 /* SW_SHOW */);
+        ShowWindow(main, 9 /* SW_RESTORE */);
+        foreach (var (window, title, visible) in all)
+            if (window != main && !visible && IsRunWindow(title)) ShowWindow(window, 5 /* SW_SHOW */);
+        SetForegroundWindow(main);
+        return IsWindowVisible(main);
+    }
 }
 
 /// <summary>
@@ -1343,7 +1435,7 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public bool Hide()
     {
-        if (_app is null || _closed || _left) return false;
+        if (_app is null || _closed || _left || _shownByUser) return false;
         try
         {
             Ask(TimeSpan.FromSeconds(30), "hide the window", _ => { _app.Hide(); return null; }, $"the {_program.Name} window did not hide within 30 seconds");
@@ -1376,13 +1468,23 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public bool Show()
     {
-        if (_app is null || _closed || _left) return false;
-        try
-        {
-            Ask(TimeSpan.FromSeconds(30), "show the window", _ => { _app.Unhide(); return null; }, $"the {_program.Name} window did not come back within 30 seconds");
-            return true;
-        }
+        // Through Windows, not the API: the API is busy in the analysis and does not answer, and the 30 s wait on it used
+        // to give the whole window up as not answering (0.4.75, Ahmed 2026-11-28: nothing showed, and the run failed).
+        if (_closed || ProcessId == 0) return false;
+        _shownByUser = true;
+        try { return ScratchDialogs.Bring(ProcessId); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
+
+    /// <summary>Show program window was pressed: the window stays on the screen for the rest of the run.</summary>
+    private volatile bool _shownByUser;
+
+    /// <summary>What the program's own run window shows now (its title and log lines), null when it has none open.</summary>
+    public (string Title, List<string> Lines)? RunWindow()
+    {
+        if (_closed || ProcessId == 0) return null;
+        try { return ScratchDialogs.RunWindow(ProcessId); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
     }
 
     /// <summary>The boxes of the program the run answered itself so far, in order (the Run Monitor shows them as they come).</summary>

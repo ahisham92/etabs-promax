@@ -167,5 +167,26 @@ static class RunMonitorTests
             }
             finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
         });
+        yield return ("run window: ETABS's own Analyzing window is told apart from its boxes, and its log box is read line by line (Ahmed 2026-11-28)", () =>
+        {
+            Check(CsiProMax.Assistant.ScratchDialogs.IsRunWindow("Analyzing ( 95%):  Case ( 51%) MODAL"), "ETABS's run window");
+            Check(CsiProMax.Assistant.ScratchDialogs.IsRunWindow("Analysis Complete"), "the window after the run");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsRunWindow("Analysis Messages"), "the messages box is not the run window");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsRunWindow("ETABS Ultimate 23.2.0 - cpm-field-test-8362c3"), "the main window is not the run window");
+            var lines = CsiProMax.Assistant.ScratchDialogs.LogLines("  8212  1.22E-14\r\n\r\n     CASE: MODAL\r\n  8213  -9.68E-14\n");
+            Check(lines.Count == 3 && lines[1].Trim() == "CASE: MODAL", "log lines: " + string.Join("|", lines));
+        });
+        yield return ("run window: what the program's run window shows is in the monitor, with the case it is on and the engineer's own file", () =>
+        {
+            var mon = new RunMonitor(CsiProgram.Etabs) { SourceFile = @"C:\m\FIXED 05.cpme", ModelFile = @"C:\m\run\cpm-field-test-1.EDB" };
+            mon.Screen("Analyzing ( 40%): Case ( 10%) MODAL", [" B E G I N   A N A L Y S I S", "     CASE: MODAL"]);
+            mon.Windows("ETABS Ultimate 23.2.0");
+            var j = mon.Json();
+            Check(j["screen_title"]!.GetValue<string>().StartsWith("Analyzing"), "title");
+            Check(j["screen"]!.AsArray().Count == 2, "screen lines");
+            Check(j["source_file"]!.GetValue<string>().EndsWith("FIXED 05.cpme"), "own file");
+            Check(j["windows"]!.GetValue<string>() == "ETABS Ultimate 23.2.0", "windows");
+            Check(mon.Case == "MODAL", "case from the screen: " + mon.Case);
+        });
     }
 }
