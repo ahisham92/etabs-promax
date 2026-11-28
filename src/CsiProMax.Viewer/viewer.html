@@ -103,7 +103,8 @@ main{flex:1;display:flex;min-height:0}
 #legend i{width:11px;height:11px;display:inline-block;border:1px solid rgba(0,0,0,.25)}
 /* the model windows */
 #center{flex:1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}
-#views{flex:1;position:relative;display:grid;gap:3px;padding:3px;min-width:0;min-height:0;background:var(--bg)}
+/* The view windows sit edge to edge, as the program tiles them: their own borders part them, with no grey frame. */
+#views{flex:1;position:relative;display:grid;gap:0;padding:0;min-width:0;min-height:0;background:var(--chrome)}
 #gl{position:absolute;left:0;top:0;width:100%;height:100%;z-index:0;pointer-events:none;display:block}
 .pane{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--vcap-off);z-index:1;position:relative}
 .pane.act{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
@@ -132,6 +133,18 @@ main{flex:1;display:flex;min-height:0}
 .float{position:fixed!important;z-index:50;box-shadow:var(--shadow);border:1px solid var(--line)!important;resize:both;overflow:hidden;min-width:180px;min-height:140px;max-width:none!important}
 #dock.float{border-top:1px solid var(--line)}#dock.float .grip{display:none}
 #dockHint{position:fixed;z-index:49;background:var(--accent);opacity:.25;pointer-events:none;display:none}
+/* A panel in a window of its own (popOut) fills that window. */
+body.popbody{display:flex;flex-direction:column;height:100vh;margin:0;overflow:hidden}
+.popped{position:static!important;flex:1;width:auto!important;height:auto!important;max-width:none!important;min-width:0;min-height:0;border:0!important;box-shadow:none!important;resize:none!important}
+#dock.popped .grip{display:none}
+/* Its window is narrow, but it is no narrow screen: the page's small-screen rules (which hide the Model Explorer and the
+   table list) don't apply to it. */
+.popped{display:flex!important;flex-direction:column}.popped[hidden]{display:none!important}body.popbody #tlist{display:flex!important}
+/* Its window has no title bar: the panel's caption moves the window (app-region, which CSI ProMax's window host turns
+   on), its buttons stay buttons. The side panel's tabs keep their width, so the rest of the row is caption. */
+body.popbody .dock,body.popbody #tabs{-webkit-app-region:drag;app-region:drag}
+body.popbody .dock button,body.popbody #tabs button{-webkit-app-region:no-drag;app-region:no-drag}
+body.popbody #tabs button[data-tab]{flex:none;padding:3px 12px}body.popbody #rightDD{margin-left:auto}
 .dragging,.dragging *{cursor:move!important;user-select:none}
 .ddm{position:fixed;z-index:60;background:var(--menu);border:1px solid var(--line);box-shadow:var(--shadow);padding:3px 0;min-width:150px}
 .ddm div{padding:3px 24px;white-space:nowrap}.ddm div:hover{background:var(--hot)}.ddm div.off{opacity:.45;pointer-events:none}
@@ -143,7 +156,17 @@ html.live #menubar .brand{display:none}
 .ib.ddb::after{content:"";position:absolute;right:4px;top:11px;border:3.5px solid transparent;border-top:4px solid var(--capink);border-bottom:0}
 .ib:disabled svg{opacity:.45}
 #strip{background:var(--cap);width:28px}
-.pane.max{position:absolute;inset:3px;z-index:3}
+.pane.max{position:absolute;inset:0;z-index:3}
+/* A maximised view window hides the others (render does not draw them either), splitters included. */
+#views:has(>.pane.max)>.pane:not(.max),#views:has(>.pane.max)>.vsplit{visibility:hidden}
+/* A floating view window (its caption dragged, or Window Position > Float): over the docked ones inside the views,
+   moved by its caption and sized from its corner. It is drawn last and opaque, so nothing of the others shows through. */
+.pane.floatv{position:absolute;z-index:5;overflow:hidden;resize:both;min-width:200px;min-height:150px;box-shadow:var(--shadow)}
+/* The windows' chrome is not text to select: captions, tabs, toolbars, menus, the tree and the status bar. */
+#menubar,.bar,#strip,.ptitle,.dock,#tabs,#tree,footer,.ddm,.drop,.pane .nav,#legend{user-select:none;-webkit-user-select:none}
+/* The dark theme: the ETABS-style toolbar pictures carry their own black lines and white fills, so they are drawn in
+   dark ink and turned over. Black lines come out light, and the colours keep their hue. */
+@media (prefers-color-scheme: dark){:root:not([data-theme=light]) .ib{color:#1a1a1a}:root:not([data-theme=light]) .ib svg{filter:invert(.9) hue-rotate(180deg)}}
 .pane canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
 .pane .nav{position:absolute;right:6px;top:6px;display:flex;gap:2px;opacity:.85}
 .pane .nav button{width:22px;height:22px;padding:0;font-size:11px;line-height:20px;background:rgba(240,240,240,.9);color:#222;border-color:#8b949a}
@@ -487,7 +510,11 @@ body.chaton #right{width:380px;max-width:42%}
 <script id="pack" type="application/json"></script>
 <script>
 "use strict";
-const $ = id => document.getElementById(id);
+// A panel moved into a window of its own (popOut) takes its elements to that window's document: lookups by id ($) and
+// by selector (qsa) look there too.
+const popDocs = new Set();
+const $ = id => document.getElementById(id) || [...popDocs].map(d => d.getElementById(id)).find(Boolean) || null;
+const qsa = sel => [document, ...popDocs].flatMap(d => [...d.querySelectorAll(sel)]);
 const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const num = v => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
@@ -536,22 +563,34 @@ let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
 const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false, dfam: "", dshow: "", dvalues: true, dnames: true, vt: "", vf: "", vcase: ""};
 const sel = new Set(), selJ = new Set(); let prevSel = {f: [], j: []}; let hover = 0; // selJ: the joints selected, by name
-let bg = "black", bgSaved = false;
-try { const b = localStorage.getItem("cpm-bg"); if (b === "white" || b === "black") { bg = b; bgSaved = true; } } catch (e) {}
+let bg = "white"; // the model windows' background: set from the theme below (bgForTheme)
 const bandsDef = ["#0f1fd1", "#1f6ff2", "#18b4ec", "#19d3b0", "#3bd34a", "#a9e22a", "#f1e51c", "#f7a31a", "#f2601b", "#e01f1f"];
 const palette = ["#3a8ee6","#e0703a","#8a6ad8","#36b06a","#d4a72c","#d4508f","#3fb6c9","#9aa63a","#b8673d","#6b7fe0","#a85fc7","#e08a2d","#4fb39a","#c94f4f"];
 // The window theme (Options > Theme): CSI ProMax keeps one theme for all its windows, light unless the engineer picks
-// dark, and hands it to this page as its colour scheme. The model windows' own background is Black Background, apart.
+// dark, and hands it to this page as its colour scheme.
 const darkTheme = () => document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches;
 function setTheme(dark) {
   if (window.chrome && chrome.webview) { chrome.webview.postMessage({theme: dark ? "dark" : "light"}); return; }
   // Outside CSI ProMax's window (a browser), the page can only be held light; dark follows the browser's own.
   if (dark) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = "light";
+  themeChanged();
 }
+// The model windows follow the theme too: black in the dark theme, white in the light one. Options > Black Background
+// changes it for the theme in use, and that choice is kept for that theme. The one choice kept before themes stays the
+// light theme's.
+const bgKey = () => "cpm-bg-" + (darkTheme() ? "dark" : "light");
+function bgForTheme() {
+  let b = null;
+  try { b = localStorage.getItem(bgKey()) || (darkTheme() ? null : localStorage.getItem("cpm-bg")); } catch (e) {}
+  return b === "white" || b === "black" ? b : darkTheme() ? "black" : "white";
+}
+bg = bgForTheme();
+function themeChanged() { bg = bgForTheme(); colourDirty = true; if (P) buildTree(); syncTools(); draw(); }
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeChanged);
 function theme() {
   // The model windows: black as analysis programs draw them, or white for printing.
   return bg === "black"
-    ? {canvas: [0, 0, 0], column: "#2f8ff7", beam: "#f0cf34", brace: "#ff8a3c", other: "#c79bff", floor: "#8d9aa4", wall: "#d4625c", grid: [0.42, 0.47, 0.52], gridText: "#c9d2d8", bubble: "#000000", level: [0.25, 0.29, 0.33], text: "#d5dde1", pick: "#ff4df0", support: "#35e06f", lit: "#ffffff", pos: [1, 0.84, 0.24, 0.55], neg: [1, 0.33, 0.33, 0.55], posEdge: "#ffd83c", negEdge: "#ff6a6a", ghost: [0.42, 0.46, 0.5], edge: 0.45, joint: "#d5dde1", dark: true}
+    ? {canvas: [0, 0, 0], column: "#2f8ff7", beam: "#f0cf34", brace: "#ff8a3c", other: "#c79bff", floor: "#8d9aa4", wall: "#d4625c", grid: [0.42, 0.47, 0.52], gridText: "#c9d2d8", bubble: "#000000", ground: [0.1, 0.16, 0.25], level: [0.25, 0.29, 0.33], text: "#d5dde1", pick: "#ff4df0", support: "#35e06f", lit: "#ffffff", pos: [1, 0.84, 0.24, 0.55], neg: [1, 0.33, 0.33, 0.55], posEdge: "#ffd83c", negEdge: "#ff6a6a", ghost: [0.42, 0.46, 0.5], edge: 0.45, joint: "#d5dde1", dark: true}
     : {canvas: [1, 1, 1], column: "#4b57a6", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "#737373", wall: "#c4463c", grid: [0.78, 0.78, 0.78], gridText: "#9a9a9a", bubble: "#ffffff", ground: [0.85, 0.925, 1], support: "#7a7a7a", level: [0.8, 0.83, 0.85], text: "#2f3a40", pick: "#e6007a", lit: "#e2620d", pos: [0.16, 0.43, 0.86, 0.38], neg: [0.84, 0.2, 0.2, 0.38], posEdge: "#1c5fd0", negEdge: "#c62828", ghost: [0.7, 0.74, 0.77], edge: 0.55, joint: "#2f3a40", dark: false};
 }
 const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
@@ -840,7 +879,8 @@ function col(fields, ...names) { for (const n of names) { const i = fields.findI
 const objCount = () => frames.length + areas.length;
 const objOf = id => id <= 0 ? null : id <= frames.length ? frames[id - 1] : areas[id - frames.length - 1] || null;
 function load(pack, keep) {
-  const before = keep && P ? panes.map(p => ({mode: p.mode, story: p.story, line: p.line && p.line.label + p.line.dir, cam: {...p.cam, target: p.cam.target.slice()}})) : null;
+  if (keep) saveView();
+  const before = keep && P ? panes.map(p => ({mode: p.mode, story: p.story, line: p.line && p.line.label + p.line.dir, cam: {...p.cam, target: p.cam.target.slice()}, view: p.view})) : null;
   const selNames = keep ? [...sel].map(objOf).filter(Boolean).map(o => o.type + ":" + o.name) : [], selJNames = keep ? [...selJ] : [];
   if (window.cpmLive) pack = engineWith(pack, keep);
   if (!window.cpmLive && pack && pack.rawPack) pack = pack.rawPack;
@@ -850,7 +890,7 @@ function load(pack, keep) {
   // In the Modeler the model is made for one program, chosen at New Model (Ahmed 2026-11-26): the page offers what it has.
   program = window.cpmLive && /^(etabs|sap2000|safe)$/.test(man.target || "") ? man.target : /safe/i.test(man.program || "") ? "safe" : /sap/i.test(man.program || "") ? "sap2000" : "etabs";
   document.body.dataset.prog = program;
-  if (!bgSaved) bg = "white"; // ETABS 23, SAP2000 and SAFE open on white
+  bg = bgForTheme(); // white in the light theme, as ETABS 23, SAP2000 and SAFE open; black in the dark one
   points = m.points || [];
   pointIdx = new Map(points.map((p, i) => [String(p[0]), i]));
   pointAt = new Map(points.map(p => [key(p[1], p[2], p[3]), p[0]]));
@@ -1976,7 +2016,7 @@ function glContextLost(e) {
   }, 5000);
 }
 function glContextRestored() {
-  clearTimeout(glLostTimer); glLost = false; prog = {}; bufs = {};
+  clearTimeout(glLostTimer); glLost = false; prog = {}; bufs = {}; geoSets.clear();
   initGL();
   for (const p of panes) { p.pickOk = false; p.pickData = null; }
   geometryDirty = pointsDirty = colourDirty = true;
@@ -2008,8 +2048,9 @@ function shapeOf(sec) {
     let pts, smooth = false, kind = "rect";
     if (/circ|pipe|round/.test(name)) { pts = []; for (let i = 0; i < 20; i++) { const t = i * Math.PI * 2 / 20; pts.push([Math.cos(t) * h, Math.sin(t) * h]); } smooth = true; kind = "round"; }
     else if (/channel|^c\b|^mc|^c\d/.test(name)) { pts = [[-h, -w], [-h, w], [-h + tf, w], [-h + tf, -w + tw], [h - tf, -w + tw], [h - tf, w], [h, w], [h, -w]]; kind = "c"; }
-    else if (/tee|^wt|^t\b/.test(name)) { pts = [[h, -w], [h, w], [h - tf, w], [h - tf, tw / 2], [-h, tw / 2], [-h, -tw / 2], [h - tf, -tw / 2], [h - tf, -w]]; kind = "t"; }
-    else if (/angle|^l\b|^l\d/.test(name)) { const t = Math.max(tf, tw); pts = [[-h, -w], [h, -w], [h, -w + t], [-h + t, -w + t], [-h + t, w], [-h, w]]; kind = "l"; }
+    // Whole words: "tee" is in "Steel I/Wide Flange" and "angle" in "Rectangle" (every steel I section was drawn as a tee).
+    else if (/\btee\b|^wt|^t\b/.test(name)) { pts = [[h, -w], [h, w], [h - tf, w], [h - tf, tw / 2], [-h, tw / 2], [-h, -tw / 2], [h - tf, -tw / 2], [h - tf, -w]]; kind = "t"; }
+    else if (/\bangle\b|\bl\b|^l\d/.test(name)) { const t = Math.max(tf, tw); pts = [[-h, -w], [h, -w], [h, -w + t], [-h + t, -w + t], [-h + t, w], [-h, w]]; kind = "l"; }
     else if (/\bi\b|wide flange|i\/|^w\d|^w\b|^hp|^s\d|^ipe|^he[abm]|^ub|^uc|i-shape|ishape|i section|^i\d/.test(name)) { pts = [[-h, -w], [-h, w], [-h + tf, w], [-h + tf, tw / 2], [h - tf, tw / 2], [h - tf, w], [h, w], [h, -w], [h - tf, -w], [h - tf, -tw / 2], [-h + tf, -tw / 2], [-h + tf, -w]]; kind = "i"; }
     else pts = [[h, w], [h, -w], [-h, -w], [-h, w]];
     if (frames.length > 9000 && kind !== "rect") { pts = [[h, w], [h, -w], [-h, -w], [-h, w]]; smooth = false; }
@@ -2211,10 +2252,13 @@ function uploadObjects(p) {
   gl.bindTexture(gl.TEXTURE_2D, objTex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEXW, objRows, gl.RGBA, gl.UNSIGNED_BYTE, objData);
 }
 function visOf(p) {
-  // Which objects a window shows, worked out now if it was not yet drawn since its view changed.
+  // Which objects a window shows (by its own display options), worked out now if it was not yet drawn since its view
+  // changed.
   const N = objCount();
-  if (!p.vis || p.vis.length !== N + 1 || p.visSig !== visSig(p)) { p.vis = new Uint8Array(N + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
-  return p.vis;
+  return inView(p, () => {
+    if (!p.vis || p.vis.length !== N + 1 || p.visSig !== visSig(p)) { p.vis = new Uint8Array(N + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
+    return p.vis;
+  });
 }
 const visSig = p => [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", opt.fill, [...hidden.kind].join(), [...hidden.section].join(), hidden.objs.size, hiddenVersion].join("|");
 let hiddenVersion = 0;
@@ -2285,22 +2329,38 @@ function auxLines(p) {
     else { const b = sp.kind === "roller" ? -13 : -10; sym(sp.p, [[0, 0], [-6, -10], [-6, -10], [6, -10], [6, -10], [0, 0], [-9, b], [9, b]]); }
   }
   const dash = gridsGuessed ? 7 : 0;
+  // A typical bay: the shorter of the middle spacings of the two grid directions (a third of the model without them).
+  const mid = list => { const d = list.slice(1).map((g, i) => g.at - list[i].at).filter(v => v > 1e-6).sort((a, b) => a - b); return d.length ? d[d.length >> 1] : size / 3; };
+  const bay = Math.min(mid(grids.X), mid(grids.Y));
+  // The background grid, as the program's 3-D view draws on the ground: a fine light-blue mesh a quarter of a bay apart,
+  // on the grid lines and reaching far past the model. Here it is in every window, in the window's own plane: the
+  // ground in 3-D, the story in plan, the grid line's plane in elevation. Where a quarter bay would be too fine or too
+  // coarse for the model (grid lines in tight groups, a long building, one bay), the mesh has a round step instead,
+  // about a twentieth of the model, from the origin.
+  const ext = Math.max(bay * 3, size * 2.5), first = (list, k) => list.length ? list[0].at : lo[k], last = (list, k) => list.length ? list[list.length - 1].at : hi[k];
+  const byBay = bay / 4 >= size / 60 && bay / 4 <= size / 8;
+  const round = v => { const e = Math.pow(10, Math.floor(Math.log10(v))), m = v / e; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * e; };
+  const mesh = (a0, a1, b0, b1, oa, ob, put) => {
+    let cell = byBay ? bay / 4 : round(size / 20); while ((a1 - a0 + b1 - b0 + 4 * ext) / cell > 1200) cell *= 2;
+    if (!byBay) oa = ob = 0;
+    const A0 = oa + Math.floor((a0 - ext - oa) / cell) * cell, A1 = a1 + ext, B0 = ob + Math.floor((b0 - ext - ob) / cell) * cell, B1 = b1 + ext;
+    for (let a = A0; a <= A1 + 1e-9; a += cell) seg(D, put(a, B0), put(a, B1), 0);
+    for (let b = B0; b <= B1 + 1e-9; b += cell) seg(D, put(A0, b), put(A1, b), 0);
+  };
   if (p.mode === "elev") {
     const along = p.line && p.line.dir === "X" ? grids.Y : grids.X, ax = p.line && p.line.dir === "X" ? 1 : 0, at = p.line ? p.line.at : 0;
     const q = (c, z) => { const v = [at, at, z]; v[ax] = c; return v; }, left = ax ? s.y0 : s.x0, right = ax ? s.y1 : s.x1;
+    mesh(first(along, ax), last(along, ax), s.z0, s.z1, first(along, ax), s.z0, q);
     for (const st of stories) { seg(L, q(left, st.elevation), q(right, st.elevation), 0); lev.push({at: q(left, st.elevation), name: st.name, z: st.elevation}); }
     for (const g of along) { seg(G, q(g.at, s.z0 - s.pad * 0.3), q(g.at, s.z1 + s.pad), dash); bub.push({at: q(g.at, s.z1 + s.pad), from: q(g.at, s.z0), label: g.label}); }
-  } else if (p.mode === "3d" && grids.X.length && grids.Y.length) {
-    // As the program's 3-D view: the grid lies on the ground as a fine light-blue mesh reaching far past the model, its
-    // lines run out to bubbles lying flat on the ground at the near ends.
-    const sp = list => { const d = list.slice(1).map((g, i) => g.at - list[i].at).filter(v => v > 1e-6).sort((a, b) => a - b); return d.length ? d[d.length >> 1] : size / 3; };
-    const bay = Math.min(sp(grids.X), sp(grids.Y)), cell = bay / 4, ext = Math.max(bay * 3, size), z = s.z0, out = bay * 1.1;
+  } else {
+    const z = p.mode === "plan" ? (elevationOf(p.story) ?? lo[2]) : s.z0;
+    mesh(first(grids.X, 0), last(grids.X, 0), first(grids.Y, 1), last(grids.Y, 1), first(grids.X, 0), first(grids.Y, 1), (x, y) => [x, y, z]);
+  }
+  if (p.mode === "3d" && grids.X.length && grids.Y.length) {
+    // As the program's 3-D view: the grid lines run out to bubbles lying flat on the ground at the near ends.
+    const z = s.z0, out = bay * 1.1;
     const X0 = grids.X[0].at, X1 = grids.X[grids.X.length - 1].at, Y0 = grids.Y[0].at, Y1 = grids.Y[grids.Y.length - 1].at;
-    const gx0 = Math.floor((X0 - ext) / cell) * cell, gx1 = X1 + ext, gy0 = Math.floor((Y0 - ext) / cell) * cell, gy1 = Y1 + ext;
-    if ((gx1 - gx0) / cell + (gy1 - gy0) / cell < 1200) {
-      for (let x = gx0; x <= gx1 + 1e-9; x += cell) seg(D, [x, gy0, z], [x, gy1, z], 0);
-      for (let y = gy0; y <= gy1 + 1e-9; y += cell) seg(D, [gx0, y, z], [gx1, y, z], 0);
-    }
     for (const g of grids.X) { seg(G, [g.at, Y0 - out, z], [g.at, Y1 + bay * 0.25, z], dash); bub.push({at: [g.at, Y0 - out, z], from: [g.at, Y1, z], label: g.label, dir: "X", flat: bay * 0.09}); }
     for (const g of grids.Y) { seg(G, [X0 - out, g.at, z], [X1 + bay * 0.25, g.at, z], dash); bub.push({at: [X0 - out, g.at, z], from: [X1, g.at, z], label: g.label, dir: "Y", flat: bay * 0.09}); }
   } else if (p.mode === "plan" || p.mode === "3d") {
@@ -2386,11 +2446,51 @@ function lerpCam(a, b, t) {
   let dy = b.yaw - a.yaw; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
   return {target: a.target.map((v, i) => v + (b.target[i] - v) * t), yaw: a.yaw + dy * t, pitch: a.pitch + (b.pitch - a.pitch) * t, hh: Math.exp(Math.log(a.hh) + (Math.log(b.hh) - Math.log(a.hh)) * t), persp: t < 0.5 ? a.persp : b.persp};
 }
+// ---- each window's own display options ----
+// Set Display Options applies to the active window, or to every window with Apply to All Windows ticked, as in ETABS.
+// The page reads opt and hidden.kind everywhere, so while a window is drawn or picked from they hold that window's
+// own, and between draws the active window's. viewHolder is the window whose options they hold now: what is changed
+// meanwhile is kept with it.
+const viewKeys = () => Object.keys(opt).filter(k => k !== "explorer" && k !== "side" && k !== "allWin");
+let viewHolder = null;
+function viewNow() { return {opt: Object.fromEntries(viewKeys().map(k => [k, opt[k]])), kind: [...hidden.kind]}; }
+function saveView() { if (viewHolder && panes.includes(viewHolder)) viewHolder.view = viewNow(); }
+function useView(p) {
+  if (!p || viewHolder === p) return;
+  saveView();
+  if (!p.view) p.view = viewNow();
+  for (const k of viewKeys()) if (k in p.view.opt) opt[k] = p.view.opt[k];
+  hidden.kind.clear(); for (const k of p.view.kind) hidden.kind.add(k);
+  viewHolder = p;
+}
+// The active window's options, before a form or a menu reads or changes them.
+function activeView() { useView(panes[active]); }
+// Runs f with one window's options, then puts back the ones held before (safe while another window is being drawn).
+function inView(p, f) { const was = viewHolder; useView(p); try { return f(); } finally { useView(was && panes.includes(was) ? was : panes[active]); } }
+// The active window's options in every window (Apply to All Windows).
+function viewToAll() { saveView(); const v = viewNow(); for (const p of panes) p.view = {opt: {...v.opt}, kind: [...v.kind]}; }
+// The 3D geometry is built from five display options (extrusion of frames and of shells, sections, shrink, the
+// analysis mesh): each combination the windows use has its own buffers, made when a window first needs them and made
+// again after the model changes. A combination no window draws with any more is let go after the frame.
+const geoSets = new Map(); let geoGen = 0;
+function useGeometry(used) {
+  if (!gl || glLost) return;
+  const key = [opt.extrude, opt.extrudeA, opt.sections, opt.shrink, meshWanted()].join();
+  let set = geoSets.get(key);
+  if (!set) geoSets.set(key, set = {bufs: {}, gen: -1});
+  bufs = set.bufs; if (used) used.add(key);
+  if (set.gen !== geoGen) { buildGeometry(); set.gen = geoGen; }
+}
+function dropGeometry(used) {
+  for (const [key, set] of geoSets) if (!used.has(key)) { for (const b of Object.values(set.bufs)) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); } geoSets.delete(key); }
+}
 function render(now) {
   const views = $("views"), vr = views.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, T = theme();
+  const used = new Set();
   if (gl && !glLost) {
-    if (meshDrawn !== meshWanted()) geometryDirty = true;
-    if (geometryDirty) buildGeometry();
+    if (geometryDirty) { geoGen++; geometryDirty = false; }
+    // The active window's geometry first, so that the colours and points below are made after it.
+    activeView(); useGeometry(used);
     if (colourDirty) buildColours();
     if (pointsDirty) uploadPoints();
     const W = Math.round(vr.width * dpr), H = Math.round(vr.height * dpr);
@@ -2399,7 +2499,13 @@ function render(now) {
     gl.clearColor(...cssColour(getComputedStyle(views).backgroundColor), 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   }
   legendSeen = new Map();
-  panes.forEach((p, n) => drawPane(p, n, vr, dpr, T, now));
+  // All windows share one 3D canvas behind them. A maximised window is drawn alone (the others are hidden); otherwise
+  // the docked windows are drawn first and the floating ones last, over them.
+  const maxed = panes.find(p => p.el.classList.contains("max"));
+  const order = panes.map((p, n) => [p, n]).filter(([p]) => !maxed || p === maxed).sort((a, b) => !!a[0].fl - !!b[0].fl);
+  for (const [p, n] of order) { useView(p); useGeometry(used); drawPane(p, n, vr, dpr, T, now); }
+  activeView(); useGeometry(used);
+  if (gl && !glLost) dropGeometry(used);
   drawLegend();
 }
 function cssColour(s) { const m = s.match(/[\d.]+/g); return m ? [m[0] / 255, m[1] / 255, m[2] / 255] : [0.5, 0.5, 0.5]; }
@@ -2459,8 +2565,8 @@ function drawScene(p, M, R, dpr, mode) {
     gl.enable(gl.DEPTH_TEST);
     return;
   }
-  // The ground grid first: everything stands on it.
-  if (p.aux && opt.grid && opt.horizon && p.mode === "3d" && T.ground) { gl.depthMask(false); thick(p.aux.ground, 1, 1, T.ground, 1, 0); gl.depthMask(true); }
+  // The background grid first: everything stands on it. Options > Background Grid, or Horizon in Set Display Options.
+  if (p.aux && opt.horizon) { gl.depthMask(false); thick(p.aux.ground, 1, 1, T.ground, 1, 0); gl.depthMask(true); }
   const savedK = curDefK;
   // The shape before loading, faint behind the deformed one.
   if (curDefK && res.ghost) { curDefK = 0; thick(bufs.lines, 1, 1, T.ghost, 1, 0); curDefK = savedK; }
@@ -2499,6 +2605,7 @@ function drawPane(p, n, vr, dpr, T, now) {
   if (n === active) { const v = $("vname"), t = paneTitle(p).split("  ·  ")[0]; if (v.textContent !== t) v.textContent = t; }
   if (cv.width !== R.W || cv.height !== R.H) { cv.width = R.W; cv.height = R.H; }
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, R.w, R.h);
+  if (p.fl) { g.fillStyle = css(T.canvas); g.fillRect(0, 0, R.w, R.h); } // a floating window is opaque whatever it shows
   if (R.w < 4 || R.h < 4) return;
   const M = matrices(p, R.w, R.h); p.M = M; p.R = R;
   if (!P) { if (gl) { scissor(R); gl.clearColor(...T.canvas, 1); gl.clear(gl.COLOR_BUFFER_BIT); } else { g.fillStyle = css(T.canvas); g.fillRect(0, 0, R.w, R.h); } return; }
@@ -2517,6 +2624,9 @@ function drawPane(p, n, vr, dpr, T, now) {
     }
     scissor(R); gl.clearColor(...T.canvas, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     drawScene(p, M, R, dpr, 0);
+    // A floating window is drawn last; its picture is copied onto its own canvas, which makes the window opaque, so the
+    // captions and labels of the windows under it don't show through.
+    if (p.fl) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(glc, R.X, glc.height - R.Y - R.H, R.W, R.H, 0, 0, R.W, R.H); g.restore(); }
   } else {
     if (p.auxSig !== auxSig) { p.auxInfo = auxLines(p); p.auxSig = auxSig; }
     if (!p.vis || p.visSig !== visSig(p)) { p.vis = new Uint8Array(objCount() + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
@@ -2884,13 +2994,14 @@ function drawPlanColumns(p, g, to, T) {
   }
 }
 function ddMenu(btn, items) {
-  // The small menu under a docked window's drop-down button.
-  document.querySelectorAll(".ddm").forEach(m => m.remove());
-  const m = document.createElement("div"), r = btn.getBoundingClientRect(); m.className = "ddm";
+  // The small menu under a docked window's drop-down button, in the window the button is in (a panel may have its own).
+  const doc = btn.ownerDocument, win = doc.defaultView;
+  qsa(".ddm").forEach(m => m.remove());
+  const m = doc.createElement("div"), r = btn.getBoundingClientRect(); m.className = "ddm";
   m.style.top = r.bottom + "px"; m.style.left = Math.max(0, r.right - 150) + "px";
-  for (const [t, f, off] of items) { const d = document.createElement("div"); d.textContent = t; if (off) d.className = "off"; d.onclick = () => { m.remove(); f(); }; m.appendChild(d); }
-  document.body.appendChild(m);
-  setTimeout(() => addEventListener("pointerdown", function off(e) { if (!m.contains(e.target)) { m.remove(); removeEventListener("pointerdown", off, true); } }, true));
+  for (const [t, f, off] of items) { const d = doc.createElement("div"); d.textContent = t; if (off) d.className = "off"; d.onclick = () => { m.remove(); f(); }; m.appendChild(d); }
+  doc.body.appendChild(m);
+  setTimeout(() => win.addEventListener("pointerdown", function off(e) { if (!m.contains(e.target)) { m.remove(); win.removeEventListener("pointerdown", off, true); } }, true));
 }
 function paneTitle(p) {
   const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? (periodOf(res.case) ? `Mode Shape (${res.case} · ${periodOf(res.case)})` : `Deformed Shape (${res.case})`) : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "shell" ? `Shell ${res.comp} (${res.case})` : res.mode === "values" && dview ? dview.title : res.mode === "loads" ? loadTitle() : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
@@ -2932,13 +3043,12 @@ function newPane(mode, n) {
 function buildPanes(before) {
   const modes = layouts[layout] || layouts[1], host = $("views");
   host.querySelectorAll(".pane, .vsplit").forEach(e => e.remove());
-  for (const p of panes) if (gl && p.aux) for (const b of [p.aux.grid, p.aux.level, p.aux.sup, p.aux.ground]) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); }
-  viewTemplate();
+  for (const p of panes) { paneSizes.unobserve(p.el); if (gl && p.aux) for (const b of [p.aux.grid, p.aux.level, p.aux.sup, p.aux.ground]) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); } }
   panes = [];
   modes.forEach((mode, n) => {
     const p = newPane(program === "safe" && n === 0 ? "plan" : mode, n), was = before ? before[n] : null;
     if (was) {
-      p.mode = was.mode; p.cam = was.cam;
+      p.mode = was.mode; p.cam = was.cam; if (was.view) p.view = was.view;
       if (stories.some(s => s.name === was.story)) p.story = was.story;
       p.line = allLines().find(g => g.label + g.dir === was.line) || p.line;
     }
@@ -2947,24 +3057,104 @@ function buildPanes(before) {
     host.appendChild(el);
     p.el = el; p.title = el.firstChild; p.hold = el.querySelector(".hold"); p.cv = el.querySelector("canvas"); p.g = p.cv.getContext("2d"); p.nav = el.querySelector(".nav");
     el.querySelector(".ptitle .x").onclick = e => { e.stopPropagation(); closePane(p); };
-    el.querySelector(".ptitle .dd").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, [[el.classList.contains("max") ? "Restore" : "Maximize", () => { el.classList.toggle("max"); placeViewSplits(); draw(); }], ["Close", () => closePane(p)]]); };
-    p.title.ondblclick = () => { el.classList.toggle("max"); placeViewSplits(); draw(); };
+    const maximise = () => { if (p.fl) floatPane(p, false); el.classList.toggle("max"); placeViewSplits(); draw(); };
+    el.querySelector(".ptitle .dd").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, [[el.classList.contains("max") ? "Restore" : "Maximize", maximise], [p.fl ? "Dock" : "Float", () => floatPane(p, !p.fl)], ["Close", () => closePane(p)]]); };
+    // A double-click on the caption docks a floating window, and maximises or restores a docked one.
+    p.title.ondblclick = e => { if (e.target.closest(".x, .dd")) return; if (p.fl) floatPane(p, false); else maximise(); };
+    wirePaneDrag(p); paneSizes.observe(el);
     wire(p); panes.push(p);
     if (!was) requestAnimationFrame(() => { fit(p, false); draw(); });
   });
-  addViewSplits();
+  // The columns for the windows there are now (made before, the windows closed or replaced were still counted, and a
+  // window left alone filled only its old column).
+  viewTemplate(); addViewSplits();
   if (active >= panes.length) active = 0;
   syncNav();
 }
 // ---- view window splitters: between the view windows, dragged to share the room between them as wanted ----
-// The share of each column (and, with four windows, each row), per layout, kept between visits.
+// The share of each column (and, with four windows, each row), per number of docked windows, kept between visits.
 let viewFr = {};
 try { viewFr = JSON.parse(localStorage.getItem("cpm-view-fr") || "{}") || {}; } catch (e) { viewFr = {}; }
+// The docked view windows: a floating one has left the grid, and the docked ones share its room.
+const dockedPanes = () => panes.filter(p => !p.fl);
 function viewShares() {
-  const cols = layout === 1 ? 1 : layout === 4 ? 2 : layout, rows = layout === 4 ? 2 : 1, kept = viewFr[layout] || {};
-  const fit = (list, n) => Array.isArray(list) && list.length === n && list.every(x => x > 0) ? list : Array(n).fill(1);
-  return viewFr[layout] = {c: fit(kept.c, cols), r: fit(kept.r, rows)};
+  const n = panes.length ? Math.max(1, dockedPanes().length) : layout;
+  const cols = n === 4 ? 2 : n, rows = n === 4 ? 2 : 1, kept = viewFr[n] || {};
+  const fit = (list, k) => Array.isArray(list) && list.length === k && list.every(x => x > 0) ? list : Array(k).fill(1);
+  return viewFr[n] = {c: fit(kept.c, cols), r: fit(kept.r, rows)};
 }
+// ---- floating view windows: a view window floats over the others inside the views (its caption dragged off, or
+// Window Position > Float) and docks back into the grid (Window Position > Dock, a double-click on its caption, or
+// dropped near the views' edge). The others share its room while it floats.
+function floatPane(p, on) {
+  const vb = $("views").getBoundingClientRect();
+  if (on && !p.fl) {
+    const r = p.el.getBoundingClientRect(), w = Math.min(r.width, vb.width * 0.6), h = Math.min(r.height, vb.height * 0.7);
+    p.el.classList.remove("max");
+    p.fl = {w, h, x: (vb.width - w) / 2, y: (vb.height - h) / 2};
+  } else if (!on && p.fl) {
+    p.fl = null;
+    Object.assign(p.el.style, {left: "", top: "", width: "", height: ""});
+  }
+  p.el.classList.toggle("floatv", !!p.fl);
+  if (p.fl) placeFloat(p);
+  $("views").querySelectorAll(".vsplit").forEach(e => e.remove());
+  viewTemplate(); addViewSplits(); draw();
+}
+// A floating window stays wholly inside the views: the 3D canvas covers only them, so no part of it is left undrawn.
+function placeFloat(p) {
+  const vb = $("views").getBoundingClientRect(), f = p.fl;
+  f.w = Math.max(200, Math.min(f.w, vb.width)); f.h = Math.max(150, Math.min(f.h, vb.height));
+  f.x = Math.max(0, Math.min(f.x, vb.width - f.w)); f.y = Math.max(0, Math.min(f.y, vb.height - f.h));
+  Object.assign(p.el.style, {left: f.x + "px", top: f.y + "px", width: f.w + "px", height: f.h + "px"});
+}
+// Dropped within 30 px of the views' edge (or beyond it), a floating view window docks back.
+function nearViewsEdge(x, y) { const b = $("views").getBoundingClientRect(); return x < b.left + 30 || x > b.right - 30 || y < b.top + 30 || y > b.bottom - 30; }
+function showViewsHint(on) {
+  const h = $("dockHint"), b = $("views").getBoundingClientRect();
+  if (!on) { h.style.display = "none"; return; }
+  Object.assign(h.style, {display: "block", left: b.left + "px", top: b.top + "px", width: b.width + "px", height: b.height + "px"});
+}
+// A caption dragged more than a few pixels floats its window under the pointer; a click stays a click.
+function wirePaneDrag(p) {
+  p.title.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest(".x, .dd")) return;
+    const x0 = e.clientX, y0 = e.clientY;
+    let moving = false, offX = 0, offY = 0;
+    const move = m => {
+      if (!moving) {
+        if (Math.hypot(m.clientX - x0, m.clientY - y0) < 6) return;
+        moving = true; document.body.classList.add("dragging");
+        const r = p.el.getBoundingClientRect();
+        if (!p.fl) floatPane(p, true);
+        offX = Math.max(10, Math.min(x0 - r.left, p.fl.w - 40)); offY = Math.max(5, Math.min(y0 - r.top, 20));
+      }
+      const vb = $("views").getBoundingClientRect();
+      p.fl.x = m.clientX - vb.left - offX; p.fl.y = m.clientY - vb.top - offY; placeFloat(p);
+      showViewsHint(nearViewsEdge(m.clientX, m.clientY)); draw();
+    };
+    const up = m => {
+      removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+      if (!moving) return;
+      document.body.classList.remove("dragging"); showViewsHint(false);
+      const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
+      addEventListener("click", eat, true); setTimeout(() => removeEventListener("click", eat, true), 0);
+      if (nearViewsEdge(m.clientX, m.clientY)) floatPane(p, false); else draw();
+    };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  });
+}
+// A floating window resized from its corner keeps that size; every window redraws when its size changes.
+const paneSizes = new ResizeObserver(entries => {
+  const vb = $("views").getBoundingClientRect();
+  for (const en of entries) {
+    const p = panes.find(q => q.el === en.target);
+    if (!p || !p.fl || !en.target.offsetWidth) continue;
+    p.fl.w = en.target.offsetWidth; p.fl.h = en.target.offsetHeight;
+    if (p.fl.x + p.fl.w > vb.width || p.fl.y + p.fl.h > vb.height) placeFloat(p); // sized past the views: kept inside
+  }
+  draw();
+});
 function viewTemplate() {
   const s = viewShares(), host = $("views");
   host.style.gridTemplateColumns = s.c.map(f => f + "fr").join(" ");
@@ -2977,10 +3167,11 @@ function addViewSplits() {
     d.onpointerdown = e => {
       e.preventDefault(); d.setPointerCapture(e.pointerId); d.classList.add("on");
       const list = kind === "c" ? s.c : s.r, box = host.getBoundingClientRect(), total = list.reduce((a, b) => a + b, 0);
-      const size = (kind === "c" ? box.width : box.height) - 6 - 3 * (list.length - 1), start = kind === "c" ? box.left + 3 : box.top + 3;
+      const cs = getComputedStyle(host), pad = parseFloat(cs.paddingLeft) || 0, gap = parseFloat(kind === "c" ? cs.columnGap : cs.rowGap) || 0;
+      const size = (kind === "c" ? box.width : box.height) - 2 * pad - gap * (list.length - 1), start = (kind === "c" ? box.left : box.top) + pad;
       const before = list.slice(0, i).reduce((a, b) => a + b, 0), pair = list[i] + list[i + 1];
       d.onpointermove = m => {
-        const at = ((kind === "c" ? m.clientX : m.clientY) - start - 3 * i) / size * total - before;
+        const at = ((kind === "c" ? m.clientX : m.clientY) - start - gap * i) / size * total - before;
         list[i] = Math.max(pair * 0.1, Math.min(pair * 0.9, at)); list[i + 1] = pair - list[i];
         viewTemplate(); placeViewSplits(); draw();
       };
@@ -2996,20 +3187,23 @@ function addViewSplits() {
 // Each splitter sits in the gap after its column (row), read from the windows as they are laid out.
 function placeViewSplits() {
   const host = $("views"), box = host.getBoundingClientRect(), maxed = !!host.querySelector(".pane.max");
-  const cols = layout === 4 ? 2 : layout;
+  const docked = dockedPanes(), cols = docked.length === 4 ? 2 : docked.length, cs = getComputedStyle(host);
+  const colGap = parseFloat(cs.columnGap) || 0, rowGap = parseFloat(cs.rowGap) || 0;
   host.querySelectorAll(".vsplit").forEach(d => {
-    const i = +d.dataset.i, pane = panes[d.classList.contains("c") ? i : i * cols];
+    const i = +d.dataset.i, pane = docked[d.classList.contains("c") ? i : i * cols];
     d.hidden = maxed || !pane || !pane.el;
     if (d.hidden) return;
+    // Centred on the line between the window and the next (in the gap, when there is one).
     const r = pane.el.getBoundingClientRect();
-    if (d.classList.contains("c")) Object.assign(d.style, {left: (r.right - box.left - 1.5) + "px", top: "0", height: "100%"});
-    else Object.assign(d.style, {top: (r.bottom - box.top - 1.5) + "px", left: "0", width: "100%"});
+    if (d.classList.contains("c")) Object.assign(d.style, {left: (r.right - box.left + colGap / 2 - 3) + "px", top: "0", height: "100%"});
+    else Object.assign(d.style, {top: (r.bottom - box.top + rowGap / 2 - 3) + "px", left: "0", width: "100%"});
   });
 }
 new ResizeObserver(() => placeViewSplits()).observe(document.getElementById("views"));
 function closePane(p) {
   if (panes.length < 2) return;
-  const keep = panes.filter(q => q !== p).map(q => ({mode: q.mode, story: q.story, line: q.line && q.line.label + q.line.dir, cam: q.cam}));
+  saveView();
+  const keep = panes.filter(q => q !== p).map(q => ({mode: q.mode, story: q.story, line: q.line && q.line.label + q.line.dir, cam: q.cam, view: q.view}));
   layout = keep.length; layouts[layout] = keep.map(k => k.mode); active = 0; buildPanes(keep); syncTools(); draw();
   layouts[2] = ["plan", "3d"]; layouts[3] = ["plan", "3d", "elev"]; layouts[1] = ["3d"];
 }
@@ -3018,7 +3212,7 @@ new ResizeObserver(() => draw()).observe($("views"));
 // ---- the camera ----
 function visiblePoints(p) {
   const out = [];
-  if (P) for (const o of frames.concat(areas)) { if (p.vis ? !p.vis[o.id] : !shown(o, p)) continue; if (o.type === "f") out.push(o.a, o.b); else out.push(...o.pts); }
+  if (P) inView(p, () => { for (const o of frames.concat(areas)) { if (p.vis ? !p.vis[o.id] : !shown(o, p)) continue; if (o.type === "f") out.push(o.a, o.b); else out.push(...o.pts); } });
   return out;
 }
 function fitCam(p, cam) {
@@ -3057,6 +3251,11 @@ function setView3d(p, name) { if (p.mode !== "3d") { p.mode = "3d"; p.sig = ""; 
 function pickRender(p) {
   if (!gl || glLost || !p.M || !p.R) return null;
   if (p.pickOk && p.pickData) return p.pickData;
+  // Picked with the window's own display options and geometry, as it is drawn.
+  useView(p); useGeometry();
+  try { return pickNow(p); } finally { activeView(); useGeometry(); }
+}
+function pickNow(p) {
   const W = glc.width, H = glc.height, dpr = window.devicePixelRatio || 1, R = p.R;
   if (pickSize[0] !== W || pickSize[1] !== H) {
     gl.bindTexture(gl.TEXTURE_2D, pickTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -3422,6 +3621,7 @@ buildBars();
 
 function syncTools() {
   const p = panes[active]; if (!p) return;
+  activeView(); // the toolbar shows the active window's options
   const on = (sel, v) => document.querySelectorAll(sel).forEach(b => b.classList.toggle("on", v));
   for (const m of ["plan", "elev", "3d"]) on(`[data-act="v:${m}"]`, p.mode === m);
   for (const t of ["select", "zoom", "pan", "orbit", "iline"]) on(`[data-act="t:${t}"]`, tool === t);
@@ -3478,7 +3678,10 @@ $("colour").addEventListener("input", () => { if (res.mode === "design" || res.m
 $("case").addEventListener("input", () => { res.case = $("case").value; pointsDirty = true; draw(); });
 $("comp").addEventListener("input", () => { res.comp = $("comp").value; pointsDirty = true; res.range = null; draw(); });
 $("scale").addEventListener("input", () => { res.scale = +$("scale").value; res.userScale = 0; draw(); });
-document.querySelectorAll("[data-lay]").forEach(b => b.onclick = () => { layouts[1] = ["3d"]; layouts[2] = ["plan", "3d"]; layouts[3] = ["plan", "3d", "elev"]; layout = +b.dataset.lay; active = 0; buildPanes(null); syncTools(); draw(); try { localStorage.setItem("cpm-layout", layout); savedLayout = layout; } catch (e) {} });
+// View > Windows: the program's tiling for that many windows (3: Plan, 3-D and an elevation side by side; 4: Plan and
+// 3-D over an elevation on the first Y grid line and one on the first X grid line), in equal shares, each window
+// zoomed to the model.
+document.querySelectorAll("[data-lay]").forEach(b => b.onclick = () => { layouts[1] = ["3d"]; layouts[2] = ["plan", "3d"]; layouts[3] = ["plan", "3d", "elev"]; layout = +b.dataset.lay; active = 0; delete viewFr[layout]; buildPanes(null); syncTools(); draw(); try { localStorage.setItem("cpm-layout", layout); localStorage.setItem("cpm-view-fr", JSON.stringify(viewFr)); savedLayout = layout; } catch (e) {} });
 function setRes(mode) {
   if (mode === "ratios") { res.mode = "model"; $("colour").value = "ratio"; }
   else { res.mode = mode; if ($("colour").value === "ratio" && mode !== "model") $("colour").value = "kind"; }
@@ -3490,8 +3693,13 @@ function hideObjs(ids) { ids.forEach(id => hidden.objs.add(id)); hiddenVersion++
 function act(name) {
   const p = panes[active];
   hideMenus();
+  activeView(); // menus act on the active window's display options
   if (name.startsWith("r:")) return setRes(name.slice(2));
-  if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude") opt.extrudeA = opt.extrude; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
+  if (name.startsWith("o:")) {
+    const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude") opt.extrudeA = opt.extrude;
+    // The Options menu's switches apply to every window (the rest of each window's options stay its own).
+    saveView(); for (const q of panes) if (q.view && k in q.view.opt) { q.view.opt[k] = opt[k]; if (k === "extrude") q.view.opt.extrudeA = opt.extrudeA; }
+    if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
   if (name.startsWith("m:")) return modelAct(name.slice(2));
   if (name.startsWith("eto:")) return etoAct(name.slice(4));
   if (name === "u:consistent") return consistentUnits();
@@ -3532,7 +3740,7 @@ function act(name) {
     case "linePrev": return stepLine(-1);
     case "lineNext": return stepLine(1);
     case "theme:light": case "theme:dark": return setTheme(name === "theme:dark");
-    case "bg": bg = bg === "black" ? "white" : "black"; bgSaved = true; try { localStorage.setItem("cpm-bg", bg); } catch (e) {} colourDirty = true; if (P) buildTree(); syncTools(); return draw();
+    case "bg": bg = bg === "black" ? "white" : "black"; try { localStorage.setItem(bgKey(), bg); } catch (e) {} colourDirty = true; if (P) buildTree(); syncTools(); return draw();
     case "plot": if (p) setMode(p, p.mode === "plot" ? "3d" : "plot"); return;
     case "tables": if (etrOn() && P) return etrChooseTables(); return showTables($("dock").hidden);
     case "anim": res.anim = !res.anim && res.mode === "deformed"; syncResults(); return draw();
@@ -3630,7 +3838,7 @@ const viewerMenus = () => {
     Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [designOutputName(f, s), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
       : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]])],
     Detailing: detailingItems(),
-    Options: [["Windows", [1, 2, 3, 4].map(n => [["One", "Two", "Three", "Four"][n - 1] + (n === 1 ? " Window" : " Windows"), "lay:" + n])], 0, ...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Theme", [["Light", "theme:light"], ["Dark", "theme:dark"]]], ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
+    Options: [["Windows", [1, 2, 3, 4].map(n => [["One", "Two", "Three", "Four"][n - 1] + (n === 1 ? " Window" : " Windows"), "lay:" + n])], 0, ...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Theme", [["Light", "theme:light"], ["Dark", "theme:dark"]]], ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Background Grid", "o:horizon"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
     Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"], ...(appMenu.length ? [0, ...appHelp()] : [])],
   };
 };
@@ -4568,6 +4776,7 @@ const dialogs = {
       [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Close"]], {width: 400}), resCases("reactions"));
   },
   display() {
+    activeView(); // the form shows, and changes, the active window's options
     // Read from the programs on Ahmed's PC (2026-11-27), tab by tab and box by box: ETABS 23.2's Set View Options
     // (General / Object Assignments / Other Assignments; SAFE has the same form) and SAP2000 26.3's Display Options
     // (Object Options / General Options). Pictures: project files field/display-forms.
@@ -4728,6 +4937,7 @@ function applyContour(d) {
   $("case").value = res.case; $("comp").value = res.comp; pointsDirty = true; syncResults(); syncTools(); draw();
 }
 function applyDisplay(d) {
+  activeView();
   // A box shown in two places takes the one the user changed.
   const seen = {};
   d.querySelectorAll("[data-o]").forEach(x => { if (x.disabled) return; const k = x.dataset.o, v = x.dataset.inv ? !x.checked : x.checked; if (k in seen && v === opt[k]) return; seen[k] = v; });
@@ -4738,6 +4948,8 @@ function applyDisplay(d) {
   d.querySelectorAll("[data-nv]:not([disabled])").forEach(x => x.dataset.nv.split(",").forEach(k => x.checked ? hidden.kind.add(k) : hidden.kind.delete(k)));
   if (hidden.kind.has("joint")) opt.joints = false;
   hiddenVersion++;
+  // The active window only, as ETABS does, unless Apply to All Windows is ticked.
+  if (opt.allWin) viewToAll(); else saveView();
   const vbc = q(d, "[name=vbc]:checked"), c = vbc ? vbc.value : q(d, "#dCol").value;
   if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design" || res.mode === "values" || res.mode === "loads") res.mode = "model"; syncResults(); }
   if (c === "bw" && bg !== "white") act("bg");
@@ -5476,7 +5688,7 @@ function wireDesignCard(el) {
 // Output Items, Named Plots.
 let xTab = "model";
 function buildTree() {
-  const open = new Set([...document.querySelectorAll("#tree details[open]")].map(d => d.dataset.k)), first = !document.querySelector("#tree details");
+  const open = new Set(qsa("#tree details[open]").map(d => d.dataset.k)), first = !qsa("#tree details").length;
   // As the programs' Model Explorer: no counts beside the names, and only the root open at first.
   const node = (k, title, n, body, wide) => `<details data-k="${k}" ${first ? (wide && (k === "model" || k === "tabs") ? "open" : "") : open.has(k) ? "open" : ""}><summary>${esc(title)}</summary>${body}</details>`;
   const plain = list => list.length ? list.map(x => `<div class="leaf">${esc(x)}</div>`).join("") : `<div class="leaf kv">none</div>`;
@@ -5535,14 +5747,19 @@ const jointsCount = () => { const k = new Set(); for (const o of frames.concat(a
 const theWords = () => { const man = P.manifest || {}, any = Object.values(P.tables).some(t => t.from !== "input" && t.rows && t.rows.length && /forces|displacement|reaction|drift|modal/.test(norm(t.name))); return {analysed: any ? "Analysed: results are shown" : window.cpmLive ? "Not analysed yet (Analyze > Run Analysis)" : "No results in this pack"}; };
 function markTree() {
   const p = panes[active];
-  document.querySelectorAll("#tree [data-story]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "plan" && el.dataset.story === p.story));
-  document.querySelectorAll("#tree [data-line]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "elev" && !!p.line && el.dataset.line === p.line.dir + p.line.label));
-  document.querySelectorAll("#tree [data-sec]").forEach(el => el.classList.toggle("cur", !!lit && lit.type === el.dataset.sec && lit.name === el.dataset.v));
+  qsa("#tree [data-story]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "plan" && el.dataset.story === p.story));
+  qsa("#tree [data-line]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "elev" && !!p.line && el.dataset.line === p.line.dir + p.line.label));
+  qsa("#tree [data-sec]").forEach(el => el.classList.toggle("cur", !!lit && lit.type === el.dataset.sec && lit.name === el.dataset.v));
+  // The object types shown are the active window's own (display options per window).
+  qsa('#tree [data-hide="kind"]').forEach(el => { el.checked = !hidden.kind.has(el.dataset.v); });
 }
-document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(b.dataset.close));
+// A panel's ✕ closes it; in a window of its own (which has no title bar) it closes that window and docks the panel
+// back where it was, as closing the window does.
+function closePanel(k, close) { const s = panelState(k); if (s.side === "window") dockPanel(k, s.last || panelInfo[k].home); else close(); }
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closePanel(b.dataset.close === "side" ? "right" : b.dataset.close, () => act(b.dataset.close)));
 
 // ---- side panel ----
-function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
+function showTab(name) { qsa("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); qsa(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $("fbFilter").onclick = () => selFilter();
 // The units at the bottom right, as each program has them (Ahmed 2026-11-27): ETABS and SAFE a "Units..." button with
@@ -5834,7 +6051,7 @@ function showInTable(o) {
   const t = tables[want], nc = nameCol(t); if (nc < 0) return;
   tFilt[nc] = "=" + o.name; const inp = $("grid").querySelector(`[data-f="${nc}"]`); if (inp) inp.value = "=" + o.name; drawTable();
 }
-$("dockClose").onclick = () => showTables(false);
+$("dockClose").onclick = () => closePanel("dock", () => showTables(false));
 $("dockMax").onclick = () => { $("dock").classList.toggle("max"); draw(); };
 $("grip").addEventListener("pointerdown", e => { const d = $("dock"), c = $("center").getBoundingClientRect(); $("grip").setPointerCapture(e.pointerId); $("grip").onpointermove = m => { d.style.height = Math.max(120, Math.min(c.height - 80, c.bottom - m.clientY)) + "px"; draw(); }; $("grip").onpointerup = () => { $("grip").onpointermove = null; panelState("dock").dh = d.offsetHeight; dockSave(); }; });
 
@@ -5844,7 +6061,7 @@ $("grip").addEventListener("pointerdown", e => { const d = $("dock"), c = $("cen
 // Window Position (the small arrow) does the same from a menu, and a double-click on the caption floats or docks it.
 // Where each one is and its size are kept between visits.
 const panelInfo = {
-  explorer: {el: () => $("explorer"), cap: () => document.querySelector("#explorer>.dock"), split: () => $("splitExplorer"), home: "left", close: () => act("explorer")},
+  explorer: {el: () => $("explorer"), cap: () => $("explorer").querySelector(".dock"), split: () => $("splitExplorer"), home: "left", close: () => act("explorer")},
   right: {el: () => $("right"), cap: () => $("tabs"), split: () => $("splitRight"), home: "right", close: () => act("side")},
   dock: {el: () => $("dock"), cap: () => $("dockCap"), split: () => null, home: "bottom", close: () => showTables(false)},
 };
@@ -5869,6 +6086,7 @@ function placePanels() {
   let left = $("strip"), right = $("center");
   for (const k of ["explorer", "right"]) {
     const s = panelState(k), el = panelInfo[k].el(), sp = panelInfo[k].split(), float = s.side === "float";
+    if (s.side === "window") continue; // in a window of its own
     el.classList.toggle("float", float);
     if (float) { floatAt(el, s); continue; }
     unfloat(el, k, s);
@@ -5876,16 +6094,92 @@ function placePanels() {
     else right = put(put(right, sp), el);
   }
   const s = panelState("dock"), d = $("dock"), float = s.side === "float";
-  if (float) d.classList.remove("max");
-  d.classList.toggle("float", float);
-  if (float) floatAt(d, s); else unfloat(d, "dock", s);
+  if (s.side !== "window") {
+    if (float) d.classList.remove("max");
+    d.classList.toggle("float", float);
+    if (float) floatAt(d, s); else unfloat(d, "dock", s);
+  }
   syncSplits(); placeViewSplits();
 }
 function syncSplits() {
-  for (const k of ["explorer", "right"]) { const el = panelInfo[k].el(); panelInfo[k].split().hidden = el.hidden || el.classList.contains("float"); }
+  for (const k of ["explorer", "right"]) { const el = panelInfo[k].el(); panelInfo[k].split().hidden = el.hidden || el.classList.contains("float") || el.classList.contains("popped"); }
 }
+// ---- a panel in a window of its own ----
+// Dropped outside CSI ProMax's window (or Window Position > Separate Window), a panel moves into a window of its own
+// that can go on any screen; the host opens it as a CSI ProMax window. Closing that window, or Dock or Float from the
+// panel's Window Position, brings the panel back. The page keeps running the panel: its elements move into that
+// window's document with their handlers, and $ and qsa find them there.
+// A page that goes away takes the handlers of every element still in it, so the panel is never left in a page that is
+// closing or being replaced: it waits in popStage (here, hidden) while its window's page changes, and comes back before
+// its window closes (the host asks first: cpmBeforeClose).
+const popWins = {}; // panel -> {win, doc, el}
+const panelTitles = {explorer: "Model Explorer", right: "Properties", dock: "Tables"};
+const popStage = document.createElement("div"); popStage.hidden = true; document.body.appendChild(popStage);
+// The host says when a panel's window has its own page (it may replace the first one): the panel goes in then.
+const popReady = new Set();
+window.cpmPopReady = name => { const k = String(name).replace(/^cpm-pop-/, ""); popReady.add(k); if (popWins[k]) popWins[k].fill(true); };
+function popOut(k, sx, sy) {
+  if (popWins[k]) { popWins[k].win.focus(); return; }
+  const s = panelState(k), el = panelInfo[k].el(), r = el.getBoundingClientRect();
+  const w = Math.round(Math.max(260, r.width || s.fw || 320)), h = Math.round(Math.max(260, r.height || s.fh || 480));
+  const x = Math.round(sx ?? window.screenX + r.left), y = Math.round(sy ?? window.screenY + r.top);
+  popReady.delete(k);
+  const win = window.open("about:blank", "cpm-pop-" + k, `left=${x},top=${y},width=${w},height=${h}`);
+  if (!win) return;
+  let first = null; try { first = win.document; } catch (e) {}
+  // CSI ProMax's window host (WebView2) may replace the window's first page with its own blank one once it has opened
+  // the window, so there the panel waits until the host says the page is ready (or 3 s); a browser keeps the first one.
+  const hosted = !!(window.chrome && chrome.webview), opened = Date.now();
+  const p = popWins[k] = {win, doc: null, el};
+  const rescue = () => { if (el.ownerDocument !== document) popStage.appendChild(el); if (p.doc) { popDocs.delete(p.doc); p.doc = null; } };
+  // No closing tags in the text: the parser adds them, and the server puts the live page's script before every closing
+  // body tag it finds in this file, so none may stand in a script.
+  const fill = ready => {
+    let doc = null;
+    try { doc = win.document; } catch (e) { return; }
+    if (!doc || doc === p.doc || hosted && doc === first && !ready && !popReady.has(k) && Date.now() - opened < 3000) return;
+    if (p.doc) popDocs.delete(p.doc);
+    doc.open(); doc.write("<!doctype html><meta charset=\"utf-8\"><title></title><body class=\"popbody\">"); doc.close();
+    doc.title = panelTitles[k] + " · " + document.title;
+    for (const st of document.querySelectorAll("style")) doc.head.appendChild(st.cloneNode(true));
+    for (const a of ["data-theme", "data-program", "class"]) { const v = document.documentElement.getAttribute(a); if (v != null) doc.documentElement.setAttribute(a, v); }
+    doc.body.dataset.prog = document.body.dataset.prog || "";
+    if (s.side !== "window") s.last = s.side === "float" ? s.last || panelInfo[k].home : s.side;
+    s.side = "window";
+    el.classList.remove("float", "max"); el.classList.add("popped");
+    Object.assign(el.style, {left: "", top: "", width: "", height: ""});
+    doc.body.appendChild(el);
+    p.doc = doc; popDocs.add(doc);
+    win.addEventListener("pagehide", rescue); // a page leaving without the host asking first (a browser's own window)
+    win.cpmBeforeClose = () => { rescue(); back(); }; // the host asks before it closes the window
+    placePanels(); dockSave(); draw();
+  };
+  // Its window closed: the panel docks where it was.
+  const back = () => {
+    if (popWins[k] !== p) return;
+    bringBack(k);
+    const st = panelState(k); if (st.side === "window") st.side = st.last || panelInfo[k].home;
+    placePanels(); dockSave(); draw();
+  };
+  p.fill = fill;
+  if (!hosted || popReady.has(k)) fill(true);
+  const watch = setInterval(() => {
+    if (popWins[k] !== p) return clearInterval(watch);
+    if (win.closed) { clearInterval(watch); return back(); }
+    if (Date.now() - opened < 5000) fill();
+  }, 100);
+}
+// The panel's elements back in this window, where placePanels then puts them; its own window closes.
+function bringBack(k) {
+  const p = popWins[k], el = p ? p.el : panelInfo[k].el();
+  if (el.ownerDocument !== document || el.parentElement === popStage) (k === "dock" ? $("views") : $("center")).after(el);
+  el.classList.remove("popped");
+  if (p) { delete popWins[k]; popDocs.delete(p.doc); try { p.win.close(); } catch (e) {} }
+}
+addEventListener("pagehide", () => { for (const k of Object.keys(popWins)) try { popWins[k].win.close(); } catch (e) {} });
 function dockPanel(k, side) {
   const s = panelState(k), el = panelInfo[k].el();
+  if (s.side === "window" && side !== "window") { bringBack(k); s.side = s.last || panelInfo[k].home; }
   if (side === "float" && s.side !== "float") {
     const r = el.getBoundingClientRect();
     if (k === "dock") s.dh = el.offsetHeight;
@@ -5914,14 +6208,15 @@ function panelMenu(k, btn) {
   const s = panelState(k), items = k === "dock"
     ? [["Dock at the Bottom", () => dockPanel(k, "bottom"), s.side === "bottom"]]
     : [["Dock Left", () => dockPanel(k, "left"), s.side === "left"], ["Dock Right", () => dockPanel(k, "right"), s.side === "right"]];
-  ddMenu(btn, [...items, ["Float", () => dockPanel(k, "float"), s.side === "float"], ["Close", panelInfo[k].close]]);
+  ddMenu(btn, [...items, ["Float", () => dockPanel(k, "float"), s.side === "float"], ["Separate Window", () => popOut(k), s.side === "window"], ["Close", panelInfo[k].close]]);
 }
 // A caption dragged more than a few pixels floats its panel under the pointer; a plain click stays a click (the side
 // panel's caption is its row of tabs).
 function wireCaption(k) {
   const cap = panelInfo[k].cap(), el = panelInfo[k].el(), skip = ".x, .dd, input, select, textarea";
   cap.addEventListener("pointerdown", e => {
-    if (e.button !== 0 || e.target.closest(skip)) return;
+    // In a window of its own, the panel moves with that window's title bar.
+    if (e.button !== 0 || e.target.closest(skip) || el.ownerDocument !== document) return;
     const x0 = e.clientX, y0 = e.clientY;
     let moving = false, offX = 0, offY = 0;
     const move = m => {
@@ -5943,6 +6238,8 @@ function wireCaption(k) {
       // The click that ends the drag doesn't also press the tab under it.
       const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
       addEventListener("click", eat, true); setTimeout(() => removeEventListener("click", eat, true), 0);
+      // Dropped outside CSI ProMax's window (on another screen, say): the panel goes into a window of its own there.
+      if (m.clientX < 0 || m.clientY < 0 || m.clientX >= innerWidth || m.clientY >= innerHeight) return popOut(k, m.screenX - offX, m.screenY - offY);
       const edge = edgeAt(k, m.clientX, m.clientY);
       if (edge) dockPanel(k, edge); else dockSave();
     };
@@ -5951,7 +6248,7 @@ function wireCaption(k) {
   cap.addEventListener("dblclick", e => {
     if (e.target.closest(skip) || k === "right") return; // the side panel's caption is its tabs: a double-click there is for them
     const s = panelState(k);
-    dockPanel(k, s.side === "float" ? s.last || panelInfo[k].home : "float");
+    dockPanel(k, s.side === "float" || s.side === "window" ? s.last || panelInfo[k].home : "float");
   });
 }
 // The splitter beside a docked side panel: dragged, the panel takes that width (the views the rest).
@@ -5968,6 +6265,14 @@ for (const k of ["explorer", "right"]) {
   };
   new MutationObserver(syncSplits).observe(el, {attributes: true, attributeFilter: ["hidden"]});
 }
+// A panel closed while it is in a window of its own (its close button, or the menu that hides it) docks back where it
+// was, so that window doesn't stay open empty.
+for (const k of ["explorer", "right", "dock"]) {
+  const el = panelInfo[k].el();
+  new MutationObserver(() => { const s = panelState(k); if (el.hidden && s.side === "window") dockPanel(k, s.last || panelInfo[k].home); }).observe(el, {attributes: true, attributeFilter: ["hidden"]});
+}
+// A separate window opens only on a click: one left over from the last visit docks where the panel was.
+for (const k of Object.keys(panelInfo)) { const s = panelState(k); if (s.side === "window") s.side = s.last || panelInfo[k].home; }
 // The Tables' list of table names, sized against the table beside it.
 $("splitTables").onpointerdown = e => {
   const sp = $("splitTables"), list = $("tlist");
