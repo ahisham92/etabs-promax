@@ -3460,9 +3460,10 @@ function boxSelect(p, r, crossing, add) {
 function rightClick(p, x, y, shift, cx, cy) {
   // As ETABS: right click on an object gives its information; on a joint the joint's. Shift, or empty space, the menu.
   const {j, id} = shift ? {j: null, id: idAt(p, x, y)} : pickAt(p, x, y, 8);
-  if (j) { if (!selJ.has(j)) { sel.clear(); selJ.clear(); selJ.add(j); selChanged(); } return jointInfo(j); }
-  if (id && !sel.has(id)) { sel.clear(); selJ.clear(); sel.add(id); selChanged(); }
+  // The information leaves the selection as it is (only Esc and Clear Selection clear it); the menu acts on the object.
+  if (j) return jointInfo(j);
   if (id && !shift) return infoWindow(id);
+  if (id && !sel.has(id)) { sel.clear(); selJ.clear(); sel.add(id); selChanged(); }
   contextMenu(p, cx ?? x, cy ?? y, id);
 }
 function selChanged() { selVersion++; showPick(); if (!$("dock").hidden) { if ($("tsel").checked) drawTable(); else markRows(); } draw(); }
@@ -3516,9 +3517,12 @@ function wire(p) {
       if (d.button === 0 && (d.act === "box" || d.act === "orbit" || d.act === "pan")) {
         if (d.list && selectionList(p, x, y)) return;
         const {j, id} = pickAt(p, x, y, 5), js = j ? jointsOnSimilar(p, [j]) : [], ids = id ? onSimilar(p, [id]) : [];
-        if (j) { if (selJ.has(j)) js.forEach(n => selJ.delete(n)); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } js.forEach(n => selJ.add(n)); } }
-        else if (id) { if (sel.has(id)) ids.forEach(i => sel.delete(i)); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } ids.forEach(i => sel.add(i)); } }
-        else if (!d.ctrl) { sel.clear(); selJ.clear(); }
+        // As ETABS: a click adds the object to the selection, or takes it off when it is selected; a click on empty
+        // space leaves the selection as it is. Only Esc and Clear Selection (Select menu, left strip) clear it (the
+        // user's ask, 28 Nov).
+        if (j) { if (selJ.has(j)) js.forEach(n => selJ.delete(n)); else js.forEach(n => selJ.add(n)); }
+        else if (id) { if (sel.has(id)) ids.forEach(i => sel.delete(i)); else ids.forEach(i => sel.add(i)); }
+        else if (!lit) return; // empty space: a section lit from the Model Explorer goes out, the selection stays
         lit = null; markTree(); selChanged();
       }
       return;
@@ -6687,7 +6691,13 @@ document.addEventListener("keydown", e => {
   if (k === "F5" && window.cpmLive) { stop(); act(e.shiftKey ? "eng:design" : "eng:run"); return; }
   if (k === "F2") { stop(); act("t:zoom"); } else if (k === "F3") { stop(); act("fitActive"); } else if (k === "F4") { stop(); setRes("model"); } else if (k === "F6") { stop(); if (disp.size) dialogs.deformed(); } else if (k === "F8") { stop(); if (forces.size) dialogs.forces(); }
   else if (k === "PageUp") { stop(); act("storyUp"); } else if (k === "PageDown") { stop(); act("storyDown"); }
-  else if (k === "Escape") { if (document.querySelector(".ctx")) hideMenus(); else if (tool !== "select") act("t:select"); else act("selNone"); }
+  // Esc closes an open window (a form does that itself, an object's information window is closed here) and leaves the
+  // selection; else it ends a tool, then clears the selection.
+  else if (k === "Escape") {
+    const info = document.querySelector(".dlg.info");
+    if (document.querySelector(".ctx")) hideMenus(); else if ([...document.querySelectorAll(".dlg:not(.float)")].some(w => w.style.display !== "none")) return;
+    else if (info) info.querySelector(".dt .x").click(); else if (tool !== "select") act("t:select"); else act("selNone");
+  }
   else if (ctrl && k.toLowerCase() === "t") { stop(); act("tables"); } else if (ctrl && k.toLowerCase() === "a") { stop(); act("selAll"); } else if (ctrl && k.toLowerCase() === "o") { stop(); act("open"); } else if (ctrl && k.toLowerCase() === "w") { stop(); dialogs.display(); }
   else if (ctrl && k.toLowerCase() === "c" && sel.size) { stop(); act("copyNames"); }
 });
