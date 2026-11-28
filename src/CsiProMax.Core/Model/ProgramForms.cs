@@ -57,6 +57,8 @@ public static class ProgramForms
         var cat = kind == "shear_wall" && target != ProgramOptions.Sap2000 ? WallOverwriteCatalog() : OverwriteCatalog(target);
         if (target != ProgramOptions.Sap2000 && kind == "slab") return cat.ContainsKey(SlabOverwrites) ? [SlabOverwrites] : [];
         static string Norm(string x) => new(x.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        // ETABS names the SJI 100-2020 joist overwrites "SJI-2020".
+        if (kind == "joist" && Norm(code) == "sji1002020") code = "SJI-2020";
         var found = new List<string>();
         foreach (var prefix in OverwritePrefixes(target, kind))
             if ((cat.Keys.FirstOrDefault(k => k.Equals(prefix + code, StringComparison.OrdinalIgnoreCase))
@@ -258,5 +260,83 @@ public static class ProgramForms
         m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
         if (row.Count == 0) m.DefinitionTables.Remove(full);
         else m.DefinitionTables[full] = [row];
+    }
+
+    /// <summary>
+    /// The preference items an ETABS design keeps in the .e2k (its preference lines are KEYWORD value pairs, e.g.
+    /// STEELPREFERENCE  SRLIMIT 0.95), by keyword, values unquoted. Empty for a design the .e2k has no heading for.
+    /// </summary>
+    public static Dictionary<string, string> E2kPreferences(StructuralModel m, string kind)
+    {
+        var o = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var d = Designs(m.Target).FirstOrDefault(x => x.Kind == kind);
+        if (d?.E2kHeading is null) return o;
+        foreach (var t in (m.Passthrough.Find(x => x.Heading == d.E2kHeading)?.Lines ?? []).Select(Tokenize).Where(t => t.Count > 0 && t[0] == d.E2kKeyword))
+            for (var i = 1; i + 1 < t.Count; i += 2) o[t[i]] = Unquote(t[i + 1]);
+        return o;
+    }
+
+    /// <summary>The preference items ETABS's form has that are in neither its table nor a known .e2k word (kept in the
+    /// .cpm by design kind and item until their .e2k word is known).</summary>
+    public const string PreferenceExtrasKept = "model|DESIGN PREFERENCE EXTRAS";
+
+    /// <summary>Design menu data kept by object or name until ETABS's own words for it are pictured: Overwrite Frame Design
+    /// Procedure (by frame), Lateral Bracing (by frame) and Define General Pier Sections (by section).</summary>
+    public static readonly HashSet<string> ObjectKept = ["procedure", "bracing", "pier_sections"];
+
+    public static Dictionary<string, string> PreferenceExtras(StructuralModel m, string kind) =>
+        (m.Kept?.GetValueOrDefault(PreferenceExtrasKept) ?? []).Where(r => r.GetValueOrDefault("Kind") == kind)
+            .ToDictionary(r => r.GetValueOrDefault("Item") ?? "", r => r.GetValueOrDefault("Value") ?? "", StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Sets preference items of an ETABS design: "e2k:KEYWORD" changes that word on the design's .e2k preference lines
+    /// (added on a line of its own when missing; a blank value removes it, the program's default); "kept:Item" keeps
+    /// the value in the .cpm. Words are letters, digits and - % _ only.
+    /// </summary>
+    public static void SetPreferenceItems(StructuralModel m, string kind, IReadOnlyDictionary<string, string> values)
+    {
+        // ObjectKept kinds keep Design menu data by object or name (kept:<name>); every other kind is a design.
+        var d = ObjectKept.Contains(kind) ? null : Design(m.Target, kind);
+        foreach (var (key, raw) in values)
+        {
+            var value = raw.Trim();
+            if (value.Contains('"') || value.Contains('\n')) throw new ArgumentException($"The value of {key} cannot hold quotes or line breaks.");
+            if (key.StartsWith("kept:", StringComparison.Ordinal))
+            {
+                var item = key[5..];
+                m.Kept ??= new(StringComparer.OrdinalIgnoreCase);
+                var rows = m.Kept.TryGetValue(PreferenceExtrasKept, out var have) ? have : m.Kept[PreferenceExtrasKept] = [];
+                rows.RemoveAll(r => r.GetValueOrDefault("Kind") == kind && string.Equals(r.GetValueOrDefault("Item"), item, StringComparison.OrdinalIgnoreCase));
+                if (value.Length > 0) rows.Add(new Dictionary<string, string> { ["Kind"] = kind, ["Item"] = item, ["Value"] = value });
+                if (rows.Count == 0) m.Kept.Remove(PreferenceExtrasKept);
+                continue;
+            }
+            if (!key.StartsWith("e2k:", StringComparison.Ordinal)) throw new ArgumentException($"'{key}' is not an e2k: or kept: item.");
+            var word = key[4..];
+            if (d?.E2kHeading is null) throw new ArgumentException($"{d?.Name ?? kind} has no .e2k preference lines.");
+            if (word.Length == 0 || !word.All(c => char.IsLetterOrDigit(c) || c is '-' or '%' or '_')) throw new ArgumentException($"'{word}' is not an .e2k word.");
+            var s = m.Passthrough.Find(x => x.Heading == d.E2kHeading);
+            if (s is null)
+            {
+                if (value.Length == 0) continue;
+                s = new RawSection { Heading = d.E2kHeading, After = E2kSections.IsKnown("LOAD COMBINATIONS") ? "LOAD COMBINATIONS" : "" };
+                m.Passthrough.Add(s);
+            }
+            var done = false;
+            for (var li = 0; li < s.Lines.Count && !done; li++)
+            {
+                var t = Tokenize(s.Lines[li]);
+                if (t.Count == 0 || t[0] != d.E2kKeyword) continue;
+                for (var i = 1; i + 1 < t.Count; i += 2)
+                {
+                    if (!t[i].Equals(word, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (value.Length == 0) t.RemoveRange(i, 2); else t[i + 1] = IsQuoted(t[i + 1]) || !TryNumber(value, out _) ? Quote(value) : value;
+                    if (t.Count <= 1) s.Lines.RemoveAt(li); else s.Lines[li] = "  " + string.Join("  ", t);
+                    done = true;
+                    break;
+                }
+            }
+            if (!done && value.Length > 0) s.Lines.Add(Line([d.E2kKeyword!, word, TryNumber(value, out _) ? value : Quote(value)]));
+        }
     }
 }
