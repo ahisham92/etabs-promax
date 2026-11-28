@@ -3251,7 +3251,15 @@ function fitCam(p, cam) {
     if (z !== null) pts.push([s.x0, s.y0, z], [s.x1, s.y1, z]);
     else if (p.line) { const at = p.line.at; pts.push(p.line.dir === "X" ? [at, s.y0, s.z0] : [s.x0, at, s.z0], p.line.dir === "X" ? [at, s.y1, s.z1 + s.pad] : [s.x1, at, s.z1 + s.pad]); }
   }
-  if (!pts.length) pts.push(lo, hi);
+  // In 3-D the grid is in the picture too: its box up to the top story (an ETABS model's grid stands there as a
+  // lattice) and the bubbles at the ends of its lines.
+  if (opt.grid && p.mode === "3d" && grids.X.length && grids.Y.length) {
+    for (const x of [s.x0, s.x1]) for (const y of [s.y0, s.y1]) for (const z of [s.z0, s.z1]) pts.push([x, y, z]);
+    for (const b of auxLines(p).bub) pts.push(b.at);
+  }
+  // With nothing else to show, all eight corners of the model's box: two opposite corners alone can fall on one line
+  // on the screen (they do in the 3-D view), and the window's sides were then left out.
+  if (!pts.length) for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) pts.push([x, y, z]);
   let r0 = 1e30, r1 = -1e30, u0 = 1e30, u1 = -1e30, d0 = 1e30, d1 = -1e30;
   for (const q of pts) { const r = dot(q, right), u = dot(q, up), k = dot(q, d); r0 = Math.min(r0, r); r1 = Math.max(r1, r); u0 = Math.min(u0, u); u1 = Math.max(u1, u); d0 = Math.min(d0, k); d1 = Math.max(d1, k); }
   const target = add(add(mul(right, (r0 + r1) / 2), mul(up, (u0 + u1) / 2)), mul(d, (d0 + d1) / 2));
