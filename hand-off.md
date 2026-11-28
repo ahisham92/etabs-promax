@@ -17,6 +17,9 @@ Standing rules: never change or remove anything another user added unless Ahmed 
 
 ## Releases
 
+### Merged after 0.4.80 (goes out with the next release)
+Engine run on Ahmed's real model (17:11, 0.4.80): ETABS took 11.7 minutes to build the analysis model, then stopped with "FILE OPERATION ERROR # 232 ... DELETE ... (CSI ProMax run).Y07". A file left from the 13:43 run was still held open, and the Engine's clean-up had dropped it without a word. Now the run's clean-up asks Windows (Restart Manager) which process holds a run copy's file and ends it (only for files named "(CSI ProMax run)"), then says so in the run's lines. Cancel Run ends ETABS together with its child processes (its solver). Open: why building the analysis model takes 11.7 minutes against about 3 in Ahmed's own ETABS. The e2k route is the suspect.
+
 ### 0.4.80 (2026-11-28, Engine's ETABS copy runs minimised, part of the urgent run fix; everything else stays on hold): PR 365
 The Engine run's program window is minimised on the taskbar, no longer hidden through the API. On 0.4.79 ETABS had still not started the analysis of Ahmed's real model 8 minutes after opening it; his own visible ETABS takes about 3 minutes. His own run's LOG builds the same model as the Engine's copy (129,925 against 129,831 joints, 763,754 against 762,914 equations), so the copy is doing the same work, only more slowly. Open: a timed run of a small model, then of his model, both against ETABS's own time.
 
