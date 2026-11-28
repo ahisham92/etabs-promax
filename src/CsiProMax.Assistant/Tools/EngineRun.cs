@@ -235,8 +235,16 @@ public static class EngineRun
             // The program's copy is named after the engineer's own file (Ahmed 2026-11-28: "why is it not the same file
             // name"), with ScratchProgram.RunMark so its windows are still told apart from any of the engineer's.
             var copyName = mustAnalyse ? ScratchProgram.RunCopyName(RunName(_model!)) : null;
-            if (copyName is not null) foreach (var line in ClearCopy(folder, copyName)) lock (Gate) Lines.Add(line);
-            window = ScratchProgram.Start(program, ctx, file, asIs: !mustAnalyse, name: copyName);
+            // ETABS builds its analysis mesh from scratch for a model that came in from a text file and saves it in the
+            // .EDB ("Saving Mesh information"); an .EDB that holds it goes straight to the analysis. Ahmed's real model on
+            // his PC, 2026-11-28, plain ETABS: "Creating Analysis Model" took 12.5 minutes after importing the Engine's .e2k,
+            // and about 10 seconds when the same .EDB was run again. So the copy an earlier run of this same model left
+            // with its mesh saved is opened again instead of importing the text file once more.
+            var stamp = copyName is null ? null : MeshStamp(file, _model!);
+            var meshed = copyName is null || stamp is null ? null : MeshedCopy(folder, copyName, stamp, ScratchProgram.ModelExtension(program));
+            if (copyName is not null) foreach (var line in ClearCopy(folder, copyName, meshed is null ? null : [meshed, MeshStampFile(folder, copyName)])) lock (Gate) Lines.Add(line);
+            if (meshed is not null) Say($"Opening the copy an earlier run of this same model left in {program.Name}, with its mesh already built ({Path.GetFileName(meshed)})");
+            window = meshed is not null ? ScratchProgram.Start(program, ctx, meshed, asIs: true, name: copyName) : ScratchProgram.Start(program, ctx, file, asIs: !mustAnalyse, name: copyName);
             if (window is null)
             {
                 // A file the program rejected is the headline, in its own words (Ahmed's real model, 2026-11-27: the report
@@ -262,13 +270,20 @@ public static class EngineRun
                 lock (Gate) Lines.Add($"{program.Name} opened the analysed model without its results, so the analysis runs again.");
                 mustAnalyse = true;
             }
-            if (mustAnalyse && SlabTables.Any(_model!.Model))
+            if (meshed is not null && Locked(window.Link))
+            {
+                // The kept copy was analysed before: it is unlocked (its old results go, its mesh stays) and runs again.
+                Say($"Unlocking the kept copy so {program.Name} analyses it again");
+                if (ctx.Tool("unlock_model") is null) lock (Gate) Lines.Add($"{program.Name} would not unlock the kept copy. {Failed(ctx)}");
+            }
+            // The kept copy already holds the slab tables and the cases set not to run: the program saved them with its mesh.
+            if (mustAnalyse && meshed is null && SlabTables.Any(_model!.Model))
             {
                 // What the .e2k cannot carry (slab line releases, slab rebar) goes in through the program's tables first.
                 Say($"Putting the slab line releases and slab rebar into {program.Name} through its tables");
                 foreach (var line in SlabTables.PutInto(window.Link, _model!.Model)) lock (Gate) Lines.Add(line);
             }
-            if (mustAnalyse && RunCases.NotRun(_model!.Model) is { Count: > 0 } notRun)
+            if (mustAnalyse && meshed is null && RunCases.NotRun(_model!.Model) is { Count: > 0 } notRun)
             {
                 // Analyze > Set Load Cases to Run: the cases set not to run are left out of this run.
                 Say($"Setting {notRun.Count} load case{(notRun.Count == 1 ? "" : "s")} not to run");
@@ -283,7 +298,10 @@ public static class EngineRun
                 // A new run writes a new log: what an earlier run left is not this run's.
                 tail.Restart();
                 Say("Running the analysis");
-                if (ctx.Tool("run_analysis") is null)
+                var runStarted = DateTime.UtcNow;
+                var ran = ctx.Tool("run_analysis");
+                if (copyName is not null && stamp is not null && window is ScratchProgram kept) KeepMeshStamp(folder, copyName, stamp, kept.ModelPath, runStarted);
+                if (ran is null)
                 {
                     tail.Read(mon);
                     Fail($"The analysis did not run. {Failed(ctx)}");
@@ -702,15 +720,16 @@ public static class EngineRun
     /// The files an earlier run left under the copy's name (its model and its analysis files), in the run folder only:
     /// the new copy is saved over them, and an old analysis must never be taken for this one's.
     /// </summary>
-    internal static List<string> ClearCopy(string folder, string copyName)
+    internal static List<string> ClearCopy(string folder, string copyName, IReadOnlyCollection<string>? keep = null)
     {
         var said = new List<string>();
+        bool Kept(string f) => keep is not null && keep.Any(k => string.Equals(Path.GetFullPath(k), Path.GetFullPath(f), StringComparison.OrdinalIgnoreCase));
         if (!copyName.EndsWith(ScratchProgram.RunMark, StringComparison.Ordinal) || !Directory.Exists(folder)) return said;
         List<string> Left()
         {
             var left = new List<string>();
             foreach (var f in Directory.EnumerateFiles(folder, copyName + ".*"))
-                if (string.Equals(Path.GetFileNameWithoutExtension(f), copyName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(Path.GetFileNameWithoutExtension(f), copyName, StringComparison.OrdinalIgnoreCase) && !Kept(f))
                     try { File.Delete(f); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { left.Add(f); }
             return left;
         }
@@ -722,6 +741,50 @@ public static class EngineRun
         held = Left();
         if (held.Count > 0) said.Add("Still held open, so the program may refuse them: " + string.Join(", ", held.Select(Path.GetFileName)));
         return said;
+    }
+
+    /// <summary>The file beside the run copy that says which model the mesh saved in the copy was built for.</summary>
+    internal static string MeshStampFile(string folder, string copyName) => Path.Combine(folder, copyName + ".cpm-mesh");
+
+    /// <summary>
+    /// What the run copy is made from: the text file the program opens (without its "$ File ... saved" line, which
+    /// changes with every write) and the Modeler's whole model (what goes in through the program's tables). Null when
+    /// either cannot be read, and then the copy is always made afresh.
+    /// </summary>
+    internal static string? MeshStamp(string textFile, OfflineEtabs model)
+    {
+        try
+        {
+            var text = string.Join("\n", File.ReadLines(textFile).Where(l => !l.StartsWith("$ File ", StringComparison.Ordinal)));
+            var bytes = System.Text.Encoding.UTF8.GetBytes(text + "\n" + ModelFile.ToJson(model.Model));
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
+    }
+
+    /// <summary>The run copy an earlier run of the same model (same <paramref name="stamp"/>) left with its mesh saved, or null.</summary>
+    internal static string? MeshedCopy(string folder, string copyName, string stamp, string extension)
+    {
+        var model = Path.Combine(folder, copyName + extension);
+        var stampFile = MeshStampFile(folder, copyName);
+        try { return File.Exists(model) && File.Exists(stampFile) && File.ReadAllText(stampFile).Trim() == stamp ? model : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>
+    /// Writes the stamp once the program has saved the copy with its mesh: the program rewrites the model file when it
+    /// has built the mesh, and only then starts the analysis log, so both written since the run started say the mesh is in.
+    /// </summary>
+    internal static void KeepMeshStamp(string folder, string copyName, string stamp, string modelPath, DateTime runStartedUtc)
+    {
+        try
+        {
+            var log = Path.ChangeExtension(modelPath, ".LOG");
+            if (modelPath.Length > 0 && File.Exists(modelPath) && File.Exists(log)
+                && File.GetLastWriteTimeUtc(modelPath) >= runStartedUtc.AddSeconds(-2) && File.GetLastWriteTimeUtc(log) >= runStartedUtc.AddSeconds(-2))
+                File.WriteAllText(MeshStampFile(folder, copyName), stamp);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>The pack and its Viewer page: beside the model's own file, named after it; in the run folder for a model never saved.</summary>
