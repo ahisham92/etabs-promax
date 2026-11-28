@@ -376,8 +376,11 @@ public static class ModelerFieldSteps
         ctx.Tool("define_load_pattern", """{"name":"CPM-W","was":"CPM-WIND","type":"Wind","self_weight":0}""", a => FieldContext.Expect(modeler.LoadPatterns().Any(p => p.Name == "CPM-W") && modeler.LoadCases().Contains("CPM-W"), "CPM-WIND and its case were not renamed"), "tool define_load_pattern renames it");
         ctx.Tool("define_combination", """{"name":"CPM-SLS","type":"Linear Add","cases":[{"case":"Dead","factor":1},{"case":"CPM-W","factor":0.6}]}""", a => FieldContext.Expect(modeler.Combos().Contains("CPM-SLS"), "CPM-SLS was not added"), "tool define_combination adds a combination");
         ctx.Tool("define_combination", """{"name":"CPM-ENV","type":"Envelope","cases":[{"case":"CPM-ULS","factor":1},{"case":"CPM-SLS","factor":1}]}""", a => FieldContext.Expect(modeler.Model.Combos.Find(c => c.Name == "CPM-ENV")?.Lines.Count(l => l[0] == "LOADCOMBO") == 2, "CPM-ENV does not hold the two combinations"), "tool define_combination makes an envelope of combinations");
+        ctx.Tool("define_work_plane", """{"name":"CPM-WP1","points":[[0,0,0],[6,0,0],[0,6,3]]}""", a => FieldContext.Expect(modeler.Model.WorkPlanes?.Exists(w => w.Name == "CPM-WP1") == true, "CPM-WP1 was not added: " + a.ToJsonString()), "tool define_work_plane adds a work plane by three points");
+        ctx.Tool("define_work_plane", """{"name":"CPM-WP","was":"CPM-WP1"}""", a => FieldContext.Expect(modeler.Model.WorkPlanes?.Exists(w => w.Name == "CPM-WP") == true, "CPM-WP1 was not renamed"), "tool define_work_plane renames it");
+        ctx.Refused("define_work_plane", """{"name":"CPM-WP2","points":[[0,0,0],[3,0,0],[6,0,0]]}""", "one line", "tool define_work_plane refuses three points on one line");
         ctx.Refused("delete_definition", """{"kind":"frame_section","name":"CPM-C400"}""", "used by", "tool delete_definition keeps a section in use");
-        foreach (var (kind, name) in new[] { ("combination", "CPM-ENV"), ("combination", "CPM-SLS"), ("load_pattern", "CPM-W"), ("frame_section", "CPM-B350"), ("shell_section", "CPM-S170"), ("material", "CPM-C45") })
+        foreach (var (kind, name) in new[] { ("combination", "CPM-ENV"), ("combination", "CPM-SLS"), ("load_pattern", "CPM-W"), ("frame_section", "CPM-B350"), ("shell_section", "CPM-S170"), ("material", "CPM-C45"), ("work_plane", "CPM-WP") })
             ctx.Tool("delete_definition", $$"""{"kind":"{{kind}}","name":"{{name}}"}""", a => FieldContext.Expect(Done(a).StartsWith("deleted", StringComparison.Ordinal), $"{name} was not deleted: " + a.ToJsonString()), $"tool delete_definition deletes {name}");
 
         // The window's own path: a hand edit and its undo, through HandModel as the window sends them.
@@ -547,6 +550,21 @@ public static class ModelerFieldSteps
                         "tool add_template, Edit > Add to Model from Template > 3D Flat Slab with the model's own sections");
             }
             ctx.Tool("relabel_objects", "{}", a => FieldContext.Expect(a["relabelled"] is not null, "no count: " + a.ToJsonString()), "tool relabel_objects, Edit > Auto Relabel All");
+            // Drawing by points at story levels, as on a work plane in the 3-D view: a brace from the base to the top as
+            // one object, and a ramp up one story.
+            {
+                // At 45 degrees, so a brace and a ramp by Options > Tolerances in any length unit.
+                double x = minX - 60, y = minY - 60, z0 = m.Elevation(0), z1 = m.Elevation(1), zt = m.Elevation(stories.Count - 1), h = z1 - z0;
+                var shell = floor?.Section ?? m.ShellSections[0].Name;
+                ctx.Tool("add_frames_by_points", $$"""{"frames":[[{{N(x)}},{{N(y)}},{{N(z0)}},{{N(x + zt - z0)}},{{N(y)}},{{N(zt)}}]],"section":{{Q(section)}}}""",
+                    a => { var f = a["frames"]![0]!.GetValue<string>().Split('@'); FieldContext.Expect(m.Line(f[0]) is { Kind: CsiProMax.Model.LineKind.Brace } l && l.StoriesBelowI == stories.Count - 1 && f[1] == top, "one brace from the base to the top was expected: " + a.ToJsonString()); },
+                    "tool add_frames_by_points, a brace from the base to the top story as one object");
+                ctx.Refused("add_frames_by_points", $$"""{"frames":[[{{N(x)}},{{N(y)}},{{N(z0 + 0.37)}},{{N(x + zt - z0)}},{{N(y)}},{{N(zt)}}]],"section":{{Q(section)}}}""", "not a story level", "tool add_frames_by_points says no to an end between story levels");
+                ctx.Tool("add_areas_by_points", $$"""{"areas":[[[{{N(x)}},{{N(y)}},{{N(z0)}}],[{{N(x + h)}},{{N(y)}},{{N(z0)}}],[{{N(x + h)}},{{N(y + h)}},{{N(z1)}}],[{{N(x)}},{{N(y + h)}},{{N(z1)}}]]],"section":{{Q(shell)}}}""",
+                    a => { var r = a["areas"]![0]!.GetValue<string>().Split('@'); FieldContext.Expect(m.Area(r[0]) is { Kind: CsiProMax.Model.AreaKind.Ramp } && r[1] == stories[1], "a ramp up to the first story was expected: " + a.ToJsonString()); },
+                    "tool add_areas_by_points, a ramp on a sloped plane");
+                ctx.Refused("add_areas_by_points", $$"""{"areas":[[[{{N(x)}},{{N(y)}},{{N(z0)}}],[{{N(x + h)}},{{N(y)}},{{N(z0)}}],[{{N(x + h)}},{{N(y + h)}},{{N(z1)}}],[{{N(x)}},{{N(y + h)}},{{N(z0)}}]]],"section":{{Q(shell)}}}""", "not flat", "tool add_areas_by_points says no to corners not in one plane");
+            }
         }
         finally
         {

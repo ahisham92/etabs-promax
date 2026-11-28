@@ -216,6 +216,119 @@ public static class ModelOps
         return made;
     }
 
+    /// <summary>
+    /// Edit > Edit Frames > Divide Frames, Break at Intersections with Story Levels: a column or brace that spans more
+    /// than one story becomes one per story, each from a level to the next, keeping the section and assignments;
+    /// uniform loads go on every part, end releases and offsets stay at the frame's own ends. A part takes the object
+    /// already standing on its story with the same ends and kind, as ETABS keeps one object over many stories.
+    /// </summary>
+    public static List<Obj> DivideAtLevels(StructuralModel m, Obj o)
+    {
+        if (!o.Line) throw new ArgumentException($"{o} is a slab or wall; Divide Frames divides frames.");
+        var line = m.Line(o.Label)!;
+        var n = line.StoriesBelowI;
+        if (n < 2) throw new ArgumentException($"{o} spans one story: no story level lies between its ends.");
+        var loads = m.LineLoads.Where(l => l.Object == o.Label && l.Story == o.Story).ToList();
+        if (loads.FirstOrDefault(l => !E2k.E2kText.Unquote(E2k.E2kText.Value(l.Tokens, "TYPE") ?? "").Equals("UNIFF", StringComparison.OrdinalIgnoreCase)
+                                    && !E2k.E2kText.Unquote(E2k.E2kText.Value(l.Tokens, "TYPE") ?? "").Equals("TEMPERATURE", StringComparison.OrdinalIgnoreCase)) is { } placed)
+            throw new ArgumentException($"{o} has a {E2k.E2kText.Unquote(E2k.E2kText.Value(placed.Tokens, "TYPE") ?? "")} load at a place along it, which cannot be shared out between the parts: take it off first, or divide it in the program.");
+        if (PropertyDefs.HingesOf(m, o.Label, o.Story).Count > 0) throw new ArgumentException($"{o} has hinges at places along it: take them off first.");
+        var top = m.StoryIndex(o.Story);
+        var (i, j) = (m.Point(line.PointI)!, m.Point(line.PointJ)!);
+        double zb = m.Elevation(top - n), zt = m.Elevation(top);
+        PlanPoint At(int level)
+        {
+            if (level == top - n) return i;
+            if (level == top) return j;
+            var t = (m.Elevation(level) - zb) / (zt - zb);
+            return m.PointAt(i.X + (j.X - i.X) * t, i.Y + (j.Y - i.Y) * t);
+        }
+        var assign = m.LineAssigns.First(a => a.Label == o.Label && a.Story == o.Story);
+        var (ri, rj) = PropertyDefs.ReleasesOf(assign);
+        var made = new List<Obj>();
+        for (var k = 0; k < n; k++)
+        {
+            var (pi, pj, story) = (At(top - n + k), At(top - n + k + 1), m.Stories[top - n + k + 1].Name);
+            var part = m.Lines.Find(l => l.Kind == line.Kind && l.StoriesBelowI == 1 && l.PointI == pi.Name && l.PointJ == pj.Name);
+            if (part is null)
+            {
+                part = new LineObject { Label = ModelEdit.NextName(m.Lines.Select(l => l.Label), Prefix(line.Label, line.Kind == LineKind.Column ? "C" : "D")), Kind = line.Kind, PointI = pi.Name, PointJ = pj.Name, StoriesBelowI = 1, Extra = [.. line.Extra] };
+                m.Lines.Add(part);
+            }
+            if (m.LineAssigns.Exists(a => a.Label == part.Label && a.Story == story)) throw new ArgumentException($"{part.Label}@{story} already stands where a part of {o} would go.");
+            var a = Clone(assign); a.Label = part.Label; a.Story = story;
+            // The end releases and offsets stay at the frame's own ends.
+            PropertyDefs.SetReleases(a, k == 0 ? ri : [], k == n - 1 ? rj : []);
+            if (k > 0) PropertyDefs.Remove(a.Extra, "LENGTHOFFI");
+            if (k < n - 1) PropertyDefs.Remove(a.Extra, "LENGTHOFFJ");
+            m.LineAssigns.Add(a);
+            foreach (var l in loads) { var c = Clone(l); c.Object = part.Label; c.Story = story; m.LineLoads.Add(c); }
+            made.Add(new Obj(true, part.Label, story));
+        }
+        Remove(m, o);
+        return made;
+    }
+
+    /// <summary>
+    /// Edit > Edit Shells > Divide Shells, Walls and Ramps at Story Levels: a wall or ramp that spans more than one
+    /// story becomes one per story, the part of it between each level and the next (its corners on the levels),
+    /// keeping the section, assignments and loads. A part takes the object already standing on its story with the
+    /// same corners, as ETABS keeps one object over many stories.
+    /// </summary>
+    public static List<Obj> DivideAreaAtLevels(StructuralModel m, Obj o)
+    {
+        if (o.Line) throw new ArgumentException($"{o} is a frame; Divide Shells divides walls and ramps at the levels.");
+        var area = m.Area(o.Label)!;
+        var top = m.StoryIndex(o.Story);
+        var levels = area.StoriesBelow.Select(b => top - b).ToList();
+        int lo = levels.Min(), hi = levels.Max();
+        if (hi - lo < 2) throw new ArgumentException($"{o} spans one story: no story level lies between its corners.");
+        var corners = area.PointNames.Select((n, k) => { var p = m.Point(n)!; return (p.X, p.Y, Z: m.Elevation(levels[k])); }).ToList();
+        var assign = m.AreaAssigns.First(a => a.Label == o.Label && a.Story == o.Story);
+        var loads = m.AreaLoads.Where(l => l.Object == o.Label && l.Story == o.Story).ToList();
+        // The outline's part on one side of a level (Sutherland-Hodgman), a new corner where an edge crosses it.
+        static List<(double X, double Y, double Z)> Side(List<(double X, double Y, double Z)> poly, double z, bool above)
+        {
+            var kept = new List<(double X, double Y, double Z)>();
+            for (var i = 0; i < poly.Count; i++)
+            {
+                var (a, b) = (poly[i], poly[(i + 1) % poly.Count]);
+                bool ina = above ? a.Z >= z - 1e-6 : a.Z <= z + 1e-6, inb = above ? b.Z >= z - 1e-6 : b.Z <= z + 1e-6;
+                if (ina) kept.Add(a);
+                if (ina != inb) { var t = (z - a.Z) / (b.Z - a.Z); kept.Add((a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t, z)); }
+            }
+            return kept.Where((c, i) => { var n = kept[(i + 1) % kept.Count]; return Math.Abs(c.X - n.X) + Math.Abs(c.Y - n.Y) + Math.Abs(c.Z - n.Z) > 1e-6; }).ToList();
+        }
+        var made = new List<Obj>();
+        for (var k = lo; k < hi; k++)
+        {
+            var (z0, z1) = (m.Elevation(k), m.Elevation(k + 1));
+            var part = Side(Side(corners, z0, true), z1, false);
+            if (part.Count < 3) continue;
+            // Each part starts at the first corner of its bottom edge, as a wall's outline does (i j j i, 1 1 0 0).
+            bool Low(int i) => Math.Abs(part[(i + part.Count) % part.Count].Z - z1) > 1e-6;
+            var first = Enumerable.Range(0, part.Count).FirstOrDefault(i => Low(i) && !Low(i - 1));
+            part = [.. part.Skip(first), .. part.Take(first)];
+            var names = part.Select(c => m.PointAt(c.X, c.Y).Name).ToList();
+            var below = part.Select(c => Math.Abs(c.Z - z1) <= 1e-6 ? 0 : 1).ToList();
+            var story = m.Stories[k + 1].Name;
+            var obj = m.Areas.Find(a => a.Kind == area.Kind && a.PointNames.SequenceEqual(names) && a.StoriesBelow.SequenceEqual(below));
+            if (obj is null)
+            {
+                obj = new AreaObject { Label = ModelEdit.NextName(m.Areas.Select(a => a.Label), Prefix(area.Label, area.Kind == AreaKind.Wall ? "W" : "F")), Kind = area.Kind, PointNames = names, StoriesBelow = below, Extra = [.. area.Extra] };
+                m.Areas.Add(obj);
+            }
+            if (m.AreaAssigns.Exists(a => a.Label == obj.Label && a.Story == story)) throw new ArgumentException($"{obj.Label}@{story} already stands where a part of {o} would go.");
+            var aa = Clone(assign); aa.Label = obj.Label; aa.Story = story;
+            m.AreaAssigns.Add(aa);
+            foreach (var l in loads) { var c = Clone(l); c.Object = obj.Label; c.Story = story; m.AreaLoads.Add(c); }
+            made.Add(new Obj(false, obj.Label, story));
+        }
+        if (made.Count < 2) throw new ArgumentException($"{o} has no part on more than one story: it stays whole.");
+        Remove(m, o);
+        return made;
+    }
+
     /// <summary>A copy of an object with each plan point put where <paramref name="f"/> says, onto <paramref name="story"/>.</summary>
     public static Obj CopyTo(StructuralModel m, Obj o, Func<double, double, (double X, double Y)> f, string story)
     {

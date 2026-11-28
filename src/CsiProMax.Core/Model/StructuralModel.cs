@@ -58,6 +58,9 @@ public sealed class StructuralModel
     /// <summary>What the program's model held that its text file does not carry, as rows of the program's own tables,
     /// put in after the text file every time the model goes into that program (<see cref="CarriedTables"/>). Null when nothing is.</summary>
     public CarriedTables? Carried { get; set; }
+    /// <summary>The Modeler's work planes, to draw on in its 3-D view (Define > Work Planes). Kept in the Modeler's
+    /// own file only: the programs' text files have no place for them. Null until one is defined.</summary>
+    public List<WorkPlane>? WorkPlanes { get; set; }
     /// <summary>The CSI program the model is made for in the Modeler: "etabs", "sap2000" or "safe" (Ahmed 2026-11-26:
     /// chosen at New Model; the Modeler then offers only what that program has, and saves its file). Kept in the .cpm.</summary>
     public string Target { get; set; } = Targets[0];

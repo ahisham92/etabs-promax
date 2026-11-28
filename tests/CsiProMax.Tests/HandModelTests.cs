@@ -65,6 +65,118 @@ static class HandModelTests
             Check(Error(m, "run_analysis", "{}").Contains("no Modeler command"), "no analysis from the page");
         });
 
+        yield return ("hand model: beams, slabs and joints go on the base level when it is named; columns and walls there say why", () =>
+        {
+            // A plan view at the base level (Move Up from the top story comes round to it) draws there too.
+            var m = Grid();
+            var b = m.Stories()[0].Name;
+            Ok(m, "add_beams", $$"""{"lines":[[0,0,6,0]],"stories":["{{b}}"],"section":"ConcBm"}""");
+            Ok(m, "add_slabs", $$"""{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"stories":["{{b}}"],"section":"Slab1"}""");
+            Ok(m, "add_joints", $$"""{"points":[[12,5]],"stories":["{{b}}"]}""");
+            Equal(1, m.Model.LineAssigns.Count(l => l.Story == b), "a grade beam on the base level");
+            Equal(1, m.Model.AreaAssigns.Count(x => x.Story == b), "a mat on the base level");
+            var why = Error(m, "add_columns", $$"""{"points":[[0,0]],"stories":["{{b}}"],"section":"ConcCol"}""");
+            Check(why.Contains("bottom level") && why.Contains("L1"), "a column on the base level says why, and where it can go: " + why);
+            Check(Error(m, "add_walls", $$"""{"lines":[[0,0,6,0]],"stories":["{{b}}"],"section":"Slab1"}""").Contains("bottom level"), "a wall on the base level says why too");
+            Ok(m, "add_beams", """{"lines":[[0,5,6,5]],"section":"ConcBm"}""");
+            Equal(1, m.Model.LineAssigns.Count(l => l.Story == b), "with no story named, beams go on every story above the base, not on it");
+        });
+
+        yield return ("work planes: by three points, two frames or an area; renamed and deleted; in the Modeler's file only; in step with the units", () =>
+        {
+            var m = Grid(); // L1 at 3 m
+            Ok(m, "add_columns", """{"points":[[0,0],[6,0]],"stories":["L1"],"section":"ConcCol"}""");
+            Ok(m, "add_beams", """{"lines":[[0,0,6,0],[0,5,6,5]],"stories":["L1"],"section":"ConcBm"}""");
+            Ok(m, "add_slabs", """{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"stories":["L1"],"section":"Slab1"}""");
+            var frames = Physical.Frames(m.Model).ToList();
+            static string Name(PhysicalFrame f) => f.Label + "@" + f.Story;
+            var column = frames.First(f => f.Kind == LineKind.Column && Math.Abs(f.I.X) < 1e-9);
+            var column6 = frames.First(f => f.Kind == LineKind.Column && Math.Abs(f.I.X - 6) < 1e-9);
+            var beam0 = frames.First(f => f.Kind == LineKind.Beam && Math.Abs(f.I.Y) < 1e-9);
+            var beam5 = frames.First(f => f.Kind == LineKind.Beam && Math.Abs(f.I.Y - 5) < 1e-9);
+            var floor = Physical.Areas(m.Model).First();
+
+            Ok(m, "define_work_plane", """{"name":"Sloped","points":[[0,0,0],[6,0,0],[0,5,3]]}""");
+            Ok(m, "define_work_plane", $$"""{"name":"Level L1","frames":["{{Name(beam0)}}","{{Name(beam5)}}"]}""");
+            Ok(m, "define_work_plane", $$"""{"name":"Grid 1","frames":["{{Name(column)}}","{{Name(beam0)}}"]}""");
+            Ok(m, "define_work_plane", $$"""{"name":"Slab","area":"{{floor.Label}}@{{floor.Story}}"}""");
+            Ok(m, "define_work_plane", $$"""{"name":"Grid B","frame":"{{Name(column6)}}","point":[6,5,3]}""");
+            WorkPlane Plane(string n) => m.Model.WorkPlanes!.Single(w => w.Name == n);
+            Equal(5, m.Model.WorkPlanes!.Count, "five work planes");
+            Check(Math.Abs(WorkPlanes.Normal(Plane("Grid B"))[0]) > 0.999999, "a column and a point off it make the plane of their grid line (x = 6)");
+            Check(Error(m, "define_work_plane", $$"""{"name":"Bad","frame":"{{Name(column6)}}","point":[6,0,1.5]}""").Contains("on the frame's line"), "a point on the frame's line makes no plane");
+            Check(Error(m, "define_work_plane", $$"""{"name":"Bad","frame":"{{Name(column6)}}"}""").Contains("give the point"), "a frame needs its point");
+            Ok(m, "delete_definition", """{"kind":"work_plane","name":"Grid B"}""");
+            Check(Math.Abs(WorkPlanes.Normal(Plane("Level L1"))[2]) > 0.999999, "two parallel beams on a story make a level plane");
+            Check(Math.Abs(WorkPlanes.Normal(Plane("Grid 1"))[1]) > 0.999999, "a column and the beam it meets make the plane of their grid line");
+            Check(Math.Abs(WorkPlanes.Normal(Plane("Slab"))[2]) > 0.999999 && WorkPlanes.Distance(Plane("Slab"), new Xyz(3, 2, 3)) < 1e-9, "a floor makes the level plane it lies in");
+
+            Check(Error(m, "define_work_plane", """{"name":"Bad","points":[[0,0,0],[1,1,1],[2,2,2]]}""").Contains("one line"), "three points on one line make no plane");
+            Check(Error(m, "define_work_plane", $$"""{"name":"Bad","frames":["{{Name(column6)}}","{{Name(beam5)}}"]}""").Contains("skew"), "two skew frames make no plane");
+            Check(Error(m, "define_work_plane", $$"""{"name":"Bad","frames":["{{Name(beam0)}}","{{Name(beam0)}}"]}""").Contains("one line"), "a frame with itself makes no plane");
+            Check(Error(m, "define_work_plane", """{"name":"Sloped","points":[[0,0,0],[6,0,0],[0,5,1]]}""").Contains("already"), "names are the planes' own");
+            Check(Error(m, "define_work_plane", """{"name":"New"}""").Contains("Give the plane"), "a new plane needs its points, frames or area");
+
+            Ok(m, "define_work_plane", """{"name":"Ramp","was":"Sloped"}""");
+            Check(m.Model.WorkPlanes!.Exists(w => w.Name == "Ramp") && !m.Model.WorkPlanes.Exists(w => w.Name == "Sloped"), "renamed, keeping its plane");
+            Ok(m, "delete_definition", """{"kind":"work_plane","name":"Ramp"}""");
+            Equal(3, m.Model.WorkPlanes!.Count, "deleted");
+            Check(Error(m, "delete_definition", """{"kind":"work_plane","name":"Ramp"}""").Contains("no work plane"), "a plane that is not there");
+            var defs = Ok(m, "model_definitions", "{}")["result"]!["work_planes"]!.AsArray();
+            Equal(3, defs.Count, "the Define form lists them");
+
+            var json = ModelFile.ToJson(m.Model);
+            Check(json.Contains("\"workPlanes\"") && json.Contains("Grid 1"), "kept in the Modeler's file");
+            Equal(3, ModelFile.FromJson(json).WorkPlanes!.Count, "and read back from it");
+            Check(!CsiProMax.E2k.E2kWriter.Write(m.Model).Contains("Grid 1"), "not written to the .e2k");
+            var ft = ModelUnits.Convert(m.Model, new CsiProMax.Model.Units { Force = "kip", Length = "ft", Temperature = "F" });
+            Check(Math.Abs(ft.WorkPlanes!.Single(w => w.Name == "Level L1").Points[0][2] - 3 / 0.3048) < 1e-6, "a units change turns the planes' points too");
+        });
+
+        yield return ("drawing by points at story levels: frames and areas take their type from their inclination (Options > Tolerances), one object across stories; ends off the levels refused", () =>
+        {
+            var m = Grid(); // Base 0, L1 3, L2 6
+            List<string> Names(JsonNode r, string key) => r["result"]![key]!.AsArray().Select(x => x!.GetValue<string>()).ToList();
+            var f = Names(Ok(m, "add_frames_by_points", """{"frames":[[0,0,3,6,0,3],[0,0,0,0,0,6],[0,0,0,6,0,6],[6,0,6,12,0,3],[0,5,0,12,5,3],[12,5,0,12.03,5,3]],"section":"ConcCol"}"""), "frames");
+            LineObject L(int i) => m.Model.Line(f[i].Split('@')[0])!;
+            Check(L(0).Kind == LineKind.Beam && f[0].EndsWith("@L1"), "two ends on one level make a beam on it");
+            Check(L(1).Kind == LineKind.Column && L(1).StoriesBelowI == 2 && f[1].EndsWith("@L2"), "one end above the other makes a column, one object from the base to L2");
+            Check(L(2).Kind == LineKind.Brace && L(2).StoriesBelowI == 2 && f[2].EndsWith("@L2"), "45 degrees makes a brace, across both stories");
+            var down = Physical.Frames(m.Model).Single(x => x.Label + "@" + x.Story == f[3]);
+            Check(L(3).Kind == LineKind.Brace && down.I == new Xyz(12, 0, 3) && down.J == new Xyz(6, 0, 6), "a brace drawn downwards runs from its lower end up");
+            Check(L(4).Kind == LineKind.Beam && L(4).StoriesBelowI == 1 && f[4].EndsWith("@L1"), "14 degrees from horizontal is within the 20 of Options > Tolerances: a sloped beam, from the base to L1");
+            Check(L(5).Kind == LineKind.Column && L(5).PointI != L(5).PointJ, "0.6 degrees from vertical is within the 1: a column, leaning");
+            Ok(m, "set_program_form", """{"table":"Preferences - Tolerance","values":{"MaxInclHorzBmFlr":"10","MaxInclVertCol":"0.5"}}""");
+            Check(m.Model.Inclinations() == (0.5, 10), "the tolerances are read from Options > Tolerances");
+            var again = Names(Ok(m, "add_frames_by_points", """{"frames":[[6,5,0,18,5,3],[0,5,0,0.03,5,3]],"section":"ConcCol"}"""), "frames");
+            Check(m.Model.Line(again[0].Split('@')[0])!.Kind == LineKind.Brace && m.Model.Line(again[1].Split('@')[0])!.Kind == LineKind.Brace, "with 10 and 0.5 degrees the sloped beam and the leaning column are braces");
+            Ok(m, "set_program_form", """{"table":"Preferences - Tolerance","values":{"MaxInclHorzBmFlr":"","MaxInclVertCol":""}}""");
+            Check(m.Model.Inclinations() == (1, 20), "blank is ETABS's default, 1 and 20");
+            Check(Error(m, "add_frames_by_points", """{"frames":[[0,0,1.5,6,0,3]],"section":"ConcCol"}""").Contains("not a story level"), "an end between levels is refused");
+            Check(Error(m, "add_frames_by_points", """{"frames":[[6,5,3,6,5,3]],"section":"ConcCol"}""").Contains("two different ends"), "a frame needs two ends");
+            Check(Error(m, "add_frames_by_points", """{"frames":[[0,0,3,6,0]],"section":"ConcCol"}""").Contains("6 numbers"), "each frame is six numbers");
+
+            var a = Names(Ok(m, "add_areas_by_points", """{"areas":[[[0,0,3],[6,0,3],[6,5,3],[0,5,3]],[[0,0,0],[6,0,0],[6,0,6],[0,0,6]],[[0,0,0],[6,0,0],[6,5,3],[0,5,3]],[[12,0,0],[12,5,0],[12,5,6]],[[0,0,0],[12,0,0],[12,12,3],[0,12,3]]],"section":"Slab1","wall_section":"Wall1"}"""), "areas");
+            AreaAssign S(int i) => m.Model.AreaAssigns.Single(x => x.Label + "@" + x.Story == a[i]);
+            AreaObject A(int i) => m.Model.Area(a[i].Split('@')[0])!;
+            Check(A(0).Kind == AreaKind.Floor && A(0).StoriesBelow.All(b => b == 0) && a[0].EndsWith("@L1"), "corners on one level make a floor on it");
+            Check(A(1).Kind == AreaKind.Wall && A(1).StoriesBelow.SequenceEqual([2, 2, 0, 0]) && a[1].EndsWith("@L2"), "upright, a wall: one object from the base to L2");
+            Check(A(2).Kind == AreaKind.Ramp && A(2).StoriesBelow.SequenceEqual([1, 1, 0, 0]) && a[2].EndsWith("@L1"), "sloped, a ramp");
+            Check(A(3).Kind == AreaKind.Wall && A(3).StoriesBelow.SequenceEqual([2, 2, 0]), "a three-cornered wall too");
+            Check(A(4).Kind == AreaKind.Floor && A(4).StoriesBelow.SequenceEqual([1, 1, 0, 0]), "14 degrees from level is within the 20: a sloped floor, from the base to L1");
+            Check(S(1).Section == "Wall1" && S(3).Section == "Wall1" && S(0).Section == "Slab1" && S(2).Section == "Slab1" && S(4).Section == "Slab1", "the walls take the wall section, the floors and the ramp the other");
+            var ramp = Physical.Areas(m.Model).Single(x => x.Label + "@" + x.Story == a[2]);
+            Check(ramp.Corners.SequenceEqual([new Xyz(0, 0, 0), new Xyz(6, 0, 0), new Xyz(6, 5, 3), new Xyz(0, 5, 3)]), "the ramp's corners are where they were drawn");
+            Check(Error(m, "add_areas_by_points", """{"areas":[[[0,0,0],[6,0,0],[6,5,3],[0,5,0]]],"section":"Slab1"}""").Contains("not flat"), "corners not in one plane are refused");
+            Check(Error(m, "add_areas_by_points", """{"areas":[[[0,0,0],[6,0,0],[6,5,1]]],"section":"Slab1"}""").Contains("not a story level"), "a corner between levels is refused");
+            Check(Error(m, "add_areas_by_points", """{"areas":[[[0,0,3],[6,0,3],[6,5,3],[6,0,3]]],"section":"Slab1"}""").Contains("at one place"), "two corners at one place are refused");
+            Check(Error(m, "add_areas_by_points", """{"areas":[[[0,0,3],[6,0,3],[6,5,3]]],"section":"Nope"}""").Contains("no slab or wall section"), "the section must be there");
+
+            var back = CsiProMax.E2k.E2kReader.Read(CsiProMax.E2k.E2kWriter.Write(m.Model));
+            Check(back.Lines.Exists(l => l.Kind == LineKind.Brace && l.StoriesBelowI == 2) && back.Lines.Exists(l => l.Kind == LineKind.Beam && l.StoriesBelowI == 1) && back.Areas.Exists(x => x.Kind == AreaKind.Wall && x.StoriesBelow.SequenceEqual([2, 2, 0, 0])) && back.Areas.Exists(x => x.Kind == AreaKind.Ramp),
+                "the .e2k keeps them across their stories");
+        });
+
         yield return ("hand model: undo and redo step through every hand change, and stop at the chat's", () =>
         {
             var m = Grid();

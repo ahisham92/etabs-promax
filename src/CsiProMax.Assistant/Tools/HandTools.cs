@@ -49,9 +49,13 @@ public static class HandTools
             "Adds a load combination, or changes one ('was': its name now): its type (Linear Add, Envelope, Absolute Add, SRSS, Range Add) and each load case or combination with its scale factor.",
             """{"type":"object","required":["name","cases"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"type":{"type":"string"},"notes":{"type":"string","description":"The Load Combination Notes."},"auto":{"type":"boolean","description":"A default design combination (Auto Combination: Yes, not editable)."},"cases":{"type":"array","items":{"type":"object","required":["case","factor"],"properties":{"case":{"type":"string"},"factor":{"type":"number"}}}}}}""",
             Ask.Changes, DefineCombination, a => $"Define the combination {Text(a, "name")}"),
+        new("define_work_plane",
+            "Adds a work plane to draw on in the Modeler's 3-D view (Define > Work Planes), or renames or moves one ('was': its name now). The plane is given by three points not on one line ('points', [x, y, z] each), by two frames in one plane that are not on one line ('frames', their names as Label@Story), by a frame and a point off its line ('frame' and 'point'), or by a flat area ('area', its name as Label@Story). Renaming alone needs no plane. Work planes are the Modeler's own: kept in its file, not in the programs' text files.",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"points":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"Three [x, y, z] points."},"frames":{"type":"array","items":{"type":"string"},"description":"Two frame names."},"frame":{"type":"string","description":"A frame's name, with 'point'."},"point":{"type":"array","items":{"type":"number"},"description":"[x, y, z], off the frame's line, with 'frame'."},"area":{"type":"string","description":"An area's name."}}}""",
+            Ask.Changes, DefineWorkPlane, a => $"Define the work plane {Text(a, "name")}"),
         new("delete_definition",
-            "Deletes a material, frame section, slab or wall section, load pattern (with its loads and case), load case, function or combination. One still in use is not deleted, and the answer says what uses it.",
-            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["material","frame_section","shell_section","load_pattern","load_case","function","combination"]},"name":{"type":"string"}}}""",
+            "Deletes a material, frame section, slab or wall section, load pattern (with its loads and case), load case, function, combination or work plane. One still in use is not deleted, and the answer says what uses it.",
+            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["material","frame_section","shell_section","load_pattern","load_case","function","combination","work_plane"]},"name":{"type":"string"}}}""",
             Ask.Changes, DeleteDefinition, a => $"Delete {Text(a, "kind").Replace('_', ' ')} {Text(a, "name")}"),
         new("model_definitions",
             "Everything the Define forms show: stories, grids, materials, frame and slab/wall sections, load patterns, load cases and combinations with their cases and factors.",
@@ -85,6 +89,13 @@ public static class HandTools
             }).ToArray()),
             ["grids"] = new JsonArray(m.Grids.Select(g => (JsonNode)new JsonObject { ["label"] = g.Label, ["direction"] = g.Direction, ["coordinate"] = g.Coordinate, ["visible"] = StoryGridOptions.Visible(g), ["bubble"] = StoryGridOptions.Bubble(g) }).ToArray()),
             ["grid_system"] = new JsonObject { ["name"] = m.GridSystem, ["bubble_size"] = StoryGridOptions.BubbleSize(m) },
+            ["work_planes"] = new JsonArray((m.WorkPlanes ?? []).Select(w => (JsonNode)new JsonObject
+            {
+                ["name"] = w.Name, ["points"] = new JsonArray(w.Points.Select(p => (JsonNode)new JsonArray(p.Select(v => (JsonNode)v).ToArray())).ToArray()),
+                ["normal"] = new JsonArray(WorkPlanes.Normal(w).Select(v => (JsonNode)Math.Round(v, 9)).ToArray()),
+            }).ToArray()),
+            // Options > Tolerances: what a frame or area drawn by its points comes out as (ModelEdit.Inclinations).
+            ["inclinations"] = new JsonObject { ["from_vertical"] = m.Inclinations().FromVertical, ["from_horizontal"] = m.Inclinations().FromHorizontal },
             ["materials"] = new JsonArray(m.Materials.Select(x => (JsonNode)new JsonObject
             {
                 ["name"] = x.Name, ["type"] = x.Type, ["fc"] = x.Number("FC"), ["fy"] = x.Number("FY"), ["elastic_modulus"] = x.Number("E"), ["unit_weight"] = x.Number("WEIGHTPERVOLUME"), ["poisson"] = x.Number("U"),
@@ -203,6 +214,70 @@ public static class HandTools
     }
 
     // ---- materials and sections ----
+
+    // ---- work planes ----
+
+    private static JsonNode DefineWorkPlane(JsonElement a, ICsiLink e)
+    {
+        var (name, was) = (Need(a, "name"), Opt(a, "was"));
+        var link = Offline(e);
+        bool Has(string k) => a.TryGetProperty(k, out var v) && v.ValueKind != JsonValueKind.Null;
+        if (new[] { Has("points"), Has("frames"), Has("frame") || Has("point"), Has("area") }.Count(x => x) > 1)
+            throw new ToolInputException("Give the plane one way: three points, two frames, a frame and a point, or an area.");
+        List<double[]>? points;
+        try { points = PlaneOf(a, link.Model); }
+        catch (ArgumentException ex) { throw new ToolInputException(ex.Message); }
+        return link.Edit<JsonNode>(m =>
+        {
+            m.WorkPlanes ??= [];
+            FreeName(m.WorkPlanes.Select(w => w.Name), name, was, "work plane");
+            var plane = Existing(m.WorkPlanes, was, w => w.Name, "work plane");
+            if (plane is null)
+            {
+                if (points is null) throw new ToolInputException("Give the plane: three points, two frames or an area.");
+                m.WorkPlanes.Add(plane = new WorkPlane { Name = name, Points = points });
+            }
+            else
+            {
+                plane.Name = name;
+                if (points is not null) plane.Points = points;
+            }
+            return new JsonObject { ["work_plane"] = name, ["normal"] = new JsonArray(WorkPlanes.Normal(plane).Select(v => (JsonNode)Math.Round(v, 9)).ToArray()) };
+        });
+    }
+
+    /// <summary>The plane given to define_work_plane, or null when none is (a rename).</summary>
+    private static List<double[]>? PlaneOf(JsonElement a, StructuralModel m)
+    {
+        static Xyz Point(JsonElement p) =>
+            p.ValueKind == JsonValueKind.Array && p.GetArrayLength() == 3 && p.EnumerateArray().All(v => v.ValueKind == JsonValueKind.Number)
+                ? new Xyz(p[0].GetDouble(), p[1].GetDouble(), p[2].GetDouble())
+                : throw new ToolInputException("Each point of a work plane is [x, y, z].");
+        var frames = new Lazy<List<PhysicalFrame>>(() => Physical.Frames(m).ToList());
+        PhysicalFrame Frame(string n) => frames.Value.Find(f => f.Label + "@" + f.Story == n) ?? throw new ToolInputException($"There is no frame named '{n}'.");
+        if (a.TryGetProperty("points", out var pts) && pts.ValueKind == JsonValueKind.Array)
+            return WorkPlanes.FromPoints(pts.EnumerateArray().Select(Point).ToList());
+        if (a.TryGetProperty("frames", out var fr) && fr.ValueKind == JsonValueKind.Array)
+        {
+            var names = fr.EnumerateArray().Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() ?? "" : "").ToList();
+            if (names.Count != 2) throw new ToolInputException("A work plane takes two frames.");
+            var (f1, f2) = (Frame(names[0]), Frame(names[1]));
+            return WorkPlanes.FromFrames(f1.I, f1.J, f2.I, f2.J);
+        }
+        if (Opt(a, "frame") is { } one)
+        {
+            if (!a.TryGetProperty("point", out var pt)) throw new ToolInputException("With a frame, give the point off its line ('point', [x, y, z]).");
+            var f = Frame(one);
+            return WorkPlanes.FromPointAndFrame(Point(pt), f.I, f.J);
+        }
+        if (a.TryGetProperty("point", out _)) throw new ToolInputException("With a point, give the frame ('frame', its name).");
+        if (Opt(a, "area") is { } area)
+        {
+            var found = Physical.Areas(m).FirstOrDefault(x => x.Label + "@" + x.Story == area) ?? throw new ToolInputException($"There is no area named '{area}'.");
+            return WorkPlanes.FromCorners(found.Corners);
+        }
+        return null;
+    }
 
     private static T Existing<T>(List<T> list, string? name, Func<T, string> named, string what) where T : class =>
         name is null ? null! : list.Find(x => named(x) == name) ?? throw new ToolInputException($"There is no {what} named '{name}'.");
@@ -455,8 +530,12 @@ public static class HandTools
                     InUse(AnalysisDefs.UsersOfFunction(m, name).Count(), "load cases");
                     if (!AnalysisDefs.DeleteFunction(m, name)) throw new ToolInputException($"There is no function named '{name}'.");
                     break;
+                case "work_plane":
+                    if ((m.WorkPlanes?.RemoveAll(w => w.Name == name) ?? 0) == 0) throw new ToolInputException($"There is no work plane named '{name}'.");
+                    if (m.WorkPlanes is { Count: 0 }) m.WorkPlanes = null;
+                    break;
                 default:
-                    throw new ToolInputException("kind is material, frame_section, shell_section, load_pattern, load_case, function or combination.");
+                    throw new ToolInputException("kind is material, frame_section, shell_section, load_pattern, load_case, function, combination or work_plane.");
             }
             return Done($"deleted {kind.Replace('_', ' ')} {name}");
         });

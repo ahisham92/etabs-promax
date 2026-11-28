@@ -157,9 +157,9 @@ public static class ModelEdit
 
     private static LineAssign AssignLine(this StructuralModel m, LineKind kind, PlanPoint i, PlanPoint j, int below, string prefix, string story, string section)
     {
-        m.RequireStory(story, kind == LineKind.Beam ? 0 : 1);
+        m.RequireStory(story, kind == LineKind.Beam || below == 0 ? 0 : 1); // a brace in a floor's plane stands on its story
         var line = m.Lines.Find(l => l.Kind == kind && l.StoriesBelowI == below &&
-                                     ((l.PointI == i.Name && l.PointJ == j.Name) || (kind == LineKind.Beam && l.PointI == j.Name && l.PointJ == i.Name)));
+                                     ((l.PointI == i.Name && l.PointJ == j.Name) || (kind == LineKind.Beam && below == 0 && l.PointI == j.Name && l.PointJ == i.Name)));
         if (line is null)
         {
             line = new LineObject { Label = NextName(m.Lines.Select(l => l.Label), prefix), Kind = kind, PointI = i.Name, PointJ = j.Name, StoriesBelowI = below };
@@ -200,6 +200,60 @@ public static class ModelEdit
         var i = m.PointAt(x1, y1).Name; var j = m.PointAt(x2, y2).Name;
         if (i == j) throw new ArgumentException("A wall needs two different ends.");
         return m.AssignArea(AreaKind.Wall, [i, j, j, i], [1, 1, 0, 0], "W", story, section, null);
+    }
+
+    /// <summary>
+    /// Options > Tolerances' two inclinations in degrees (ETABS's MaxInclVertCol and MaxInclHorzBmFlr; blank is its
+    /// default, 1 and 20). A frame within the first of vertical is a column, one within the second of horizontal a
+    /// beam, else a brace; an area within the second of level is a floor, one within the first of upright a wall, else
+    /// a ramp.
+    /// </summary>
+    public static (double FromVertical, double FromHorizontal) Inclinations(this StructuralModel m)
+    {
+        var row = m.DefinitionTables?.GetValueOrDefault("Preferences - Tolerance")?.FirstOrDefault();
+        double Read(string key, double fallback) => row?.GetValueOrDefault(key) is { Length: > 0 } text &&
+            double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && v is >= 0 and <= 90 ? v : fallback;
+        return (Read("MaxInclVertCol", 1), Read("MaxInclHorzBmFlr", 20));
+    }
+
+    /// <summary>A frame between two points, each at a story level (Draw Beam/Column/Brace in the 3-D view): a column,
+    /// beam or brace by its inclination (<see cref="Inclinations"/>), one on a single level a beam. One object however
+    /// many stories it spans. With <paramref name="brace"/> (Quick Draw Braces) it is a brace whatever its inclination,
+    /// one on a single level too (bracing in a floor's plane).</summary>
+    public static LineAssign AddFrame(this StructuralModel m, Xyz a, Xyz b, string section, bool brace = false)
+    {
+        int la = m.LevelOf(a.Z), lb = m.LevelOf(b.Z);
+        var plan = Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+        if (la == lb && plan <= Tolerance) throw new ArgumentException("A frame needs two different ends.");
+        if (brace && plan <= Tolerance) throw new ArgumentException("A brace's two ends are apart in plan (one above the other is a column).");
+        var (low, high) = la <= lb ? (a, b) : (b, a);
+        int bottom = Math.Min(la, lb), top = Math.Max(la, lb);
+        var (fromVertical, fromHorizontal) = m.Inclinations();
+        var tilt = Math.Atan2(plan, Math.Abs(b.Z - a.Z)) * 180 / Math.PI; // 0 upright, 90 level
+        var (kind, prefix) = brace ? (LineKind.Brace, "D") : la == lb || 90 - tilt <= fromHorizontal + 1e-9 ? (LineKind.Beam, "B") : tilt <= fromVertical + 1e-9 ? (LineKind.Column, "C") : (LineKind.Brace, "D");
+        var i = m.PointAt(low.X, low.Y); var j = plan <= Tolerance ? i : m.PointAt(high.X, high.Y);
+        return m.AssignLine(kind, i, j, top - bottom, prefix, m.Stories[top].Name, section);
+    }
+
+    /// <summary>An area on corners in one plane, each at a story level, in order round its edge (Draw Floor/Wall in the
+    /// 3-D view): a floor, wall or ramp by its inclination (<see cref="Inclinations"/>), one on a single level a floor;
+    /// a wall takes <paramref name="wallSection"/> when one is given. One object however many stories it spans.</summary>
+    public static AreaAssign AddArea(this StructuralModel m, IReadOnlyList<Xyz> corners, string section, string? diaphragm = null, string? wallSection = null)
+    {
+        var levels = corners.Select(c => m.LevelOf(c.Z)).ToList();
+        var plane = new WorkPlane { Points = WorkPlanes.FromCorners(corners) }; // three or more, not on one line, flat
+        for (var k = 0; k < corners.Count; k++)
+            for (var l = k + 1; l < corners.Count; l++)
+                if (levels[k] == levels[l] && Math.Abs(corners[k].X - corners[l].X) <= Tolerance && Math.Abs(corners[k].Y - corners[l].Y) <= Tolerance)
+                    throw new ArgumentException("Two of the area's corners are at one place.");
+        if (levels.All(l => l == levels[0])) return m.AddSlab(corners.Select(c => (c.X, c.Y)).ToList(), m.Stories[levels[0]].Name, section, diaphragm);
+        var (fromVertical, fromHorizontal) = m.Inclinations();
+        var tilt = Math.Acos(Math.Min(1, Math.Abs(WorkPlanes.Normal(plane)[2]))) * 180 / Math.PI; // 0 level, 90 upright
+        var kind = tilt <= fromHorizontal + 1e-9 ? AreaKind.Floor : 90 - tilt <= fromVertical + 1e-9 ? AreaKind.Wall : AreaKind.Ramp;
+        var top = levels.Max();
+        var names = corners.Select(c => m.PointAt(c.X, c.Y).Name).ToList();
+        return m.AssignArea(kind, names, levels.Select(l => top - l).ToList(), kind == AreaKind.Wall ? "W" : "F", m.Stories[top].Name,
+            kind == AreaKind.Wall && wallSection is { Length: > 0 } ? wallSection : section, null);
     }
 
     private static AreaAssign AssignArea(this StructuralModel m, AreaKind kind, List<string> names, List<int> below, string prefix, string story, string section, string? diaphragm)
@@ -293,6 +347,15 @@ public static class ModelEdit
         var index = m.StoryIndex(story);
         if (index < 0) throw new ArgumentException($"There is no story named '{story}'. Stories: {string.Join(", ", m.Stories.Select(s => s.Name))}.");
         if (index < levelsBelowNeeded) throw new ArgumentException($"'{story}' is the base level: nothing can hang below it.");
+    }
+
+    /// <summary>The story whose level is at elevation z (to 1e-4 of the model's length unit).</summary>
+    private static int LevelOf(this StructuralModel m, double z)
+    {
+        for (var i = 0; i < m.Stories.Count; i++)
+            if (Math.Abs(m.Elevation(i) - z) <= 1e-4) return i;
+        string N(double v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        throw new ArgumentException($"Elevation {N(z)} is not a story level: members join at story levels. The levels are: {string.Join(", ", m.Stories.Select((s, i) => $"{s.Name} {N(m.Elevation(i))}"))}.");
     }
 
     /// <summary>The next free name: prefix plus the smallest number above every name of that form in use.</summary>
