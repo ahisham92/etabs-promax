@@ -1,0 +1,762 @@
+File written by CSI ProMax Modeler on 2026-11-28 12:56: story Story1 of CPM field test
+
+TABLE:  "PROGRAM CONTROL"
+   ProgramName=SAFE   Version=20.1.0   ProgLevel="Post Tensioning"   CurrUnits="KN, m, C"   ConcSlbCode="ACI 318-19"
+
+TABLE:  "GRID DEFINITIONS - GENERAL"
+   Name=G1   Type=Cartesian   Ux=0   Uy=0   Rz=0   "Datum Name"=Story1   "Story Name Below"=Base   "Model Datum"=3.2   "Story Height Below"=3.2
+
+TABLE:  "GRID DEFINITIONS - GRID LINES"
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=A   Ordinate=0   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=B   Ordinate=6   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=C   Ordinate=12   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=CPM-X   Ordinate=18   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=1   Ordinate=0   "Bubble Location"=Start   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=2   Ordinate=5   "Bubble Location"=Start   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=3   Ordinate=10   "Bubble Location"=Start   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=CPM-Y   Ordinate=15   "Bubble Location"=Start   Visible=Yes
+
+TABLE:  "MATERIAL PROPERTIES - GENERAL"
+   Material=S355   Type=Steel   SymType=Isotropic   Grade=S355
+   Material=C30/37   Type=Concrete   SymType=Isotropic   Grade=C30/37
+   Material=DefaultRebar_500   Type=Rebar   SymType=Uniaxial   Grade="Grade 500"
+   Material=CPM-C35   Type=Concrete   SymType=Isotropic   Grade=CPM-C35
+   Material=CPM-S355   Type=Steel   SymType=Isotropic   Grade=S355   Notes="CPM field test steel"
+   Material=CPM-A416   Type=Tendon   SymType=Uniaxial   Grade=Tendon
+   Material=CPM-REBAR   Type=Rebar   SymType=Uniaxial   Grade=Rebar
+
+TABLE:  "MATERIAL PROPERTIES - BASIC MECHANICAL PROPERTIES"
+   Material=S355   DensityType=Weight   UnitWeight=76.97286   E1=210000000   G12=80769230.7692308   U12=0.3   A1=0.0000117
+   Material=C30/37   DensityType=Weight   UnitWeight=24.992619   E1=33000000   G12=13750000   U12=0.2   A1=0.00001
+   Material=DefaultRebar_500   DensityType=Weight   UnitWeight=77   E1=200000000   U12=0.3   A1=0.000012
+   Material=CPM-C35   DensityType=Weight   UnitWeight=25   E1=32000000   G12=13333333.3333333   U12=0.2   A1=0.0000099
+   Material=CPM-S355   DensityType=Weight   UnitWeight=77   E1=210000000   G12=80769230.7692308   U12=0.3   A1=0.0000117
+   Material=CPM-A416   DensityType=Weight   UnitWeight=0   E1=196500000   U12=0.3   A1=0.0000117
+   Material=CPM-REBAR   DensityType=Weight   UnitWeight=0   E1=200000000   U12=0.3   A1=0.0000117
+
+TABLE:  "MATERIAL PROPERTIES - STEEL DATA"
+   Material=S355   Fy=355000   Fu=510000   Fye=390500   Fue=561000   SSCurveOpt=Simple   SSHysType=Kinematic   SHard=0.015   SMax=0.11   SRup=0.17   FinalSlope=-0.1
+   Material=CPM-S355   Fy=355000   Fu=510000   Fye=390500   Fue=561000   SSCurveOpt=Simple   SSHysType=Kinematic   SHard=0.02   SMax=0.11   SRup=0.17   FinalSlope=-0.1
+
+TABLE:  "MATERIAL PROPERTIES - CONCRETE DATA"
+   Material=C30/37   Fc=30000   LtWtConc=No   SSCurveOpt=Mander   SSHysType=Concrete   SFc=0.00181818   SCap=0.005   FinalSlope=-0.1
+   Material=CPM-C35   Fc=35000   LtWtConc=No
+
+TABLE:  "MATERIAL PROPERTIES - REBAR DATA"
+   Material=DefaultRebar_500   Fy=500000   Fu=630000   Fye=550000   Fue=690000   SSCurveOpt=Simple   SSHysType=Kinematic   SHard=0.01   FinalSlope=-0.1   SCap=0.1
+   Material=CPM-REBAR   Fy=420000   Fu=620000   Fye=462000   Fue=682000
+
+TABLE:  "MATERIAL PROPERTIES - TENDON DATA"
+   Material=CPM-A416   Fy=1675000   Fu=1862000
+
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - SUMMARY"
+   Name=SteelCol   Shape="Steel I/Wide Flange"
+   Name=SteelBm   Shape="Steel I/Wide Flange"
+   Name=ConcCol   Shape="Concrete Rectangular"
+   Name=ConcBm   Shape="Concrete Rectangular"
+   Name=ConcCol1   Shape="Concrete Rectangular"
+   Name=ConcBm1   Shape="Concrete Rectangular"
+   Name=C500x500   Shape="Concrete Rectangular"
+   Name=B300x600   Shape="Concrete Rectangular"
+   Name=CPM-C400   Shape="Concrete Rectangular"
+   Name=CPM-B250x500   Shape="Concrete Rectangular"
+   Name=CPM-W   Shape="Steel I/Wide Flange"
+   Name=CPM-PIPE   Shape="Concrete Rectangular"
+   Name=CPM-ANGLE   Shape="Concrete Rectangular"
+   Name=CPM-TRAP   Shape="Concrete Rectangular"
+   Name=CPM-NP   Shape="Concrete Rectangular"
+   Name=SDCPM-ANGLE   Shape="Concrete Rectangular"
+
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE"
+   Name=SteelCol   Material=S355   "From File?"=No   "Total Depth"=0.5   "Top Flange Width"=0.5   "Top Flange Thickness"=0.025   "Web Thickness"=0.0125   "Bottom Flange Width"=0.5   "Bottom Flange Thickness"=0.025   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=SteelBm   Material=S355   "From File?"=No   "Total Depth"=0.5   "Top Flange Width"=0.16666667   "Top Flange Thickness"=0.0125   "Web Thickness"=0.00625   "Bottom Flange Width"=0.16666667   "Bottom Flange Thickness"=0.0125   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-W   Material=CPM-S355   "From File?"=No   "Total Depth"=0.5   "Top Flange Width"=0.2   "Top Flange Thickness"=0.016   "Web Thickness"=0.01   "Bottom Flange Width"=0.2   "Bottom Flange Thickness"=0.016   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=0.9   "Mass Modifier"=1   "Weight Modifier"=1
+
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR"
+   Name=ConcCol   Material=C30/37   "From File?"=No   Depth=0.375   Width=0.375   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=ConcBm   Material=C30/37   "From File?"=No   Depth=0.5   Width=0.375   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=ConcCol1   Material=C30/37   "From File?"=No   Depth=0.3   Width=0.3   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=ConcBm1   Material=C30/37   "From File?"=No   Depth=0.6   Width=0.96666664   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=C500x500   Material=C30/37   "From File?"=No   Depth=0.5   Width=0.5   "Design Type"=Column   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=B300x600   Material=C30/37   "From File?"=No   Depth=0.6   Width=0.3   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-C400   Material=CPM-C35   "From File?"=No   Depth=0.4   Width=0.4   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-B250x500   Material=CPM-C35   "From File?"=No   Depth=0.5   Width=0.25   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-PIPE   Material=CPM-S355   "From File?"=No   Depth=0.3   Width=0.3   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-ANGLE   Material=CPM-S355   "From File?"=No   Depth=0.1   Width=0.1   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-TRAP   Material=C30/37   "From File?"=No   Depth=0   Width=0   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-NP   Material=""   "From File?"=No   Depth=0   Width=0   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=SDCPM-ANGLE   Material=CPM-S355   "From File?"=No   Depth=0   Width=0   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+
+TABLE:  "TENDON SECTION PROPERTIES"
+   Name=Tendon1   Material=" "   StrandArea=0.0000987095
+   Name=CPM-T15   Material=CPM-A416   StrandArea=0.00014
+
+TABLE:  "AREA SECTION PROPERTY DEFINITIONS - SUMMARY"
+   Name=Slab1   Type=Slab   "Element Type"=Shell-Thin   Material=C30/37   "Total Thickness"=0.2
+   Name=Plank1   Type=Slab   "Element Type"=Membrane   Material=C30/37   "Total Thickness"=0.2
+   Name=Drop1   Type=Slab   "Element Type"=Shell-Thin   Material=C30/37   "Total Thickness"=0.35
+   Name=S200   Type=Slab   "Element Type"=Shell-Thin   Material=C30/37   "Total Thickness"=0.2
+   Name=CPM-S180   Type=Slab   "Element Type"=Shell-Thin   Material=CPM-C35   "Total Thickness"=0.18
+   Name=CPM-DROP   Type=Slab   "Element Type"=Shell-Thick   Material=C30/37   "Total Thickness"=0.3
+   Name=CPM-RIB   Type=Slab   "Element Type"=Shell-Thin   Material=C30/37   "Total Thickness"=0.1
+   Name=Wall1   Type=Wall   "Element Type"=Shell-Thin   Material=C30/37   "Total Thickness"=0.25
+   Name=CPM-W200   Type=Wall   "Element Type"=Shell-Thin   Material=CPM-C35   "Total Thickness"=0.2
+
+TABLE:  "SLAB PROPERTY DEFINITIONS"
+   Name=Slab1   "Modeling Type"=Shell-Thin   "Property Type"=Slab   Material=C30/37   "Slab Thickness"=0.2   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=Plank1   "Modeling Type"=Membrane   "Property Type"=Slab   Material=C30/37   "Slab Thickness"=0.2   "One Way Load Distribution?"=Yes   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=Drop1   "Modeling Type"=Shell-Thin   "Property Type"=Drop   Material=C30/37   "Slab Thickness"=0.35   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=S200   "Modeling Type"=Shell-Thin   "Property Type"=Slab   Material=C30/37   "Slab Thickness"=0.2   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-S180   "Modeling Type"=Shell-Thin   "Property Type"=Slab   Material=CPM-C35   "Slab Thickness"=0.18   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-DROP   "Modeling Type"=Shell-Thick   "Property Type"=Drop   Material=C30/37   "Slab Thickness"=0.3   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=0.25   "m22 Modifier"=0.25   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-RIB   "Modeling Type"=Shell-Thin   "Property Type"=Ribbed   Material=C30/37   "Slab Thickness"=0.1   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   "Overall Depth"=0.4   "Rib Width at Top"=0.15   "Rib Width at Bottom"=0.125   "Rib Spacing 1"=0.9
+   Name=CPM-SF-SLAB   "Modeling Type"=Shell-Thin   "Property Type"=Slab   Material=C30/37   "Slab Thickness"=0.23   "One Way Load Distribution?"=No   "f11 Modifier"=0.8   "f22 Modifier"=0.8   "f12 Modifier"=1   "m11 Modifier"=0.5   "m22 Modifier"=0.5   "m12 Modifier"=0.5   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+
+TABLE:  "DECK PROPERTY DEFINITIONS"
+   Name=Deck1   "Deck Type"=Filled   "Slab Material"=C30/37   "Deck Material"=S355   "Slab Depth"=0.0875   "Rib Depth"=0.075   "Rib Width Top"=0.175   "Rib Width Bottom"=0.125   "Rib Spacing"=0.3   "Deck Shear Thickness"=0.001   "Deck Unit Weight"=0.1101246   "Shear Stud Diameter"=0.019   "Shear Stud Height"=0.15   "Shear Stud Tensile Strength"=400000   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-DECK   "Deck Type"=Filled   "Slab Material"=C30/37   "Deck Material"=C30/37   "Slab Depth"=0.0875   "Rib Depth"=0.075   "Rib Width Top"=0.175   "Rib Width Bottom"=0.125   "Rib Spacing"=0.3   "Deck Shear Thickness"=0.001   "Deck Unit Weight"=0.11   "Shear Stud Diameter"=0.019   "Shear Stud Height"=0.15   "Shear Stud Tensile Strength"=400000   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+
+TABLE:  "WALL PROPERTY DEFINITIONS - SPECIFIED"
+   Name=Wall1   "Modeling Type"=Shell-Thin   Material=C30/37   "Wall Thickness"=0.25   "Include Auto Rigid Zone?"=No   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=CPM-W200   "Modeling Type"=Shell-Thin   Material=CPM-C35   "Wall Thickness"=0.2   "Include Auto Rigid Zone?"=No   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+
+TABLE:  "REINFORCING BAR SIZES"
+   Name=6   Diameter=0.006   Area=2.8299999E-05
+   Name=8   Diameter=0.008   Area=5.03E-05
+   Name=10   Diameter=0.01   Area=7.85E-05
+   Name=12   Diameter=0.012   Area=0.000113099995
+   Name=14   Diameter=0.014   Area=0.0001539
+   Name=16   Diameter=0.016   Area=0.0002011
+   Name=18   Diameter=0.018   Area=0.0002545
+   Name=20   Diameter=0.02   Area=0.0003142
+   Name=22   Diameter=0.022   Area=0.0003801
+   Name=25   Diameter=0.025   Area=0.0004909
+   Name=26   Diameter=0.026   Area=0.0005309
+   Name=28   Diameter=0.028   Area=0.0006158
+   Name=32   Diameter=0.032   Area=0.0008042
+   Name=36   Diameter=0.036   Area=0.0010179001
+   Name=40   Diameter=0.04   Area=0.0012566
+   Name=50   Diameter=0.05   Area=0.0019635
+   Name=CPM16   Diameter=0.016   Area=0.000201
+   Name=CPM-SF-B22   Diameter=0.022   Area=0.00038
+
+TABLE:  "LOAD PATTERN DEFINITIONS"
+   Name=Dead   "Is Auto Load"=No   Type=Dead   "Self Weight Multiplier"=1
+   Name=Live   "Is Auto Load"=No   Type=Live   "Self Weight Multiplier"=0
+   Name=CPM-SDL   "Is Auto Load"=No   Type="Super Dead"   "Self Weight Multiplier"=0
+   Name=CPM-TEMP   "Is Auto Load"=No   Type=Temperature   "Self Weight Multiplier"=0
+   Name=CPM-EQ22   "Is Auto Load"=No   Type=Seismic   "Self Weight Multiplier"=0
+   Name=CPM-EQUC   "Is Auto Load"=No   Type=Seismic   "Self Weight Multiplier"=0
+   Name=CPM-W16   "Is Auto Load"=No   Type=Wind   "Self Weight Multiplier"=0
+   Name=CPM-NOTX   "Is Auto Load"=No   Type=Notional   "Self Weight Multiplier"=0
+   Name=CPM-PTT   "Is Auto Load"=No   Type=Prestress-Transfer   "Self Weight Multiplier"=0
+   Name=CPM-PTF   "Is Auto Load"=No   Type=Prestress-Final   "Self Weight Multiplier"=0
+   Name=CPM-SF-LIVE   "Is Auto Load"=No   Type=Live   "Self Weight Multiplier"=0
+
+TABLE:  "GROUP DEFINITIONS"
+   Name=All   Color=Yellow   "Steel Design?"=No   "Concrete Design?"=No   "Composite Design?"=No
+   Name=CPM-G   Color=Blue   "Steel Design?"=No   "Concrete Design?"=No   "Composite Design?"=No
+   Name=CPM-SF-GRP   Color=Red   "Steel Design?"=No   "Concrete Design?"=Yes   "Composite Design?"=No
+
+TABLE:  "GROUP ASSIGNMENTS"
+   "Group Name"=CPM-G   "Object Type"=Beam   "Object Unique Name"=B1
+   "Group Name"=CPM-G   "Object Type"=Beam   "Object Unique Name"=B2
+   "Group Name"=CPM-G   "Object Type"=Beam   "Object Unique Name"=B3
+
+TABLE:  "MASS SOURCE DEFINITION"
+   Name=MsSrc1   "Is Default"=Yes   "Include Lateral Mass?"=Yes   "Include Vertical Mass?"=No   "Lump Mass?"=Yes   "Source Self Mass?"=Yes   "Source Added Mass?"=Yes   "Source Load Patterns?"=No   "Move Mass Centroid?"=No
+
+TABLE:  "DATABASE TABLE NAMED SET DEFINITIONS"
+   Name=CPM-DBSET   "Table Key"="Story Definitions"   "Load Pattern"=Dead   "Base Reaction Option"="Program Determined"   "Mode Option"=Range   "Buckling Mode Option"=Range   Multistep=Stepped   "Nonlinear Static"=Envelopes   "Modal History"=Envelopes   "Direct History"=Envelopes   "Load Combination"=Envelopes   "Show Unformatted"=No   "Expose All"=No
+
+TABLE:  "LOAD CASE DEFINITIONS - SUMMARY"
+   Name=Dead   Type="Linear Static"
+   Name=Live   Type="Linear Static"
+   Name=CPM-SDL   Type="Linear Static"
+   Name=CPM-TEMP   Type="Linear Static"
+   Name=CPM-EQ22   Type="Linear Static"
+   Name=CPM-EQUC   Type="Linear Static"
+   Name=CPM-W16   Type="Linear Static"
+   Name=CPM-NOTX   Type="Linear Static"
+   Name=CPM-LS   Type="Linear Static"
+   Name=CPM-PTT   Type="Linear Static"
+   Name=CPM-PTF   Type="Linear Static"
+   Name=Modal   Type="Modal - Eigen"
+   Name=CPM-PTF-HP   Type=Hyperstatic
+
+TABLE:  "LOAD CASE DEFINITIONS - LINEAR STATIC"
+   Name=Dead   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=Dead   "Load SF"=1   "Design Type"="Program Determined"
+   Name=Live   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=Live   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-SDL   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-SDL   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-TEMP   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-TEMP   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-EQ22   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-EQ22   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-EQUC   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-EQUC   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-W16   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-W16   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-NOTX   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-NOTX   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-LS   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=Dead   "Load SF"=1.4   "Design Type"="Program Determined"
+   Name=CPM-PTT   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-PTT   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-PTF   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-PTF   "Load SF"=1   "Design Type"="Program Determined"
+
+TABLE:  "MODAL CASE DEFINITIONS - EIGEN"
+   Name=Modal   "Exclude Group"=None   "Mass Source"=MsSrc1   "Initial Condition"=Unstressed   "Max Modes"=12   "Min Modes"=1   "Freq Shift"=0   "Cutoff Freq"=0   "Convergence Tol"=1E-09   "Auto Shift?"=Yes   "Design Type"="Program Determined"
+
+TABLE:  "LOAD CASE DEFINITIONS - HYPERSTATIC"
+   Name=CPM-PTF-HP   "Base Case"=CPM-PTF   "Support Type"=Springs   "Relative SF"=1   "Design Type"="Program Determined"
+
+TABLE:  "LOAD COMBINATION DEFINITIONS"
+   Name=CPM-ULS   Type="Linear Add"   "Is Auto"=No   "Load Name"=Modal   SF=1.4
+   Name=CPM-ULS   "Load Name"=Dead   SF=1.4
+   Name=CPM-ULS   "Load Name"=CPM-SDL   SF=1.4
+   Name=CPM-TXT   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1.4
+   Name=CPM-CMBN   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1.2
+   Name=DConS99   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1.4
+   Name=CPM-CNV   Type="Linear Add"   "Is Auto"=No   "Load Name"=CPM-CNV-NL   SF=1
+   Name=CPM-SF-COMB   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1.2
+   Name=CPM-SF-COMB   Type="Linear Add"   "Is Auto"=No   "Load Name"=Live   SF=1.6
+
+TABLE:  "POINT OBJECT CONNECTIVITY"
+   UniqueName=1   "Is Auto Point"=No   IsSpecial=No   X=0   Y=0   Z=3.2
+   UniqueName=2   "Is Auto Point"=No   IsSpecial=No   X=6   Y=0   Z=3.2
+   UniqueName=3   "Is Auto Point"=No   IsSpecial=No   X=6   Y=5   Z=3.2
+   UniqueName=4   "Is Auto Point"=No   IsSpecial=No   X=0   Y=5   Z=3.2
+   UniqueName=5   "Is Auto Point"=No   IsSpecial=No   X=6   Y=10   Z=3.2
+   UniqueName=6   "Is Auto Point"=No   IsSpecial=No   X=0   Y=10   Z=3.2
+   UniqueName=7   "Is Auto Point"=No   IsSpecial=No   X=12   Y=0   Z=3.2
+   UniqueName=8   "Is Auto Point"=No   IsSpecial=No   X=12   Y=5   Z=3.2
+   UniqueName=9   "Is Auto Point"=No   IsSpecial=No   X=12   Y=10   Z=3.2
+   UniqueName=10   "Is Auto Point"=No   IsSpecial=No   X=0   Y=0   Z=0
+   UniqueName=11   "Is Auto Point"=No   IsSpecial=No   X=0   Y=5   Z=0
+   UniqueName=12   "Is Auto Point"=No   IsSpecial=No   X=0   Y=10   Z=0
+   UniqueName=13   "Is Auto Point"=No   IsSpecial=No   X=6   Y=0   Z=0
+   UniqueName=14   "Is Auto Point"=No   IsSpecial=No   X=6   Y=5   Z=0
+   UniqueName=15   "Is Auto Point"=No   IsSpecial=No   X=6   Y=10   Z=0
+   UniqueName=16   "Is Auto Point"=No   IsSpecial=No   X=12   Y=0   Z=0
+   UniqueName=17   "Is Auto Point"=No   IsSpecial=No   X=12   Y=5   Z=0
+   UniqueName=18   "Is Auto Point"=No   IsSpecial=No   X=12   Y=10   Z=0
+   UniqueName=19   "Is Auto Point"=No   IsSpecial=No   X=0   Y=0   Z=6.4
+   UniqueName=20   "Is Auto Point"=No   IsSpecial=No   X=0   Y=5   Z=6.4
+   UniqueName=21   "Is Auto Point"=No   IsSpecial=No   X=0   Y=10   Z=6.4
+   UniqueName=22   "Is Auto Point"=No   IsSpecial=No   X=6   Y=0   Z=6.4
+   UniqueName=23   "Is Auto Point"=No   IsSpecial=No   X=6   Y=5   Z=6.4
+   UniqueName=24   "Is Auto Point"=No   IsSpecial=No   X=6   Y=10   Z=6.4
+   UniqueName=25   "Is Auto Point"=No   IsSpecial=No   X=12   Y=0   Z=6.4
+   UniqueName=26   "Is Auto Point"=No   IsSpecial=No   X=12   Y=5   Z=6.4
+   UniqueName=27   "Is Auto Point"=No   IsSpecial=No   X=12   Y=10   Z=6.4
+   UniqueName=28   "Is Auto Point"=No   IsSpecial=No   X=0   Y=2.5   Z=3.2
+   UniqueName=29   "Is Auto Point"=No   IsSpecial=No   X=12   Y=2.5   Z=3.2
+   UniqueName=30   "Is Auto Point"=No   IsSpecial=No   X=3   Y=0   Z=3.2
+   UniqueName=31   "Is Auto Point"=No   IsSpecial=No   X=3   Y=5   Z=3.2
+   UniqueName=32   "Is Auto Point"=No   IsSpecial=No   X=0   Y=3.5   Z=3.2
+   UniqueName=33   "Is Auto Point"=No   IsSpecial=No   X=12   Y=3.5   Z=3.2
+   UniqueName=34   "Is Auto Point"=No   IsSpecial=No   X=4   Y=1   Z=3.2
+   UniqueName=35   "Is Auto Point"=No   IsSpecial=No   X=5   Y=1   Z=3.2
+   UniqueName=36   "Is Auto Point"=No   IsSpecial=No   X=5   Y=2   Z=3.2
+   UniqueName=37   "Is Auto Point"=No   IsSpecial=No   X=4   Y=2   Z=3.2
+
+TABLE:  "COLUMN OBJECT CONNECTIVITY"
+   "Unique Name"=C1   UniquePtI=10   UniquePtJ=1   Length=3.2
+   "Unique Name"=C2   UniquePtI=11   UniquePtJ=4   Length=3.2
+   "Unique Name"=C3   UniquePtI=12   UniquePtJ=6   Length=3.2
+   "Unique Name"=C4   UniquePtI=13   UniquePtJ=2   Length=3.2
+   "Unique Name"=C5   UniquePtI=14   UniquePtJ=3   Length=3.2
+   "Unique Name"=C6   UniquePtI=15   UniquePtJ=5   Length=3.2
+   "Unique Name"=C7   UniquePtI=16   UniquePtJ=7   Length=3.2
+   "Unique Name"=C8   UniquePtI=17   UniquePtJ=8   Length=3.2
+   "Unique Name"=C9   UniquePtI=18   UniquePtJ=9   Length=3.2
+   "Unique Name"=C1A   UniquePtI=1   UniquePtJ=19   Length=3.2
+   "Unique Name"=C2A   UniquePtI=4   UniquePtJ=20   Length=3.2
+   "Unique Name"=C3A   UniquePtI=6   UniquePtJ=21   Length=3.2
+   "Unique Name"=C4A   UniquePtI=2   UniquePtJ=22   Length=3.2
+   "Unique Name"=C5A   UniquePtI=3   UniquePtJ=23   Length=3.2
+   "Unique Name"=C6A   UniquePtI=5   UniquePtJ=24   Length=3.2
+   "Unique Name"=C7A   UniquePtI=7   UniquePtJ=25   Length=3.2
+   "Unique Name"=C8A   UniquePtI=8   UniquePtJ=26   Length=3.2
+   "Unique Name"=C9A   UniquePtI=9   UniquePtJ=27   Length=3.2
+
+TABLE:  "BEAM OBJECT CONNECTIVITY"
+   "Unique Name"=B1   UniquePtI=1   UniquePtJ=2   Length=6
+   "Unique Name"=B2   UniquePtI=2   UniquePtJ=7   Length=6
+   "Unique Name"=B3   UniquePtI=4   UniquePtJ=3   Length=6
+   "Unique Name"=B4   UniquePtI=3   UniquePtJ=8   Length=6
+   "Unique Name"=B5   UniquePtI=6   UniquePtJ=5   Length=6
+   "Unique Name"=B6   UniquePtI=5   UniquePtJ=9   Length=6
+   "Unique Name"=B7   UniquePtI=1   UniquePtJ=4   Length=5
+   "Unique Name"=B8   UniquePtI=4   UniquePtJ=6   Length=5
+   "Unique Name"=B9   UniquePtI=2   UniquePtJ=3   Length=5
+   "Unique Name"=B10   UniquePtI=3   UniquePtJ=5   Length=5
+   "Unique Name"=B11   UniquePtI=7   UniquePtJ=8   Length=5
+   "Unique Name"=B12   UniquePtI=8   UniquePtJ=9   Length=5
+
+TABLE:  "NULL LINE OBJECT CONNECTIVITY"
+   "Unique Name"=CPM-LR   UniquePtI=30   UniquePtJ=31
+
+TABLE:  "FLOOR OBJECT CONNECTIVITY"
+   "Unique Name"=F1   UniquePt1=1   UniquePt2=2   UniquePt3=3   UniquePt4=4
+   "Unique Name"=F2   UniquePt1=4   UniquePt2=3   UniquePt3=5   UniquePt4=6
+   "Unique Name"=F3   UniquePt1=2   UniquePt2=7   UniquePt3=8   UniquePt4=3
+   "Unique Name"=F4   UniquePt1=3   UniquePt2=8   UniquePt3=9   UniquePt4=5
+
+TABLE:  "WALL OBJECT CONNECTIVITY"
+   UniqueName=W1   UniquePt1=17   UniquePt2=16   UniquePt3=7   UniquePt4=8
+
+TABLE:  "NULL AREA OBJECT CONNECTIVITY"
+   "Unique Name"=CPM-OPEN   UniquePt1=34   UniquePt2=35   UniquePt3=36   UniquePt4=37
+
+TABLE:  "TENDON OBJECT CONNECTIVITY"
+   Name=CPM-TEN   "Number Points"=2   "Point Name"=28   "Horizontal Segment Number"=1   "Horizontal Curve Type"=Straight   "Number Control Points"=2   "Curve Point Number"=1   "Global X"=0   "Global Y"=2.5   "Number Vertical Spans"=1   "Datum Offset"=0   "First Support Type"=None   "Span Number"=1   "Span ID"="Span 1"   "End Support Type"=None   "Span Profile"="Reverse Parabola"   RD=1   L=12   A=1.2   B=1.2   C=6   ZL=-0.05   ZC=-0.1   ZR=-0.05   Layer=Other
+   Name=CPM-TEN   "Point Name"=29   "Horizontal Segment Number"=1   "Curve Point Number"=2   "Global X"=12   "Global Y"=2.5
+   Name=CPM-TEN2   "Number Points"=2   "Point Name"=32   "Horizontal Segment Number"=1   "Horizontal Curve Type"=Straight   "Number Control Points"=2   "Curve Point Number"=1   "Global X"=0   "Global Y"=3.5   "Number Vertical Spans"=1   "Datum Offset"=0   "First Support Type"=None   "Span Number"=1   "Span ID"="Span 1"   "End Support Type"=None   "Span Profile"="Reverse Parabola"   RD=1   L=12   A=0   B=0   C=6   ZL=-0.05   ZC=-0.1   ZR=-0.05   Layer=Other
+   Name=CPM-TEN2   "Point Name"=33   "Horizontal Segment Number"=1   "Curve Point Number"=2   "Global X"=12   "Global Y"=3.5
+
+TABLE:  "STRIP OBJECT CONNECTIVITY"
+   Name=CSA1   "Number Segments"=1   "Strip Start Point"=1   "Segment End Point"=7   "Start Width Left"=2.5   "Start Width Right"=2.5   "End Width Left"=2.5   "End Width Right"=2.5   "Auto Widen"=No   Layer=A
+   Name=CSA2   "Number Segments"=1   "Strip Start Point"=4   "Segment End Point"=8   "Start Width Left"=2.5   "Start Width Right"=2.5   "End Width Left"=2.5   "End Width Right"=2.5   "Auto Widen"=No   Layer=A
+   Name=CSA3   "Number Segments"=1   "Strip Start Point"=6   "Segment End Point"=9   "Start Width Left"=2.5   "Start Width Right"=2.5   "End Width Left"=2.5   "End Width Right"=2.5   "Auto Widen"=No   Layer=A
+   Name=CSBA   "Number Segments"=1   "Strip Start Point"=1   "Segment End Point"=6   "Start Width Left"=3   "Start Width Right"=3   "End Width Left"=3   "End Width Right"=3   "Auto Widen"=No   Layer=B
+   Name=CSBB   "Number Segments"=1   "Strip Start Point"=2   "Segment End Point"=5   "Start Width Left"=3   "Start Width Right"=3   "End Width Left"=3   "End Width Right"=3   "Auto Widen"=No   Layer=B
+   Name=CSBC   "Number Segments"=1   "Strip Start Point"=7   "Segment End Point"=9   "Start Width Left"=3   "Start Width Right"=3   "End Width Left"=3   "End Width Right"=3   "Auto Widen"=No   Layer=B
+   Name=CPM-STRIP   "Number Segments"=1   "Strip Start Point"=28   "Segment End Point"=29   "Start Width Left"=1   "Start Width Right"=1   "End Width Left"=1   "End Width Right"=1   "Auto Widen"=No   Layer=A
+
+TABLE:  "SLAB REBAR OBJECT GEOMETRY"
+   Name=CPM-SR   X1=1   Y1=1.5   X2=11   Y2=1.5   "Vertical Offset"=0.03   "Width Left"=0.5   "Width Right"=0.5   Layer=A
+
+TABLE:  "DIMENSION LINE OBJECT GEOMETRY"
+   Type=Default   "Grid System"=G1   "Drawn X1"=0   "Drawn Y1"=0   "Drawn X2"=0   "Drawn Y2"=5   "Display X1"=-1   "Display Y1"=0   "Display X2"=-1   "Display Y2"=5   Length=5
+   Type=Default   "Grid System"=G1   "Drawn X1"=0   "Drawn Y1"=5   "Drawn X2"=0   "Drawn Y2"=10   "Display X1"=-1   "Display Y1"=5   "Display X2"=-1   "Display Y2"=10   Length=5
+   Type=Default   "Grid System"=G1   "Drawn X1"=0   "Drawn Y1"=10   "Drawn X2"=0   "Drawn Y2"=15   "Display X1"=-1   "Display Y1"=10   "Display X2"=-1   "Display Y2"=15   Length=5
+   Type=Default   "Grid System"=G1   "Drawn X1"=0   "Drawn Y1"=15   "Drawn X2"=6   "Drawn Y2"=15   "Display X1"=0   "Display Y1"=16   "Display X2"=6   "Display Y2"=16   Length=6
+   Type=Default   "Grid System"=G1   "Drawn X1"=6   "Drawn Y1"=15   "Drawn X2"=12   "Drawn Y2"=15   "Display X1"=6   "Display Y1"=16   "Display X2"=12   "Display Y2"=16   Length=6
+   Type=Default   "Grid System"=G1   "Drawn X1"=12   "Drawn Y1"=15   "Drawn X2"=18   "Drawn Y2"=15   "Display X1"=12   "Display Y1"=16   "Display X2"=18   "Display Y2"=16   Length=6
+
+TABLE:  "JOINT ASSIGNMENTS - SUMMARY"
+   UniqueName=1   Diaphragm="From Area"
+   UniqueName=2   Diaphragm="From Area"
+   UniqueName=3   Diaphragm="From Area"
+   UniqueName=4   Diaphragm="From Area"
+   UniqueName=5   Diaphragm="From Area"
+   UniqueName=6   Diaphragm="From Area"
+   UniqueName=7   Diaphragm="From Area"
+   UniqueName=8   Diaphragm="From Area"
+   UniqueName=9   Diaphragm="From Area"
+   UniqueName=10   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=11   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=12   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=13   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=14   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=15   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=16   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=17   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=18   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=19   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=20   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=21   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=22   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=23   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=24   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=25   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=26   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=27   Diaphragm="From Area"   Restraints="UX; UY; UZ; RX; RY; RZ"
+   UniqueName=28   Diaphragm="From Area"
+   UniqueName=29   Diaphragm="From Area"
+   UniqueName=30   Diaphragm="From Area"
+   UniqueName=31   Diaphragm="From Area"
+   UniqueName=32   Diaphragm="From Area"
+   UniqueName=33   Diaphragm="From Area"
+   UniqueName=34   Diaphragm="From Area"
+   UniqueName=35   Diaphragm="From Area"
+   UniqueName=36   Diaphragm="From Area"
+   UniqueName=37   Diaphragm="From Area"
+
+TABLE:  "JOINT ASSIGNMENTS - RESTRAINTS"
+   UniqueName=10   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=11   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=12   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=13   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=14   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=15   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=16   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=17   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=18   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=19   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=20   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=21   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=22   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=23   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=24   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=25   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=26   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=27   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+
+TABLE:  "FRAME ASSIGNMENTS - SUMMARY"
+   UniqueName=C1   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C2   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C3   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C4   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C5   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C6   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C7   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C8   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C9   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C1A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C2A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C3A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C4A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C5A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C6A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C7A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C8A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=C9A   "Design Type"=Column   Length=3.2   "Analysis Section"=C500x500   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B1   "Design Type"=Beam   Length=6   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B2   "Design Type"=Beam   Length=6   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B3   "Design Type"=Beam   Length=6   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B4   "Design Type"=Beam   Length=6   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B5   "Design Type"=Beam   Length=6   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B6   "Design Type"=Beam   Length=6   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B7   "Design Type"=Beam   Length=5   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B8   "Design Type"=Beam   Length=5   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B9   "Design Type"=Beam   Length=5   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B10   "Design Type"=Beam   Length=5   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B11   "Design Type"=Beam   Length=5   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+   UniqueName=B12   "Design Type"=Beam   Length=5   "Analysis Section"=B300x600   "Design Section"=N/A   "Min Number Stations"=3
+
+TABLE:  "FRAME ASSIGNMENTS - SECTION PROPERTIES"
+   UniqueName=B1   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B2   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B3   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B4   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B5   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B6   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B7   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B8   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B9   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B10   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B11   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B12   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=C1   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C2   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C3   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C4   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C5   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C6   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C7   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C8   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C9   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C1A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C2A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C3A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C4A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C5A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C6A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C7A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C8A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C9A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+
+TABLE:  "FRAME ASSIGNMENTS - END LENGTH OFFSETS"
+   UniqueName=B1   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B2   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B3   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B4   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B5   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B6   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B7   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B8   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B9   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B10   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B11   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=B12   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C1   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C2   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C3   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C4   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C5   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C6   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C7   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C8   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C9   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C1A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C2A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C3A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C4A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C5A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C6A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C7A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C8A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+   UniqueName=C9A   "Offset Option"=Auto   "Offset I"=0   "Offset J"=0   "Rigid Factor"=0   "Self Weight Option"=Auto
+
+TABLE:  "FRAME ASSIGNMENTS - INSERTION POINT"
+   UniqueName=B1   "Cardinal Point"="8 (Top Center)"   Mirror2=Yes   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B2   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B3   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B4   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B5   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B6   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B7   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B8   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B9   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B10   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B11   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=B12   "Cardinal Point"="8 (Top Center)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C1   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C2   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C3   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C4   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C5   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C6   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C7   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C8   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C9   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C1A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C2A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C3A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C4A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C5A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C6A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C7A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C8A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+   UniqueName=C9A   "Cardinal Point"="10 (Centroid)"   Mirror2=No   Mirror3=No   "No Transform Stiffness"=Yes
+
+TABLE:  "FRAME ASSIGNMENTS - OUTPUT STATIONS"
+   UniqueName=C1   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C2   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C3   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C4   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C5   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C6   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C7   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C8   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C9   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C1A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C2A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C3A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C4A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C5A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C6A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C7A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C8A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=C9A   "Station Option"="Min Stations"   "Min Stations"=3
+   UniqueName=B1   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B2   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B3   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B4   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B5   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B6   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B7   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B8   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B9   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B10   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B11   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+   UniqueName=B12   "Station Option"="Max Spacing"   "Max Spacing"=0.5
+
+TABLE:  "FRAME ASSIGNMENTS - FRAME AUTO MESH OPTIONS"
+   UniqueName=C1   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C2   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C3   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C4   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C5   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C6   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C7   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C8   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C9   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C1A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C2A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C3A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C4A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C5A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C6A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C7A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C8A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=C9A   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B1   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B2   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B3   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B4   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B5   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B6   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B7   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B8   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B9   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B10   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B11   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+   UniqueName=B12   "Auto Mesh"=Yes   "At Intermediate Joints"=Yes   "At Intersections"=Yes   "Min Number?"=No   "Max Length?"=No
+
+TABLE:  "FRAME ASSIGNMENTS - FRAME FLOOR MESHING OPTION"
+   UniqueName=C1   "Offset Option"="Include in Mesh"
+   UniqueName=C2   "Offset Option"="Include in Mesh"
+   UniqueName=C3   "Offset Option"="Include in Mesh"
+   UniqueName=C4   "Offset Option"="Include in Mesh"
+   UniqueName=C5   "Offset Option"="Include in Mesh"
+   UniqueName=C6   "Offset Option"="Include in Mesh"
+   UniqueName=C7   "Offset Option"="Include in Mesh"
+   UniqueName=C8   "Offset Option"="Include in Mesh"
+   UniqueName=C9   "Offset Option"="Include in Mesh"
+   UniqueName=C1A   "Offset Option"="Include in Mesh"
+   UniqueName=C2A   "Offset Option"="Include in Mesh"
+   UniqueName=C3A   "Offset Option"="Include in Mesh"
+   UniqueName=C4A   "Offset Option"="Include in Mesh"
+   UniqueName=C5A   "Offset Option"="Include in Mesh"
+   UniqueName=C6A   "Offset Option"="Include in Mesh"
+   UniqueName=C7A   "Offset Option"="Include in Mesh"
+   UniqueName=C8A   "Offset Option"="Include in Mesh"
+   UniqueName=C9A   "Offset Option"="Include in Mesh"
+   UniqueName=B1   "Offset Option"="Include in Mesh"
+   UniqueName=B2   "Offset Option"="Include in Mesh"
+   UniqueName=B3   "Offset Option"="Include in Mesh"
+   UniqueName=B4   "Offset Option"="Include in Mesh"
+   UniqueName=B5   "Offset Option"="Include in Mesh"
+   UniqueName=B6   "Offset Option"="Include in Mesh"
+   UniqueName=B7   "Offset Option"="Include in Mesh"
+   UniqueName=B8   "Offset Option"="Include in Mesh"
+   UniqueName=B9   "Offset Option"="Include in Mesh"
+   UniqueName=B10   "Offset Option"="Include in Mesh"
+   UniqueName=B11   "Offset Option"="Include in Mesh"
+   UniqueName=B12   "Offset Option"="Include in Mesh"
+
+TABLE:  "TENDON ASSIGNMENTS - PROPERTIES"
+   Name=CPM-TEN   "Tendon Property"=CPM-T15   "Number Strands"=4   "Bonding Options"=Unbonded
+   Name=CPM-TEN2   "Tendon Property"=CPM-T15   "Number Strands"=2   "Bonding Options"=Unbonded
+
+TABLE:  "AREA ASSIGNMENTS - SUMMARY"
+   UniqueName=F1   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F2   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F3   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F4   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=W1   "Section Property"=CPM-W200   "Property Type"=Wall
+   UniqueName=CPM-OPEN   "Section Property"=Opening   "Property Type"=Opening
+
+TABLE:  "AREA ASSIGNMENTS - SECTION PROPERTIES"
+   UniqueName=F1   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F2   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F3   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F4   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=W1   "Section Property"=CPM-W200   "Property Type"=Wall
+   UniqueName=CPM-OPEN   "Section Property"=Opening   "Property Type"=Opening
+
+TABLE:  "AREA ASSIGNMENTS - INSERTION POINT"
+   UniqueName=F1   "Cardinal Point"=Top   Transform=No
+   UniqueName=F2   "Cardinal Point"=Top   Transform=No
+   UniqueName=F3   "Cardinal Point"=Top   Transform=No
+   UniqueName=F4   "Cardinal Point"=Top   Transform=No
+
+TABLE:  "AREA ASSIGNMENTS - FLOOR AUTO MESH OPTIONS"
+   UniqueName=F1   "Mesh Option"="Auto Cookie Cut"   "At Beams"=No   "At Walls"=No   "At Grids"=No   Submesh=Yes   "Submesh Size"=1.25   "Add Restraints"=No
+   UniqueName=F2   "Mesh Option"="Auto Cookie Cut"   "At Beams"=No   "At Walls"=No   "At Grids"=No   Submesh=Yes   "Submesh Size"=1.25   "Add Restraints"=No
+   UniqueName=F3   "Mesh Option"="Auto Cookie Cut"   "At Beams"=No   "At Walls"=No   "At Grids"=No   Submesh=Yes   "Submesh Size"=1.25   "Add Restraints"=No
+   UniqueName=F4   "Mesh Option"="Auto Cookie Cut"   "At Beams"=No   "At Walls"=No   "At Grids"=No   Submesh=Yes   "Submesh Size"=1.25   "Add Restraints"=No
+
+TABLE:  "AREA ASSIGNMENTS - AUTO EDGE CONSTRAINTS"
+   UniqueName=F1   Constraint=Yes
+   UniqueName=F2   Constraint=Yes
+   UniqueName=F3   Constraint=Yes
+   UniqueName=F4   Constraint=Yes
+
+TABLE:  "AREA ASSIGNMENTS - SLAB LINE RELEASES"
+   UniqueName=CPM-LR   "Shear Left"=Yes   "Moment Left"=Yes   "Shear Right"=No   "Moment Right"=No
+
+TABLE:  "SLAB REBAR PROPERTY ASSIGNMENTS"
+   Name=CPM-SR   "Rebar Size"=6   Material=CPM-REBAR   "Bar Number Type"="Total Bars"   "Total Bars"=6
+
+TABLE:  "AREA LOAD ASSIGNMENTS - UNIFORM"
+   UniqueName=F1   "Load Pattern"=Dead   Direction=Gravity   Load=2
+   UniqueName=F1   "Load Pattern"=Live   Direction=Gravity   Load=3
+   UniqueName=F2   "Load Pattern"=Dead   Direction=Gravity   Load=2
+   UniqueName=F2   "Load Pattern"=Live   Direction=Gravity   Load=3
+   UniqueName=F3   "Load Pattern"=Dead   Direction=Gravity   Load=2
+   UniqueName=F3   "Load Pattern"=Live   Direction=Gravity   Load=3
+   UniqueName=F4   "Load Pattern"=Dead   Direction=Gravity   Load=2
+   UniqueName=F4   "Load Pattern"=Live   Direction=Gravity   Load=3
+
+TABLE:  "TENDON LOAD ASSIGNMENTS - JACKING STRESS"
+   Name=CPM-TEN   "Transfer Load Pattern"=CPM-PTT   "Final Load Pattern"=CPM-PTF   "Jacking Stress"=1400000   "Jacking Location"="Both Ends"
+   Name=CPM-TEN2   "Transfer Load Pattern"=CPM-PTT   "Final Load Pattern"=CPM-PTF   "Jacking Stress"=1400000   "Jacking Location"="I End"
+
+TABLE:  "TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"
+   Name=CPM-TEN   "Loss Method"=Fixed   "Stressing Loss Fixed"=100000   "Long Term Loss Fixed"=150000
+   Name=CPM-TEN2   "Loss Method"=Detailed   "Curvature Coefficient"=0.07   "Wobble Coefficient"=0.0003   "Anchorage Set Slip"=0.006   "Shortening Stress"=7000   "Creep Stress"=48000   "Shrinkage Stress"=41000   "Relaxation Stress"=21000
+
+TABLE:  "ANALYSIS MODELING OPTIONS"
+   "Two Dimensional Only"=No   "Rigid Diaphragm At Top"=No   "Ignore Vertical Offsets"=No
+
+TABLE:  "ANALYSIS OPTIONS - SAPFIRE OPTIONS"
+   "Solver Option"=Advanced   "Analysis Process"=Auto   "Number Analysis Threads"=0   "Max File Size"=0
+
+TABLE:  "ANALYSIS OPTIONS - DESIGN AND RESPONSE RECOVERY OPTIONS"
+   "Number Design Threads"=0   "Number Recovery Threads"=0   "Use Memory Mapped Files"="Program Determined"   "Allow Model Differences"=No
+
+TABLE:  "ANALYSIS OPTIONS - AUTOMATIC MESH SETTINGS FOR FLOORS"
+   "Mesh Option"=General   "Use Localized Meshing"=Yes   "Merge Joints"=Yes   "Maximum Mesh Size"=1.25
+
+TABLE:  "ANALYSIS OPTIONS - AUTOMATIC RECTANGULAR MESH OPTIONS FOR WALLS"
+   "Maximum Mesh Size"=1.25
+
+TABLE:  "ANALYSIS OPTIONS - CRACKING ANALYSIS OPTIONS"
+   "Reinforcement Source"="User and Designed"   "Minimum Tension Ratio"=0.0018   "Minimum Compression Ratio"=0
+
+TABLE:  "PREFERENCES - TOLERANCE"
+   MergeTol=0.00254   MaxInclVertCol=1   MaxInclHorzBmFlr=20
+
+TABLE:  "PREFERENCES - GRAPHICS"
+   MaxFontSize=6   MinFontSize=3   MinSLineThick=1   MinPLineThick=4   AntiAliasing?=Yes   ConstantLineThick?=Yes   ShadingWithinElement?=No   AutoZoomStep=10   ShrinkFactor=70
+
+TABLE:  "MISCELLANEOUS OPTIONS"
+   "Start Page"=Yes   "Value at Cursor"=Yes   "Frame Info"=Yes   "Bounding Plane"=Yes   "Architectural Dimensioning"=No   "Moments on Tension Side"=Yes   "Animation Sound"=Yes   "Auto Save"=No   Crosshairs=No   "Model Explorer"=Yes
+
+TABLE:  "OPTIONS - COLORS - DISPLAY"
+   "Device Type"=Screen   ColorColumns=10507331   ColorBeams=10507331   ColorBraces=10507331   ColorLinks=10507331   ColorSprings=Black   ColorTendons=DarkCyan   ColorSlabPanels=Green   ColorWalls=Red   ColorFloors=Gray4   ColorNullObjects=Gray8Dark   ColorOpenings=Black   ColorColStripA=Red   ColorColStripB=Blue   ColorMidStripA=Yellow   ColorMidStripB=Cyan   ColorStripEdge=16744703   ColorOtherStripFill=Green   ColorSupportLines=16744703   ColorDimLines=10461087   ColorText=Black   ColorGridLines=Gray6   ColorBackground=White   ColorUserMeshEdge=5065984   ColorStlDesign=DarkCyan   ColorCompDesign=Cyan   ColorConcDesign=4227327   ColorNoDesign=4227327   TransColumns=0.5   TransBeams=0.5   TransBraces=0.5   TransFloors=0.5   TransWalls=0.4   TransLinks=0.5   Darkness=0.3
+   "Device Type"=Printer   ColorColumns=Black   ColorBeams=Black   ColorBraces=Black   ColorLinks=Gray8Dark   ColorSprings=Gray8Dark   ColorTendons=DarkCyan   ColorSlabPanels=Green   ColorWalls=Gray4   ColorFloors=Gray4   ColorNullObjects=Gray4   ColorOpenings=Gray8Dark   ColorColStripA=Red   ColorColStripB=Blue   ColorMidStripA=Yellow   ColorMidStripB=Cyan   ColorStripEdge=16744703   ColorOtherStripFill=Green   ColorSupportLines=16744703   ColorDimLines=10461087   ColorText=Black   ColorGridLines=Gray4   ColorBackground=White   ColorUserMeshEdge=5065984   ColorStlDesign=Black   ColorCompDesign=Gray4   ColorConcDesign=Gray8Dark   ColorNoDesign=Gray4   TransColumns=0.5   TransBeams=0.5   TransBraces=0.5   TransFloors=0.5   TransWalls=0.4   TransLinks=0.5   Darkness=0.5
+   "Device Type"="Color Printer"   ColorColumns=10507331   ColorBeams=Blue   ColorBraces=Blue   ColorLinks=10507331   ColorSprings=Black   ColorTendons=DarkCyan   ColorSlabPanels=Green   ColorWalls=Blue   ColorFloors=Gray4   ColorNullObjects=Gray8Dark   ColorOpenings=Black   ColorColStripA=Red   ColorColStripB=Blue   ColorMidStripA=Yellow   ColorMidStripB=Cyan   ColorStripEdge=16744703   ColorOtherStripFill=Green   ColorSupportLines=16744703   ColorDimLines=10461087   ColorText=Black   ColorGridLines=Gray6   ColorBackground=White   ColorUserMeshEdge=5065984   ColorStlDesign=DarkCyan   ColorCompDesign=Cyan   ColorConcDesign=4227327   ColorNoDesign=4227327   TransColumns=0.5   TransBeams=0.5   TransBraces=0.5   TransFloors=0.5   TransWalls=0.4   TransLinks=0.5   Darkness=0.3
+
+TABLE:  "OPTIONS - COLORS - OUTPUT"
+   "Device Type"="Screen Classic"   Contour1=13107400   Contour2=6553828   Contour3=Red   Contour4=16639   Contour5=Orange   Contour6=43775   Contour7=54527   Contour8=Yellow   Contour9=65408   Contour10=Green   Contour11=8453888   Contour12=Cyan   Contour13=16755200   Contour14=16733440   Contour15=Blue   TransContours=0   Ratio1=Cyan   Ratio2=Green   Ratio3=Yellow   Ratio4=Magenta   Ratio5=Red   RatioNotD=Gray4   RatioVal1=0.5   RatioVal2=0.7   RatioVal3=0.9   RatioVal4=1   HState1=Black   HState2=Green   HState3=Cyan   HState4=Magenta   HState5=Red   HStatus1=Black   HStatus2=Green   HStatus3=Cyan   HStatus4=Red   DFillPos=Yellow   DFillNeg=Red   DFillRange=Blue   TransDiag=0.2
+   "Device Type"="Screen GrayScale"   Contour1=Black   Contour2=3158064   Contour3=4210752   Contour4=5263440   Contour5=6316128   Contour6=7368816   Contour7=Gray8Dark   Contour8=Gray7   Contour9=Gray6   Contour10=Gray5   Contour11=Gray4   Contour12=Gray3   Contour13=Gray2   Contour14=Gray1Light   Contour15=White   TransContours=0   Ratio1=Gray2   Ratio2=Gray4   Ratio3=Gray8Dark   Ratio4=4210752   Ratio5=Black   RatioNotD=Gray4   RatioVal1=0.5   RatioVal2=0.7   RatioVal3=0.9   RatioVal4=1   HState1=Black   HState2=Gray4   HState3=Gray8Dark   HState4=4210752   HState5=Black   HStatus1=Black   HStatus2=Gray4   HStatus3=Gray8Dark   HStatus4=4210752   DFillPos=Yellow   DFillNeg=Red   DFillRange=Blue   TransDiag=0.2
+   "Device Type"=Printer   Contour1=Black   Contour2=3158064   Contour3=4210752   Contour4=5263440   Contour5=6316128   Contour6=7368816   Contour7=Gray8Dark   Contour8=Gray7   Contour9=Gray6   Contour10=Gray5   Contour11=Gray4   Contour12=Gray3   Contour13=Gray2   Contour14=Gray1Light   Contour15=White   TransContours=0   Ratio1=Gray2   Ratio2=Gray4   Ratio3=Gray8Dark   Ratio4=4210752   Ratio5=Black   RatioNotD=Gray4   RatioVal1=0.5   RatioVal2=0.7   RatioVal3=0.9   RatioVal4=1   HState1=Black   HState2=Gray4   HState3=Gray8Dark   HState4=4210752   HState5=Black   HStatus1=Black   HStatus2=Gray4   HStatus3=Gray8Dark   HStatus4=4210752   DFillPos=Gray8Dark   DFillNeg=Gray8Dark   DFillRange=4210752   TransDiag=0.2
+   "Device Type"="Color Printer"   Contour1=13107400   Contour2=6553828   Contour3=Red   Contour4=16639   Contour5=Orange   Contour6=43775   Contour7=54527   Contour8=Yellow   Contour9=65408   Contour10=Green   Contour11=8453888   Contour12=Cyan   Contour13=16755200   Contour14=16733440   Contour15=Blue   TransContours=0   Ratio1=Cyan   Ratio2=Green   Ratio3=Yellow   Ratio4=Magenta   Ratio5=Red   RatioNotD=Gray4   RatioVal1=0.5   RatioVal2=0.7   RatioVal3=0.9   RatioVal4=1   HState1=Black   HState2=Green   HState3=Cyan   HState4=Magenta   HState5=Red   HStatus1=Black   HStatus2=Green   HStatus3=Cyan   HStatus4=Red   DFillPos=Yellow   DFillNeg=Red   DFillRange=Blue   TransDiag=0.2
+
+TABLE:  "PROJECT INFORMATION"
+   "Model Name"="CPM field test"   "Revision Number"=0
+
+TABLE:  "MATERIAL LIST BY OBJECT TYPE"
+   "Object Type"=Floor   Material=C30/37   Weight=599.822856
+   "Object Type"=Wall   Material=CPM-C35   Weight=80
+   "Object Type"=Column   Material=C30/37   Weight=359.8937136
+   "Object Type"=Beam   Material=C30/37   Weight=296.91231372
+
+TABLE:  "MATERIAL LIST BY SECTION PROPERTY"
+   Section=S200   "Object Type"=Floor   Weight=599.822856
+   Section=CPM-W200   "Object Type"=Wall   Weight=80
+   Section=C500x500   "Object Type"=Column   Weight=359.8937136
+   Section=B300x600   "Object Type"=Beam   Weight=296.91231372
+
+TABLE:  "CONCRETE FRAME DESIGN PREFERENCES - ACI 318-19"
+   "Multi-Response Design"="Step-by-Step - All"   "# Interaction Curves"=24   "# Interaction Points"=11   "Minimum Eccentricity?"=Yes   "Design for BCCR?"=Yes   "Ignore Beneficial Pu for Beam Design?"=Yes   "Seismic Design Category"=D   "Design System Omega0"=2   "Design System Rho"=1   "Design System Sds"=0.5   "Phi (Tension)"=0.9   "Phi (Compression Tied)"=0.65   "Phi (Compression Spiral)"=0.75   "Phi (Shear and Torsion)"=0.75   "Phi (Shear Seismic)"=0.6   "Phi (Shear Joint)"=0.85   "Pattern Live Load Factor"=0.75   "Utlization Factor Limit"=1
+
+TABLE:  "CONCRETE SLAB DESIGN PREFERENCES - ACI 318-19"
+   PhiTen=0.9   PhiComp=0.65   PhiShear=0.75   CoverTop=0.035   CoverBot=0.04   BarSize=18   InnerLayer="Layer B"   PTCGSTop=0.025   PTCGSBotExt=0.04   PTCGSBotInt=0.025   SlabType="Two Way"   UserStress=No   InitConcRat=0.8   LLFraction=0.5
+
+TABLE:  "CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED"
+   "Strip Name"=CPM-STRIP   "Strip Layer"=A   "Strip Design Type"="Column Strip"   Design?=Yes   "Ignote PT?"=No   "Rebar Material"=DefaultRebar_500   "Cover Specification Type"="From Preferences"   LLRF=1
+
+TABLE:  "CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL"
+   "Unique Name"=28   "Check Punching Shear?"="Program Determined"   "Location Type"=Edge   "Perimeter Type"="User Perimeter"   "Effective Depth Type"=Auto   "Opening Definition"=Auto   "Reinforcement Type"="Stud Rails"   "Reinforcement Pattern"=Radial   "Reinforcement Diameter"=420000   "Reinforcement Fy"=0.01   "Reinforcement Spacing"=0.08
+
+TABLE:  "CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - PERIMETER"
+   "Unique Name"=28   "Point Number"=1   "X Coord"=-0.3   "Y Coord"=-0.3   Radius=0   "Is Null?"=No
+   "Unique Name"=28   "Point Number"=2   "X Coord"=0.3   "Y Coord"=-0.3   Radius=0   "Is Null?"=No
+   "Unique Name"=28   "Point Number"=3   "X Coord"=0.3   "Y Coord"=0.3   Radius=0   "Is Null?"=No
+   "Unique Name"=28   "Point Number"=4   "X Coord"=-0.3   "Y Coord"=0.3   Radius=0   "Is Null?"=No
+
+TABLE:  "CONCRETE SLAB DESIGN LOAD COMBINATION DATA"
+   "Combo Type"=Strength   "Combo Name"=CPM-ULS
+   "Combo Type"=Strength   "Combo Name"=CPM-TXT
+   "Combo Type"=Strength   "Combo Name"=CPM-CMBN
+   "Combo Type"=Strength   "Combo Name"=DConS99
+   "Combo Type"=Strength   "Combo Name"=CPM-CNV
+
+END TABLE DATA
+$ CSI ProMax model 6B2691E69A686E656E9462BE
+$ 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
+$ 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
+$ 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
+$ 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
+$ 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
+$ 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
+$ end of the CSI ProMax model

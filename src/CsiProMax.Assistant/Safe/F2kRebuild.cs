@@ -180,14 +180,15 @@ public static class F2kRebuild
                 ["thickness"] = N(row, "Slab Thickness", 0.2), ["thick_plate"] = string.Equals(row.GetValueOrDefault("Modeling Type"), "Shell-Thick", StringComparison.OrdinalIgnoreCase),
             });
         }
+        var refusedSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in Rows(t, "FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR"))
-            Run(e, Sap2000.SapTools.All, "add_frame_section", new JsonObject
+            Section(e, "add_frame_section", new JsonObject
             {
                 ["name"] = row.GetValueOrDefault("Name"), ["shape"] = "rectangle", ["material"] = row.GetValueOrDefault("Material"),
                 ["depth"] = N(row, "Depth", 0.6), ["width"] = N(row, "Width", 0.3),
-            });
+            }, notes, refusedSections);
         foreach (var row in Rows(t, "FRAME SECTION PROPERTY DEFINITIONS - CONCRETE CIRCLE"))
-            Run(e, Sap2000.SapTools.All, "add_frame_section", new JsonObject { ["name"] = row.GetValueOrDefault("Name"), ["shape"] = "circle", ["material"] = row.GetValueOrDefault("Material"), ["diameter"] = N(row, "Diameter", 0.5) });
+            Section(e, "add_frame_section", new JsonObject { ["name"] = row.GetValueOrDefault("Name"), ["shape"] = "circle", ["material"] = row.GetValueOrDefault("Material"), ["diameter"] = N(row, "Diameter", 0.5) }, notes, refusedSections);
         foreach (var row in Rows(t, "FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE"))
             notes.Add($"The steel section {row.GetValueOrDefault("Name")} was not defined (only concrete rectangles and circles are built through the API); its frames take the first frame section.");
         var walls = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -218,7 +219,7 @@ public static class F2kRebuild
             points.TryGetValue(row.GetValueOrDefault(key) ?? "", out var p) ? p : throw new EtabsException($"The .f2k names point {row.GetValueOrDefault(key)}, which it does not list.");
         var frameSection = Assignments(t, "FRAME ASSIGNMENTS - SECTION PROPERTIES", "UniqueName", "Section Property");
         var areaSection = Assignments(t, "AREA ASSIGNMENTS - SECTION PROPERTIES", "UniqueName", "Section Property");
-        var firstFrame = e.FrameSections().FirstOrDefault() ?? "";
+        var firstFrame = e.FrameSections().FirstOrDefault(x => !refusedSections.Contains(x)) ?? "";
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         int beams = 0, columns = 0, wallCount = 0, slabs = 0;
         foreach (var (table, isColumn) in new[] { ("BEAM OBJECT CONNECTIVITY", false), ("COLUMN OBJECT CONNECTIVITY", true) })
@@ -226,7 +227,9 @@ public static class F2kRebuild
             {
                 var name = row.GetValueOrDefault("Unique Name") ?? "";
                 var (i, j) = (P(row, "UniquePtI"), P(row, "UniquePtJ"));
-                Rename(e, "FrameObj", e.AddFrame(i.X, i.Y, i.Z, j.X, j.Y, j.Z, frameSection.GetValueOrDefault(name, firstFrame)), name, names);
+                var section = frameSection.GetValueOrDefault(name, firstFrame);
+                if (refusedSections.Contains(section)) section = firstFrame;
+                Rename(e, "FrameObj", AddFrame(e, name, i, j, section), name, names);
                 if (isColumn) columns++; else beams++;
             }
         List<(double X, double Y, double Z)> Corners(Dictionary<string, string> row) =>
@@ -518,8 +521,74 @@ public static class F2kRebuild
 
     private static void Run(ICsiLink e, IReadOnlyList<Tool> from, string tool, JsonObject args)
     {
+        var was = Sap2000.SapTools.Refuser;
+        Sap2000.SapTools.Refuser = e is MemoryEtabs or OfflineEtabs ? was : e.Program.Name;
         try { from.First(x => x.Name == tool).Run(JsonSerializer.SerializeToElement(args), e); }
         catch (EtabsException ex) when (ex.Message.Contains("already", StringComparison.OrdinalIgnoreCase)) { /* kept as it is */ }
+        finally { Sap2000.SapTools.Refuser = was; }
+    }
+
+    /// <summary>
+    /// A section the build needs but the program refused, or one with no size: said in the notes, and the build goes on
+    /// (its frames take another section) instead of stopping. SAFE 20.1 stopped the whole build on CPM-TRAP, a trapezoid
+    /// written as a 0 by 0 rectangle (tester's SAFE-only field test, 0.4.76, 2026-11-28).
+    /// </summary>
+    private static bool Section(ICsiLink e, string tool, JsonObject args, JsonArray notes, HashSet<string> refused)
+    {
+        var name = args["name"]?.ToString() ?? "";
+        foreach (var size in new[] { "depth", "width", "diameter" })
+            if (args[size] is JsonValue v && v.TryGetValue<double>(out var d) && d <= 0)
+            {
+                notes.Add($"The frame section {name} has no {size} in the file, so it was not defined; its frames take another section.");
+                refused.Add(name);
+                return false;
+            }
+        try { Run(e, Sap2000.SapTools.All, tool, args); return true; }
+        catch (EtabsException ex)
+        {
+            notes.Add($"The frame section {name} was not defined ({ex.Message}); its frames take another section.");
+            refused.Add(name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A frame by its two ends; when the program refuses that (SAFE 20.1 refused the Modeler's columns, tester's SAFE-only
+    /// field test, 0.4.76), by two points first, then FrameObj.AddByPoint. Still refused: the message names the ends'
+    /// levels against the stories and the units, so the next report shows why.
+    /// </summary>
+    internal static string AddFrame(ICsiLink e, string name, (double X, double Y, double Z) i, (double X, double Y, double Z) j, string section)
+    {
+        try { return e.AddFrame(i.X, i.Y, i.Z, j.X, j.Y, j.Z, section); }
+        catch (EtabsException first)
+        {
+            string? made = null;
+            try
+            {
+                made = e.Raw("add a frame by its points", m =>
+                {
+                    object model = m;
+                    string P((double X, double Y, double Z) p)
+                    {
+                        var call = ApiCall.Must(model, "PointObj.AddCartesian", CsiTools.D(("x", p.X), ("y", p.Y), ("z", p.Z)), "add a point");
+                        return ApiCall.Value(call, "Name")?.ToString() ?? throw new EtabsException("the program gave the point no name");
+                    }
+                    var (a, b) = (P(i), P(j));
+                    var frame = ApiCall.Must(model, "FrameObj.AddByPoint", CsiTools.D(("Point1", a), ("Point2", b), ("PropName", section)), $"add a frame with section {section} by its points");
+                    return (object?)(ApiCall.Value(frame, "Name")?.ToString() ?? "");
+                }) as string;
+            }
+            catch (Exception ex) when (ex is EtabsException or ToolInputException or MissingMethodException or InvalidOperationException) { }
+            if (!string.IsNullOrEmpty(made)) return made;
+            var why = "";
+            try
+            {
+                var info = e.Info();
+                why = $" The model's stories: {string.Join(", ", e.Stories().Select(s => $"{s.Name} at {CsiTableText.Number(s.Elevation)} (height {CsiTableText.Number(s.Height)})"))}; units {info.Force}, {info.Length}.";
+            }
+            catch (EtabsException) { /* the first message is enough */ }
+            throw new EtabsException($"{first.Message} (frame {name}, from Z = {CsiTableText.Number(i.Z)} to Z = {CsiTableText.Number(j.Z)}).{why}");
+        }
     }
 
     /// <summary>

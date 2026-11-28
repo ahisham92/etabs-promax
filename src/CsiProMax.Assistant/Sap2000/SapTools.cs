@@ -262,8 +262,13 @@ public static class SapTools
 
     private static void Ok(object result, string what)
     {
-        if (Convert.ToInt32(result) != 0) throw new EtabsException($"SAP2000 refused to {what}.");
+        // These tools also build SAFE's model from a .f2k (F2kRebuild): the program that said no is named, not always
+        // SAP2000 (tester's SAFE 20.1 run, 0.4.76: "SAP2000 refused to add the section CPM-TRAP").
+        if (Convert.ToInt32(result) != 0) throw new EtabsException($"{Refuser ?? "SAP2000"} refused to {what}.");
     }
+
+    /// <summary>The program these tools are working in on this thread, for their refusals (null: SAP2000).</summary>
+    [ThreadStatic] internal static string? Refuser;
 
     private static (double X, double Y, double Z) Xyz(JsonElement p)
     {
