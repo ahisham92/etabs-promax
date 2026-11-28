@@ -17,7 +17,7 @@ Standing rules: never change or remove anything another user added unless Ahmed 
 
 ## Releases
 
-### Merged after 0.4.79 (goes out with the next release)
+### 0.4.80 (2026-11-28, Engine's ETABS copy runs minimised, part of the urgent run fix; everything else stays on hold): PR 365
 The Engine run's program window is minimised on the taskbar, no longer hidden through the API. On 0.4.79 ETABS had still not started the analysis of Ahmed's real model 8 minutes after opening it; his own visible ETABS takes about 3 minutes. His own run's LOG builds the same model as the Engine's copy (129,925 against 129,831 joints, 763,754 against 762,914 equations), so the copy is doing the same work, only more slowly. Open: a timed run of a small model, then of his model, both against ETABS's own time.
 
 ### 0.4.79 (2026-11-28, Engine run speed fix on Ahmed's direct ask; everything else stays on hold): PR 362, 364
