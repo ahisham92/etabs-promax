@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>0.4.76</Version>
+    <Version>0.4.77</Version>
     <!-- A test build (release.yml, tag vX.Y.Z-testN) passes CsiTestBuild=N: only these files carry X.Y.Z.N, never the API stand-ins. -->
     <AssemblyVersion Condition="'$(CsiTestBuild)' != ''">$(Version).$(CsiTestBuild)</AssemblyVersion>
     <FileVersion Condition="'$(CsiTestBuild)' != ''">$(Version).$(CsiTestBuild)</FileVersion>
