@@ -65,6 +65,23 @@ static class HandModelTests
             Check(Error(m, "run_analysis", "{}").Contains("no Modeler command"), "no analysis from the page");
         });
 
+        yield return ("hand model: beams, slabs and joints go on the base level when it is named; columns and walls there say why", () =>
+        {
+            // A plan view at the base level (Move Up from the top story comes round to it) draws there too.
+            var m = Grid();
+            var b = m.Stories()[0].Name;
+            Ok(m, "add_beams", $$"""{"lines":[[0,0,6,0]],"stories":["{{b}}"],"section":"ConcBm"}""");
+            Ok(m, "add_slabs", $$"""{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"stories":["{{b}}"],"section":"Slab1"}""");
+            Ok(m, "add_joints", $$"""{"points":[[12,5]],"stories":["{{b}}"]}""");
+            Equal(1, m.Model.LineAssigns.Count(l => l.Story == b), "a grade beam on the base level");
+            Equal(1, m.Model.AreaAssigns.Count(x => x.Story == b), "a mat on the base level");
+            var why = Error(m, "add_columns", $$"""{"points":[[0,0]],"stories":["{{b}}"],"section":"ConcCol"}""");
+            Check(why.Contains("bottom level") && why.Contains("L1"), "a column on the base level says why, and where it can go: " + why);
+            Check(Error(m, "add_walls", $$"""{"lines":[[0,0,6,0]],"stories":["{{b}}"],"section":"Slab1"}""").Contains("bottom level"), "a wall on the base level says why too");
+            Ok(m, "add_beams", """{"lines":[[0,5,6,5]],"section":"ConcBm"}""");
+            Equal(1, m.Model.LineAssigns.Count(l => l.Story == b), "with no story named, beams go on every story above the base, not on it");
+        });
+
         yield return ("hand model: undo and redo step through every hand change, and stop at the chat's", () =>
         {
             var m = Grid();
