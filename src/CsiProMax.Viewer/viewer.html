@@ -260,6 +260,7 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .ctx .mi{padding:3px 24px 3px 28px;white-space:nowrap;position:relative}
 .ctx .mi:hover{background:var(--hot)}
 .ctx .mi.off{opacity:.45;pointer-events:none}
+.ctx .mi.tick::before{content:"\2713";position:absolute;left:10px}
 .ctx .head{padding:3px 10px 4px;color:var(--mute);font-size:11px;border-bottom:1px solid var(--line2);margin-bottom:3px}
 .ctx hr{border:0;border-top:1px solid var(--line2);margin:3px 2px 3px 28px}
 .veil{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.08)}
@@ -3973,12 +3974,23 @@ function contextMenu(p, x, y, id) {
   const items = o ? [["Object Information...", () => infoWindow(id)], ["Show in Tables", () => showInTable(o)], ["Comment on It...", () => { showTab("comments"); opt.side = true; $("right").hidden = false; $("text").focus(); }], window.cpmChat ? ["Ask the Chat About It...", () => chatAbout(o)] : null, 0,
       ["Zoom to It", () => zoomTo(p, [id])], ["Hide It", () => hideObjs([id])], ["Select Same Section", () => { for (const q of frames.concat(areas)) if (q.type === o.type && q.section === o.section && (!p.vis || p.vis[q.id])) sel.add(q.id); selChanged(); }],
       o.story ? ["Open Its Story in Plan", () => setStory(o.story)] : null, 0, ["Clear Selection", () => act("selNone")], ["Show All Objects", () => act("showAll"), !hidden.objs.size]]
+    : window.cpmLive && etnOn() ? etabsBgMenu(p)
     : [["Restore Full View", () => fit(p)], ["Set Display Options...", () => dialogs.display()], 0, ["Plan View", () => setMode(p, "plan")], ["Elevation View", () => setMode(p, "elev")], ["3-D View", () => setMode(p, "3d")], ["Perspective", () => act("persp"), p.mode !== "3d"], 0, ["Show Tables", () => showTables(true)], ["Show All Objects", () => act("showAll"), !hidden.objs.size && !hidden.kind.size]];
-  m.innerHTML = (o ? `<div class="head">${esc(describe(o))}</div>` : "") + items.filter(i => i !== null).map((i, n) => i ? `<div class="mi ${i[2] ? "off" : ""}" data-n="${n}">${esc(i[0])}</div>` : "<hr>").join("");
+  m.innerHTML = (o ? `<div class="head">${esc(describe(o))}</div>` : "") + items.filter(i => i !== null).map((i, n) => i ? `<div class="mi ${i[2] ? "off" : ""}${i[3] ? " tick" : ""}" data-n="${n}">${esc(i[0])}</div>` : "<hr>").join("");
   const list = items.filter(i => i !== null);
   m.querySelectorAll("[data-n]").forEach(el => el.onclick = () => { hideMenus(); list[+el.dataset.n][1](); });
   doc.body.appendChild(m);
   const r = m.getBoundingClientRect(), w = doc.defaultView; m.style.left = Math.min(x, w.innerWidth - r.width - 4) + "px"; m.style.top = Math.min(y, w.innerHeight - r.height - 4) + "px";
+}
+// ETABS's menu for a right click away from any object, in a live ETABS model: the commands its help lists (Right Mouse
+// Button), in its order, from the Edit, View, Draw and Options menus; then the window's own view commands.
+function etabsBgMenu(p) {
+  const anyHidden = hidden.objs.size || hidden.kind.size || hidden.section.size;
+  return [["Add/Modify Grids...", () => act("m:storyGrid")], ["Glue Joints to Grids", () => act("m:ete:glue"), false, ticked("m:ete:glue")], ["Lock On Screen Grid System Edit", () => act("m:ete:lockGrid"), false, ticked("m:ete:lockGrid")],
+    ["Set Grid System Visibility...", () => act("o:grid")], 0, ["Show Selected Objects Only", () => act("m:etv:only"), !(sel.size || selJ.size)], ["Invert Visibility of Objects", () => act("m:etv:invert"), !anyHidden],
+    ["Hide Selected Objects", () => act("m:etv:hide"), !sel.size], ["Restore Visibility of Previous Selection", () => act("m:etv:restore"), !etv.lastHidden.length], ["Show All Objects", () => act("showAll"), !anyHidden], 0,
+    ["Snap Options...", () => act("m:snapOpts")], ["Graphics Preferences...", () => act("m:eto:graphics")], 0,
+    ["Restore Full View", () => fit(p)], ["Set Display Options...", () => dialogs.display()], ["Plan View", () => setMode(p, "plan")], ["Elevation View", () => setMode(p, "elev")], ["3-D View", () => setMode(p, "3d")]];
 }
 function zoomTo(p, ids) {
   const pts = ids.map(objOf).filter(Boolean).flatMap(o => o.type === "f" ? [o.a, o.b] : o.pts); if (!pts.length) return;
