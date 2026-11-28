@@ -15,7 +15,9 @@ public static class StatusBarText
     // The status bar found once and kept: a search of ETABS's whole window tree every second ran on ETABS's own busy
     // thread while it built the analysis model (0.4.77 on Ahmed's real model: 22 minutes before the analysis began,
     // about 3 in his own ETABS). Only the bar's own parts are read after the first find.
-    private static (int Pid, IntPtr Window, AutomationElement Bar)? _bar;
+    // Kept as object, and the search condition made inside Read: a static of a UI Automation type would load
+    // UIAutomationClient when Words alone is called, which fails where Windows' UI Automation is missing.
+    private static (int Pid, IntPtr Window, object Bar)? _bar;
 
     /// <summary>How often the status bar is read at most.</summary>
     public static TimeSpan Every { get; set; } = TimeSpan.FromSeconds(5);
@@ -45,10 +47,11 @@ public static class StatusBarText
         {
             var window = ScratchDialogs.MainWindow(processId);
             if (window == IntPtr.Zero) return "";
-            AutomationElement? bar = _bar is { } kept && kept.Pid == processId && kept.Window == window ? kept.Bar : null;
+            var bar = _bar is { } kept && kept.Pid == processId && kept.Window == window ? kept.Bar as AutomationElement : null;
             if (bar is null)
             {
                 var main = AutomationElement.FromHandle(window);
+                var StatusBar = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.StatusBar);
                 bar = main.FindFirst(TreeScope.Children, StatusBar) ?? main.FindFirst(TreeScope.Descendants, StatusBar);
                 if (bar is null) return "";
                 _bar = (processId, window, bar);
@@ -61,8 +64,6 @@ public static class StatusBarText
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { _bar = null; return ""; }
     }
-
-    private static readonly PropertyCondition StatusBar = new(AutomationElement.ControlTypeProperty, ControlType.StatusBar);
 
     /// <summary>The status bar's parts as one line: empty parts and repeats left out.</summary>
     public static string Words(IEnumerable<string> parts) =>
