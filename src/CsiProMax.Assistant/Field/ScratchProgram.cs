@@ -486,6 +486,20 @@ public static class ScratchDialogs
     /// the screen and in front, by Windows itself: never through the program's API, which does not answer while the
     /// program is busy in its analysis (Ahmed 2026-11-28: Show program window did nothing during a run). True when shown.
     /// </summary>
+    /// <summary>
+    /// Minimises the program's main window without taking the focus, the way an engineer's own run sits on the taskbar:
+    /// the window stays a shown window (not hidden through the API), so the program builds and runs its analysis model
+    /// as in a normal run. False when there is no window.
+    /// </summary>
+    public static bool Minimise(int processId)
+    {
+        if (processId == 0 || !OperatingSystem.IsWindows()) return false;
+        var main = MainWindow(processId);
+        if (main == IntPtr.Zero) return false;
+        ShowWindow(main, 7 /* SW_SHOWMINNOACTIVE */);
+        return true;
+    }
+
     public static bool Bring(int processId)
     {
         if (processId == 0 || !OperatingSystem.IsWindows()) return false;
@@ -1506,6 +1520,9 @@ public sealed class ScratchProgram : IScratchWindow
     /// Takes the program's window off the screen (its API's Hide), for CSI ProMax Engine's runs, which use the program
     /// as a solver in the background (Ahmed 2026-11-26). False when the program does not hide; the run goes on either way.
     /// </summary>
+    /// <summary>The run's window minimised to the taskbar, not hidden (Ahmed's real model, 0.4.79: hidden, ETABS took far longer than his own visible run to start the analysis).</summary>
+    public bool Minimise() => !_closed && !_left && !_shownByUser && ScratchDialogs.Minimise(ProcessId);
+
     public bool Hide()
     {
         if (_app is null || _closed || _left || _shownByUser) return false;

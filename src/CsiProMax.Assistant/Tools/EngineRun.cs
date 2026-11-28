@@ -250,7 +250,9 @@ public static class EngineRun
             if (window is ScratchProgram longRun) longRun.LongRuns(TimeSpan.FromHours(12));
             if (window.ModelPath.Length > 0) mon.ModelFile = window.ModelPath;
             tail.File = RunLog.FileOf(mon.ModelFile); mon.LogFile = tail.File;
-            if (window is ScratchProgram sp) Say(sp.Hide() ? $"{program.Name} is running hidden" : $"{program.Name} is running (it could not be hidden)");
+            // Minimised on the taskbar, not hidden through the API: Ahmed's own visible ETABS starts the analysis of his
+            // real model in about 3 minutes, the hidden copy took over 20 (0.4.77 and 0.4.79, 2026-11-28).
+            if (window is ScratchProgram sp) Say(sp.Minimise() ? $"{program.Name} is running minimised on the taskbar" : $"{program.Name} is running (it could not be minimised)");
             mon.End("start", "done", $"{program.Name} opened {Path.GetFileName(mon.ModelFile)}");
             if (Cancelled()) return;
             ctx.Link = window.Link;
