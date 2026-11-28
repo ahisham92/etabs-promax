@@ -1603,7 +1603,9 @@ public sealed class ScratchProgram : IScratchWindow
             if (!string.Equals(process.ProcessName, _program.ProcessName, StringComparison.OrdinalIgnoreCase) || (_startedAt != default && process.StartTime < _startedAt.AddSeconds(-2)))
                 return $"process {ProcessId} is not the run's own {_program.Name}, so it was not ended";
             _left = true; _closed = true;
-            process.Kill();
+            // With its solver: ETABS analyses in a process of its own, which ending ETABS alone left running, holding the
+            // run's files and the processors (Ahmed's model, 2026-11-28).
+            process.Kill(entireProcessTree: true);
             return process.WaitForExit(20000) ? $"{_program.Name} was ended without saving; its licence is free" : $"{_program.Name} was told to end and has not yet (process id {ProcessId})";
         }
         catch (ArgumentException) { _closed = true; return $"{_program.Name} had already ended"; }

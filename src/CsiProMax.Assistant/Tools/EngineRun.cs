@@ -235,7 +235,7 @@ public static class EngineRun
             // The program's copy is named after the engineer's own file (Ahmed 2026-11-28: "why is it not the same file
             // name"), with ScratchProgram.RunMark so its windows are still told apart from any of the engineer's.
             var copyName = mustAnalyse ? ScratchProgram.RunCopyName(RunName(_model!)) : null;
-            if (copyName is not null) ClearCopy(folder, copyName);
+            if (copyName is not null) foreach (var line in ClearCopy(folder, copyName)) lock (Gate) Lines.Add(line);
             window = ScratchProgram.Start(program, ctx, file, asIs: !mustAnalyse, name: copyName);
             if (window is null)
             {
@@ -702,12 +702,26 @@ public static class EngineRun
     /// The files an earlier run left under the copy's name (its model and its analysis files), in the run folder only:
     /// the new copy is saved over them, and an old analysis must never be taken for this one's.
     /// </summary>
-    internal static void ClearCopy(string folder, string copyName)
+    internal static List<string> ClearCopy(string folder, string copyName)
     {
-        if (!copyName.EndsWith(ScratchProgram.RunMark, StringComparison.Ordinal) || !Directory.Exists(folder)) return;
-        foreach (var f in Directory.EnumerateFiles(folder, copyName + ".*"))
-            if (string.Equals(Path.GetFileNameWithoutExtension(f), copyName, StringComparison.OrdinalIgnoreCase))
-                try { File.Delete(f); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        var said = new List<string>();
+        if (!copyName.EndsWith(ScratchProgram.RunMark, StringComparison.Ordinal) || !Directory.Exists(folder)) return said;
+        List<string> Left()
+        {
+            var left = new List<string>();
+            foreach (var f in Directory.EnumerateFiles(folder, copyName + ".*"))
+                if (string.Equals(Path.GetFileNameWithoutExtension(f), copyName, StringComparison.OrdinalIgnoreCase))
+                    try { File.Delete(f); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { left.Add(f); }
+            return left;
+        }
+        var held = Left();
+        if (held.Count == 0) return said;
+        // A file of the copy still open: the solver of an earlier run (a process of its own, left running when that run's
+        // program was ended) holds it, and takes the PC's processors from every run after it (Ahmed's model, 2026-11-28).
+        said.AddRange(FileHolders.EndHoldersOfCopy(held));
+        held = Left();
+        if (held.Count > 0) said.Add("Still held open, so the program may refuse them: " + string.Join(", ", held.Select(Path.GetFileName)));
+        return said;
     }
 
     /// <summary>The pack and its Viewer page: beside the model's own file, named after it; in the run folder for a model never saved.</summary>
