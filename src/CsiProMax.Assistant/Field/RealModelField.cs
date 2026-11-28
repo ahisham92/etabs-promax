@@ -349,6 +349,7 @@ public static class RealModelField
         foreach (var (key, ta) in a)
         {
             if (!model && OnlyTheRun(key)) continue;
+            if (model && WorkedOutByProgram(key)) continue;
             if (!b.TryGetValue(key, out var tb)) { out_.Add($"{key}: the table is gone ({ta.Rows.Count} rows)"); continue; }
             // An object's unique name and its points' are the program's numbering, given again on each open
             // (AISC-360-10 Ex003: C1 is 1, not 2), where its story and label name it: those are compared, not the number.
@@ -448,6 +449,18 @@ public static class RealModelField
 
     /// <summary>A result table that holds the run itself, not the model's results (Analysis Messages: the time of each
     /// message), so two runs of the same model never match.</summary>
+    /// <summary>
+    /// A model table the program works out itself from the tendons and their loads, not one the engineer enters: SAFE's
+    /// "Tendon - Total Elongation" (force and elongation at the jacking end) and "Tendon Discretized Points". SAFE 20.1
+    /// gave ForceJ 0 for the engineer's own saved model and 57834 (the value SAFE's own export of that model has) for the
+    /// Engine's (tester's SAFE-only field test, 0.4.76, 2026-11-28). The tendons, their jacking and losses are compared.
+    /// </summary>
+    internal static bool WorkedOutByProgram(string table)
+    {
+        var n = string.Join(" ", table.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        return n.Equals("Tendon - Total Elongation", StringComparison.OrdinalIgnoreCase) || n.Equals("Tendon Discretized Points", StringComparison.OrdinalIgnoreCase);
+    }
+
     internal static bool OnlyTheRun(string table) => table.Equals("Analysis Messages", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>A row of a modal case (ETABS: StepType "Mode"; SAP2000/SAFE: a modal case type).</summary>

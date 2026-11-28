@@ -31,6 +31,62 @@ public sealed record F2kResult(string Text, string Story, int Slabs, int Beams, 
 /// </summary>
 public static class F2kWriter
 {
+    /// <summary>
+    /// The depth, width and material a section SAFE has no shape for goes in as a concrete rectangle of. SAFE 20.1 was
+    /// given CPM-TRAP (a Concrete Trapezoid kept by its table fields t3/t2/t2b), CPM-NP (Nonprismatic) and SDCPM-ANGLE
+    /// (SD Section) with Depth=0 Width=0, and its API refused the section (tester's SAFE-only field test, 0.4.76,
+    /// 2026-11-28). So: the .e2k dimensions, else the form's own fields (t3 depth; width the mean of t2 and t2b), else for
+    /// a nonprismatic section its first segment's start section, else the shape lines of an SD section (its outline).
+    /// </summary>
+    internal static (double Depth, double Width, string Material) RectangleOf(FrameSection s, IReadOnlyList<FrameSection> all, int depthGuard = 0)
+    {
+        double? d = s.Number("D") is > 0 ? s.Number("D") : null, b = s.Number("B") is > 0 ? s.Number("B") : null;
+        var material = s.Material;
+        if (d is null || b is null)
+        {
+            var extras = PropertyDefs.FrameExtras(s);
+            double? X(params string[] keys)
+            {
+                foreach (var k in keys)
+                    if (extras.FirstOrDefault(kv => string.Equals(kv.Key, k, StringComparison.OrdinalIgnoreCase)).Value is { } v
+                        && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) && n > 0) return n;
+                return null;
+            }
+            d ??= X("t3", "D", "Depth");
+            var top = X("t2", "B", "Width"); var bottom = X("t2b", "tb", "BBottom");
+            b ??= top is not null && bottom is not null ? (top + bottom) / 2 : top ?? bottom;
+        }
+        if ((d is null || b is null) && depthGuard < 3 && s.Shape.Contains("Nonprismatic", StringComparison.OrdinalIgnoreCase))
+        {
+            var start = FrameTableShapes.Rows(s).Select(r => r.GetValueOrDefault("StartSect")).FirstOrDefault(n => !string.IsNullOrEmpty(n));
+            if (all.FirstOrDefault(x => string.Equals(x.Name, start, StringComparison.OrdinalIgnoreCase) && !ReferenceEquals(x, s)) is { } first)
+            {
+                var (fd, fb, fm) = RectangleOf(first, all, depthGuard + 1);
+                d ??= fd > 0 ? fd : null; b ??= fb > 0 ? fb : null;
+                if (material.Length == 0) material = fm;
+            }
+        }
+        if ((d is null || b is null) && SdOutline(s) is { } box) { d ??= box.Depth; b ??= box.Width; }
+        return (d ?? 0, b ?? d ?? 0, material);
+    }
+
+    /// <summary>The outline of an SD section's shapes (the largest HEIGHT/WIDTH, D/B its .e2k shape lines give), or null.</summary>
+    private static (double Depth, double Width)? SdOutline(FrameSection s)
+    {
+        if (!s.Shape.Contains("SD", StringComparison.OrdinalIgnoreCase)) return null;
+        double? depth = null, width = null;
+        foreach (var line in s.Lines)
+            for (var i = 0; i + 1 < line.Count; i++)
+            {
+                if (!E2k.E2kText.TryNumber(line[i + 1], out var v) || v <= 0) continue;
+                var key = line[i].ToUpperInvariant();
+                if (key is "HEIGHT" or "D" or "T3") depth = Math.Max(depth ?? 0, v);
+                else if (key is "WIDTH" or "B" or "T2" or "BF") width = Math.Max(width ?? 0, v);
+            }
+        return depth is > 0 ? (depth.Value, width ?? depth.Value) : null;
+    }
+
+
     private static string N(double v) => CsiTableText.Number(v);
 
     /// <summary>PROGRAM CONTROL's ProgLevel, as SAFE writes it: "Post Tensioning" for a model with tendons, else "Standard".</summary>
@@ -331,7 +387,8 @@ public static class F2kWriter
                     if (!s.Shape.Contains("Rectangular", StringComparison.OrdinalIgnoreCase))
                         notes.Add($"The frame section {s.Name} ({s.Shape}) went in as a concrete rectangle of its depth and width; give it its own shape in SAFE.");
                     shapeOf[s.Name] = "Concrete Rectangular";
-                    rect.Add([.. Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Depth", N(s.Number("D") ?? 0)), ("Width", N(s.Number("B") ?? s.Number("D") ?? 0)), ("Design Type", design)), .. FrameMods(s)]);
+                    var (depth, width, material) = RectangleOf(s, frameProps);
+                    rect.Add([.. Row(("Name", s.Name), ("Material", material), ("From File?", "No"), ("Depth", N(depth)), ("Width", N(width)), ("Design Type", design)), .. FrameMods(s)]);
                 }
             }
             tables.Add(CsiTableText.Table("FRAME SECTION PROPERTY DEFINITIONS - SUMMARY", frameProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Shape", shapeOf[s.Name])))));
