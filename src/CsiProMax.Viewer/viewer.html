@@ -28660,7 +28660,23 @@ const draw3dKinds = ["joint", "column", "beam", "wall", "brace", "floor", "rect"
 const elevKinds = ["joint", "beam", "brace", "floor", "rect", "qbeam", "qfloor"];
 const elevDraws = p => !!p && p.mode === "elev" && !!p.line && program === "etabs";
 function elevPlane(p) { const l = p.line, x = l.dir === "X"; return {name: "Elevation " + l.label, normal: x ? [1, 0, 0] : [0, 1, 0], points: [x ? [l.at, 0, 0] : [0, l.at, 0]]}; }
-function elevSnap(p, x, y) { const was = hm.wp; hm.wp = ""; try { return snap3d(p, x, y, wpOnly(p)); } finally { hm.wp = was; } }
+function elevSnap(p, x, y) {
+  const was = hm.wp; let s; hm.wp = ""; try { s = snap3d(p, x, y, wpOnly(p)); } finally { hm.wp = was; }
+  if (s) return s;
+  // Away from grid crossings and joints, as Snap Options says (Line Ends and Midpoints, then Lines and Frames): the
+  // midpoint of a story line's span, else a point on a story line, so a brace can end at mid-span.
+  const g = elevGrid(p), M = p.M, tolPx = Math.max(2, +snapOpt.snapTol || 12), raw = M.back(x, y), name = z => (stories.find(v => v.elevation === z) || {}).name || "";
+  let best = null, bd = tolPx;
+  if (snapOpt.ends) for (const z of g.levels) for (let i = 0; i + 1 < g.along.length; i++) {
+    const q = g.at((g.along[i] + g.along[i + 1]) / 2, z), t = M.to(q), d = Math.hypot(t[0] - x, t[1] - y); if (d < bd) { bd = d; best = q; }
+  }
+  if (best) return {q: best.map(wpRound), what: "midpoint, " + name(best[2]), story: name(best[2])};
+  if (!snapOpt.lines) return null;
+  let lz = null, ld = Math.max(2, tolPx * 2 / 3);
+  for (const z of g.levels) { const d = Math.abs(M.to(g.at(raw[g.ax], z))[1] - y); if (d < ld) { ld = d; lz = z; } }
+  const u = Math.round(raw[g.ax] * 1000) / 1000;
+  return lz === null || u < g.along[0] || u > g.along[g.along.length - 1] ? null : {q: g.at(u, lz).map(wpRound), what: "on " + name(lz), story: name(lz)};
+}
 // The story levels strictly between two heights, lowest first.
 const elevLevels = (z0, z1, t) => [...new Set(stories.map(s => s.elevation))].filter(z => z > Math.min(z0, z1) + t && z < Math.max(z0, z1) - t).sort((a, b) => a - b);
 // A frame from a to b, as one frame per story it crosses.
