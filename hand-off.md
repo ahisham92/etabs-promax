@@ -17,7 +17,7 @@ Standing rules: never change or remove anything another user added unless Ahmed 
 
 ## Releases
 
-### Merged after 0.4.77 (goes out with the next release)
+### 0.4.78 (2026-11-28, SAFE 20.1 tester fixes on Ahmed's direct ask; everything else stays on hold): PR 360
 SAFE 20.1 tester field test on 0.4.76 (2026-11-28 12:00, SAFE alone: 1652 passed, 8 failed, 4 not tested), on Ahmed's ask. The .f2k writes a section SAFE has no shape for (Concrete Trapezoid, Nonprismatic, SD Section) with its real size, never 0 by 0 (CPM-TRAP stopped the build). The API build of a .f2k notes a refused or sizeless section and goes on; a refusal names SAFE, not SAP2000; a frame refused by its ends goes in by two points, else the message names the stories, heights and units. The blank SAFE model's story takes the file's height as well as its level (SAFE 20.1 kept height 1, so columns from Z = 0 were refused), and the model is worked in and saved in the file's units (the engineer's lb, in model came back as kip, in). The pack takes the program's own summaries (Frame/Area/Joint Assignments - Summary, section summaries, material lists, SAFE's slab design span data) in all three programs. SAFE's own tendon elongation tables are not compared as model tables. Open: SAFE 20.1 still took only part of the Modeler's .f2k through its tables (18 of 35 objects) and why is not known; the fixes above make the API build that follows it work. Unproven until the tester's next SAFE 20.1 run.
 
 ### 0.4.77 (2026-11-28, Engine run fix for real models; everything else stays on hold): PR 358
