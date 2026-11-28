@@ -57,6 +57,34 @@ public sealed class RunMonitor
     /// <summary>The program's analysis log being read, and the model file the job ran on (for Open in program).</summary>
     public string LogFile { get; set; } = "";
     public string ModelFile { get; set; } = "";
+    /// <summary>The engineer's own model file the run is of (the program runs a working copy of it, <see cref="ModelFile"/>).</summary>
+    public string SourceFile { get; set; } = "";
+    private List<string> _screen = [];
+    private string _screenTitle = "";
+    private string _windows = "";
+
+    /// <summary>
+    /// What the program's own run window shows now (ETABS's "Analyzing" window: its title with the percentages and the
+    /// case, and the lines of its log box), read off the screen every second, so the Engine's window shows what the
+    /// program shows even before (or without) a log file (Ahmed 2026-11-28: the box stayed empty for minutes).
+    /// </summary>
+    public void Screen(string title, IReadOnlyList<string> lines)
+    {
+        lock (_gate)
+        {
+            if (title.Length > 0) _screenTitle = title;
+            if (lines.Count > 0)
+            {
+                if (lines.Count != _screen.Count || !lines.SequenceEqual(_screen)) LastHeard = _now();
+                _screen = lines.TakeLast(4000).ToList();
+                foreach (var line in lines)
+                    if (RunLog.CaseOf(line) is { } c && _casesSeen.Add(c)) { Case = c; CaseNumber = _casesSeen.Count; }
+            }
+        }
+    }
+
+    /// <summary>The program's open windows, said in the run window so nothing it shows is unseen ("" when none).</summary>
+    public void Windows(string said) { lock (_gate) _windows = said; }
     private readonly HashSet<string> _casesSeen = new(StringComparer.OrdinalIgnoreCase);
 
     public RunMonitor(CsiProgram program, Func<DateTime>? now = null)
@@ -156,6 +184,10 @@ public sealed class RunMonitor
                 ["log"] = new JsonArray(_log.TakeLast(most).Select(l => (JsonNode)l).ToArray()),
                 ["log_total"] = _log.Count,
                 ["notices"] = new JsonArray(_notices.Select(l => (JsonNode)l).ToArray()),
+                ["source_file"] = SourceFile,
+                ["screen_title"] = _screenTitle,
+                ["screen"] = new JsonArray(_screen.TakeLast(most).Select(l => (JsonNode)l).ToArray()),
+                ["windows"] = _windows,
             };
             if (Report is not null) o["report"] = Report.DeepClone();
             return o;

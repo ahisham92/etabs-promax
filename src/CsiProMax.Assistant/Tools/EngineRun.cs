@@ -119,7 +119,7 @@ public static class EngineRun
                 try { file = model.WriteForRun(Path.Combine(folder, RunName(model) + ".e2k")); }
                 catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
             Lines.Clear(); _error = ""; _pack = null; _lost = null; _probe = null; _done = false; _running = true; _closed = false; _keptOpen = false; _cancel = false; _window = null; _seenNotices = 0;
-            _mon = new RunMonitor(program) { CaseCount = CasesOf(model) };
+            _mon = new RunMonitor(program) { CaseCount = CasesOf(model), SourceFile = model.Path };
             // The model as the instability check reads it, taken here on the window's thread; checked in the background.
             AnalysisModel? check = null;
             try { check = FromStructural.Read(model.Model, program.Key); } catch (Exception ex) when (ex is not OutOfMemoryException) { _mon.Skip("check", "the model could not be read for the check: " + ex.Message); }
@@ -506,8 +506,12 @@ public static class EngineRun
     private static int _seenNotices;
 
     /// <summary>One look of the monitor: new log lines, the boxes answered, and a box the program waits on.</summary>
+    private static int _watching;
+
     private static void Watch(RunMonitor mon, LogTail tail)
     {
+        // One look at a time: a look held by a slow window must not pile up behind the timer.
+        if (Interlocked.Exchange(ref _watching, 1) == 1) return;
         try
         {
             tail.Read(mon);
@@ -515,6 +519,11 @@ public static class EngineRun
             lock (Gate) window = _window;
             Notices(mon, window);
             if (window is not ScratchProgram sp) { mon.Wait(""); return; }
+            // What the program's own run window shows (ETABS's "Analyzing" window and its log box), and the windows it
+            // has open: the Engine's run window shows them live (Ahmed 2026-11-28: "it is important to see what is happening").
+            if (sp.RunWindow() is { } screen) mon.Screen(screen.Title, screen.Lines);
+            var shown = sp.OpenWindows();
+            mon.Windows(shown.Count == 0 ? "" : string.Join(" | ", shown));
             var quiet = (DateTime.Now - mon.LastHeard).TotalSeconds;
             if (quiet < 30) { mon.Wait(""); return; }
             // Quiet for half a minute: what the program shows is said, so a box nobody answered is never a silent wait.
@@ -524,6 +533,7 @@ public static class EngineRun
                 : $"{mon.Program} has written nothing for {quiet:0} s. Its open windows: " + string.Join(" | ", open) + ". If one waits for an answer, press Show program window.");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ }
+        finally { Volatile.Write(ref _watching, 0); }
     }
 
     private static void Notices(RunMonitor mon, IScratchWindow? window)
