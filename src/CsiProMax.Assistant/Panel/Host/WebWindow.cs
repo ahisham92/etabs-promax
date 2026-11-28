@@ -141,6 +141,7 @@ internal sealed class WebPane : Border, IDisposable
     private readonly WebPages.Kind _kind;
     private readonly WebView2 _web = new();
     private int _restarts;
+    private CoreWebView2Environment? _environment; // the browser the page runs in, shared by its panels' windows
 
     /// <summary>The page could not be drawn here (it was opened outside instead).</summary>
     public event Action? Failed;
@@ -194,6 +195,7 @@ internal sealed class WebPane : Border, IDisposable
         {
             System.IO.Directory.CreateDirectory(WebPages.DataFolder);
             var environment = await CoreWebView2Environment.CreateAsync(null, WebPages.DataFolder);
+            _environment = environment;
             await _web.EnsureCoreWebView2Async(environment);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -250,6 +252,12 @@ internal sealed class WebPane : Border, IDisposable
         };
         core.NewWindowRequested += (_, n) =>
         {
+            // A panel the page moves into a window of its own (its popOut): a CSI ProMax window on the same browser.
+            if (n.Name.StartsWith("cpm-pop-", StringComparison.Ordinal) && _environment is { } environment)
+            {
+                PanelWindow.Open(n, environment, Window.GetWindow(this));
+                return;
+            }
             n.Handled = true;
             if (Uri.TryCreate(n.Uri, UriKind.Absolute, out var target) && WebPages.StaysInWindow(page, target) && target.Scheme is "http" or "https" or "file")
                 WebWindow.ShowHere(n.Uri, _kind == WebPages.Kind.ModelerView ? WebPages.Kind.ProgramView : _kind);
