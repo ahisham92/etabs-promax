@@ -872,13 +872,15 @@ public sealed class ScratchProgram : IScratchWindow
                 {
                     object model = m;
                     ApiCall.Must(model, "InitializeNewModel", CsiTools.D(("Units", units)), "start a new model");
-                    return ApiCall.First(model, ["File.NewBlank", "File.NewGridOnly"], CsiTools.D(("NumberStorys", 1), ("TypicalStoryHeight", height), ("BottomStoryHeight", height), ("NumberLinesX", 2), ("NumberLinesY", 2), ("SpacingX", 6), ("SpacingY", 6)), "start a blank model");
+                    var made = ApiCall.First(model, ["File.NewBlank", "File.NewGridOnly"], CsiTools.D(("NumberStorys", 1), ("TypicalStoryHeight", height), ("BottomStoryHeight", height), ("NumberLinesX", 2), ("NumberLinesY", 2), ("SpacingX", 6), ("SpacingY", 6)), "start a blank model");
+                    BlankUnits = UnitsAsFile(model, units);
+                    return made;
                 }, $"{name} did not finish starting a blank model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.");
                 // NewBlank takes no story height in SAFE: the one story is moved to the file's level when it is not there.
                 var level = F2kRebuild.FloorLevelOf(text);
-                var stories = level is null ? "" : Convert.ToString(Ask(FileTimeout, "put the story at the file's level", m => SafeStory.AtLevel(m, level.Value),
+                var stories = level is null ? "" : Convert.ToString(Ask(FileTimeout, "put the story at the file's level", m => SafeStory.AtLevel(m, level.Value, height),
                     $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.")) ?? "";
-                return $"blank, in {ComEtabs.UnitNames[units - 1]}, {stories}";
+                return $"blank, in {ComEtabs.UnitNames[units - 1]}{BlankUnits}, {stories}";
             }
         if (build && !Blank($"{name} on this PC opens only {ModelExtension(_program)} files through its API, so the Modeler's {Path.GetExtension(modelFile)} is built in it instead")) return false;
         var openedEmpty = false;
@@ -1045,7 +1047,8 @@ public sealed class ScratchProgram : IScratchWindow
                 if (built is JsonObject o) o["tables_first"] = tables;
             }
             ctx.Facts["safe.built"] = 1;
-            var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
+            // Saved in the file's units, so the model keeps the engineer's (Program Control CurrUnits, SAFE 20.1, 0.4.76).
+            var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => { UnitsAsFile((object)m, F2kRebuild.UnitsOf(text)); return m.File.Save(target); },
                 $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
             if (answer != 0) throw new EtabsException($"{name} could not save the scratch model after building it (it answered {answer}).");
             return built;
@@ -1222,6 +1225,37 @@ public sealed class ScratchProgram : IScratchWindow
 
     /// <summary>Whether the program holds every beam, column, wall and floor of the file after its tables went in.</summary>
     internal static bool TablesBroughtAll(int held, int wanted) => held > 0 && held >= wanted;
+
+    /// <summary>What the blank model's units were against the file's, for the step's answer ("" when the same).</summary>
+    private string BlankUnits = "";
+
+    /// <summary>
+    /// Makes the present units the file's after a blank model is started, and says when the program's own units differ:
+    /// the Engine's SAFE 20.1 model of the engineer's lb, in file came back saved in kip, in (tester's SAFE-only field
+    /// test, 0.4.76, 2026-11-28, Program Control CurrUnits), and every number the build gives is in the present units.
+    /// </summary>
+    internal static string UnitsAsFile(object model, int units)
+    {
+        static int Of(JsonObject call) => (int)ApiCall.Number(call["return"]);
+        var said = "";
+        try
+        {
+            var database = Of(ApiCall.Invoke(model, "GetDatabaseUnits"));
+            if (database > 0 && database != units && database <= ComEtabs.UnitNames.Length) said += $" (the program's database units are {ComEtabs.UnitNames[database - 1]})";
+        }
+        catch (Exception ex) when (ex is EtabsException or ToolInputException or MissingMethodException) { }
+        try
+        {
+            var present = Of(ApiCall.Invoke(model, "GetPresentUnits"));
+            if (present != units)
+            {
+                ApiCall.Invoke(model, "SetPresentUnits", CsiTools.D(("Units", units)));
+                said += present > 0 && present <= ComEtabs.UnitNames.Length ? $" (present units {ComEtabs.UnitNames[present - 1]} made the file's)" : " (present units set to the file's)";
+            }
+        }
+        catch (Exception ex) when (ex is EtabsException or ToolInputException or MissingMethodException) { }
+        return said;
+    }
 
     private static int Count(object model, string path)
     {

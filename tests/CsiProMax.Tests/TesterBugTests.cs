@@ -1687,7 +1687,7 @@ static class TesterBugTests
             var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
             Check(scratch.Contains("(\"TypicalStoryHeight\", height), (\"BottomStoryHeight\", height)", StringComparison.Ordinal) && scratch.Contains("F2kRebuild.StoryHeightOf(text)", StringComparison.Ordinal),
                 "the blank model takes the file's story height, not 3");
-            Check(scratch.Contains("SafeStory.AtLevel(m, level.Value)", StringComparison.Ordinal), "and its story is put at the file's level");
+            Check(scratch.Contains("SafeStory.AtLevel(m, level.Value, height)", StringComparison.Ordinal), "and its story is put at the file's level, with the file's height");
         });
 
         yield return ("SAFE 22.7 tester (0.4.66): when SAFE opens the Modeler's .f2k empty, the test opens other forms of it and SAFE's own export, to say why", () =>
@@ -1826,6 +1826,102 @@ static class TesterBugTests
                 Check(!File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", file)).Replace("try { return Assembly.LoadFrom(apiFile); }", "").Contains("LoadFrom(api", StringComparison.Ordinal), file + " loads the API through EtabsApi.Load");
         });
 
+        yield return ("SAFE 20.1 tester (0.4.76): a section SAFE has no shape for goes into the .f2k with its own size, never 0 by 0", () =>
+        {
+            var link = new OfflineEtabs(CsiProMax.Model.Templates.ConcreteFrame("T", [6, 5], [4], 2, 3.2));
+            var conc = link.Model.Materials.First(x => x.IsConcrete).Name;
+            var rect = link.Model.FrameSections.First(x => x.Shape.Contains("Rectangular", StringComparison.OrdinalIgnoreCase)).Name;
+            Define(link, new { name = "CPM-TRAP", shape = "Concrete Trapezoid", material = conc, extras = new Dictionary<string, string> { ["t3"] = "0.6", ["t2"] = "0.4", ["t2b"] = "0.3" } });
+            Define(link, new { name = "CPM-NP", shape = "Nonprismatic", rows = new[] { new Dictionary<string, string> { ["StartSect"] = rect, ["EndSect"] = rect, ["LengthType"] = "Proportional", ["Length"] = "1", ["EI33Var"] = "Linear", ["EI22Var"] = "Linear" } } });
+            var f2k = CsiTableText.Parse(CsiProMax.F2k.F2kWriter.Write(link.Model, new CsiProMax.F2k.F2kOptions(Story: link.Model.Stories[1].Name)).Text);
+            var rows = f2k["FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR"];
+            var trap = rows.Single(r => r["Name"] == "CPM-TRAP");
+            Equal("0.6", trap["Depth"], "the trapezoid's depth is its t3");
+            Equal("0.35", trap["Width"], "its width the mean of t2 and t2b");
+            var np = rows.Single(r => r["Name"] == "CPM-NP");
+            var start = link.Model.FrameSections.First(x => x.Name == rect);
+            Check(double.Parse(np["Depth"], System.Globalization.CultureInfo.InvariantCulture) > 0 && np["Depth"] == CsiTableText.Number(start.Number("D")!.Value), "the nonprismatic section takes its start section's depth: " + np["Depth"]);
+            Equal(start.Material, np["Material"], "and its material");
+            foreach (var r in rows) Check(r["Depth"] != "0" && r["Width"] != "0", $"no section is 0 by 0: {r["Name"]}");
+        });
+
+        yield return ("SAFE 20.1 tester (0.4.76): a section SAFE refuses, or one with no size, is a note and the build goes on; the refusal names SAFE, not SAP2000", () =>
+        {
+            var tester = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", "safe20-tester-cpm-field-test.f2k"));
+            Check(tester.Contains("Name=CPM-TRAP   Material=C30/37   \"From File?\"=No   Depth=0   Width=0", StringComparison.Ordinal), "the tester's file had the 0 by 0 trapezoid");
+            var m = CsiProMax.Model.Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
+            var text = CsiProMax.F2k.F2kWriter.Write(m, new CsiProMax.F2k.F2kOptions(Story: "Story2")).Text;
+            var conc = m.Materials.First(x => x.IsConcrete).Name;
+            text = text.Replace("TABLE:  \"FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR\"\r\n", $"TABLE:  \"FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR\"\r\n   Name=CPM-TRAP   Material={conc}   \"From File?\"=No   Depth=0   Width=0\r\n", StringComparison.Ordinal);
+            Check(text.Contains("Name=CPM-TRAP", StringComparison.Ordinal), "the 0 by 0 section is in the file");
+            var t = CsiTableText.Parse(text);
+            var column = t["FRAME ASSIGNMENTS - SECTION PROPERTIES"].Select(r => r["Section Property"]).First();
+            var link = new StoryBound(new SafeMemory(new MemoryEtabs { Program = CsiProgram.Safe }, program: CsiProgram.Safe) { Api = new SaysNo("SetRectangle", column) }, [new StoryRow("Base", 0, 0), new StoryRow("Story2", 7, 3.5)]);
+            var built = CsiProMax.Assistant.Safe.F2kRebuild.Build(link, text);
+            var notes = string.Join(" | ", (built["notes"] as JsonArray ?? []).Select(n => n?.ToString()));
+            Check(notes.Contains("CPM-TRAP has no depth", StringComparison.Ordinal), "the 0 by 0 section is said: " + notes);
+            Check(notes.Contains($"SAFE refused to add the section {column}", StringComparison.Ordinal) && !notes.Contains("SAP2000 refused", StringComparison.Ordinal), "a refused section names SAFE: " + notes);
+            Check(built["columns"]!.GetValue<int>() > 0 && built["slabs"]!.GetValue<int>() > 0, "the build went on: " + built.ToJsonString());
+        });
+
+        yield return ("SAFE 20.1 tester (0.4.76): a frame SAFE refuses by its two ends goes in by two points, and one still refused says the stories and units", () =>
+        {
+            var api = new PointsAndFrames();
+            var link = new NoFrameByCoord(new SafeMemory(new MemoryEtabs { Program = CsiProgram.Safe }, program: CsiProgram.Safe), api);
+            var made = CsiProMax.Assistant.Safe.F2kRebuild.AddFrame(link, "C1", (0, 0, 0), (0, 0, 3.2), "C500x500");
+            Equal("F1", made, "the frame made by its points");
+            Equal("0,0,0|0,0,3.2|P1-P2 C500x500", string.Join("|", api.Asked), "two points, then the frame between them with its section");
+            api.Refuse = true;
+            try { CsiProMax.Assistant.Safe.F2kRebuild.AddFrame(link, "C2", (6, 0, 0), (6, 0, 3.2), "C500x500"); throw new Exception("a refused frame was taken"); }
+            catch (EtabsException ex)
+            {
+                Check(ex.Message.Contains("frame C2, from Z = 0 to Z = 3.2", StringComparison.Ordinal) && ex.Message.Contains("Story1 at", StringComparison.Ordinal) && ex.Message.Contains("units kN, m", StringComparison.Ordinal), ex.Message);
+            }
+            var rebuild = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Safe/F2kRebuild.cs"));
+            Check(rebuild.Contains("Rename(e, \"FrameObj\", AddFrame(e, name, i, j, section), name, names);", StringComparison.Ordinal), "the build adds its frames this way");
+        });
+
+        yield return ("SAFE 20.1 tester (0.4.76): the blank model's story takes the file's height too, so its base is at the file's (columns from Z = 0)", () =>
+        {
+            var api = new BaseStoryApi(1, 1);
+            var said = CsiProMax.Assistant.Safe.SafeStory.AtLevel(api, 3.2, 3.2);
+            Check(Math.Abs(api.Story.Elevation - 3.2) < 1e-9 && Math.Abs(api.Story.Height - 3.2) < 1e-9, $"the story at 3.2 with height 3.2 (base 0), not height 1: {api.Story.Elevation} / {api.Story.Height}: {said}");
+            Check(said.Contains("made the file's 3.2", StringComparison.Ordinal), said);
+            Equal("its story is at the file's level 3.2", CsiProMax.Assistant.Safe.SafeStory.AtLevel(api, 3.2, 3.2), "and then left as it is");
+        });
+
+        yield return ("SAFE 20.1 tester (0.4.76): the blank model is worked in and saved in the file's units", () =>
+        {
+            var api = new UnitsApi { Present = 3, Database = 3 };
+            var said = ScratchProgram.UnitsAsFile(api, 1);
+            Equal(1, api.Present, "present units made lb, in, F (the file's)");
+            Check(said.Contains("database units are kip_in_F", StringComparison.Ordinal) && said.Contains("present units kip_in_F made the file's", StringComparison.Ordinal), said);
+            Equal("", ScratchProgram.UnitsAsFile(new UnitsApi { Present = 6, Database = 6 }, 6), "nothing to say when they are the file's");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("UnitsAsFile((object)m, F2kRebuild.UnitsOf(text)); return m.File.Save(target);", StringComparison.Ordinal), "the built model is saved in the file's units");
+        });
+
+        yield return ("SAFE 20.1 tester (0.4.76): the program's own summaries (assignments, sections, material lists, span data) come back in the pack, in all three programs", () =>
+        {
+            foreach (var name in new[] { "Area Assignments - Summary", "Area Section Property Definitions - Summary", "Concrete Slab Design Summary - Span Definition Data", "Frame Assignments - Summary", "Frame Section Property Definitions - Summary", "Joint Assignments - Summary", "Material List by Section Property", "Material List by Object Type" })
+            {
+                Check(PackTables.Kind(new TableName(name, name, false, 0)) is not null, name + ", not importable, is taken");
+                Check(PackTables.Kind(new TableName(name, name, false, -1)) is not null, name + ", import not said, is taken");
+            }
+            Equal(null, PackTables.Kind(new TableName("Frame Assignments - Section Properties", "Frame Assignments - Section Properties", false, 0)), "an assignment table is still not taken as a summary");
+            Equal(null, PackTables.Kind(new TableName("Frame Assignments - Summary", "Frame Assignments - Summary", false, 2)), "an importable table is not taken");
+        });
+
+        yield return ("SAFE 20.1 tester (0.4.76): tendon elongations SAFE works out are not compared as model tables; the tendons and their jacking are", () =>
+        {
+            Check(RealModelField.WorkedOutByProgram("Tendon  - Total Elongation") && RealModelField.WorkedOutByProgram("Tendon Discretized Points"), "SAFE's own tendon results");
+            Check(!RealModelField.WorkedOutByProgram("Tendon Load Assignments - Jacking Stress"), "the jacking is the engineer's");
+            var a = new Dictionary<string, TableData> { ["Tendon  - Total Elongation"] = new(["Name", "ForceJ"], [["2", "0"]]), ["Tendon Load Assignments - Jacking Stress"] = new(["Name", "Stress"], [["2", "216000"]]) };
+            var b = new Dictionary<string, TableData> { ["Tendon  - Total Elongation"] = new(["Name", "ForceJ"], [["2", "57834"]]), ["Tendon Load Assignments - Jacking Stress"] = new(["Name", "Stress"], [["2", "200000"]]) };
+            var off = RealModelField.Compare(a, b, model: true);
+            Check(off.Count == 1 && off[0].StartsWith("Tendon Load Assignments - Jacking Stress", StringComparison.Ordinal), string.Join(" | ", off));
+        });
+
         yield return ("Out of memory box (0.4.68): a large model's results table is read one load case or combination at a time from the start, with repeated values kept once", () =>
         {
             Check(ComEtabs.IsCaseTable(["Story", "Joint", "OutputCase", "CaseType", "UX"]), "a table with OutputCase is read by case");
@@ -1919,10 +2015,88 @@ static class TesterBugTests
         }
     }
 
+    static void Define(OfflineEtabs link, object args) =>
+        PropertyTools.All.Single(x => x.Name == "define_frame_shape").Invoke(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
+
+    /// <summary>A SAFE API that says no (1) to one call for one name, and yes to the rest.</summary>
+    sealed class SaysNo(string call, string name) : System.Dynamic.DynamicObject
+    {
+        public override bool TryGetMember(System.Dynamic.GetMemberBinder binder, out object? result) { result = this; return true; }
+        public override bool TryInvokeMember(System.Dynamic.InvokeMemberBinder binder, object?[]? args, out object? result)
+        {
+            result = binder.Name == call && args is { Length: > 0 } && Equals(args[0], name) ? 1 : binder.Name == "ChangeName" ? 1 : 0;
+            return true;
+        }
+    }
+
+    /// <summary>SAFE 20.1 as the tester's run had it: FrameObj.AddByCoord refused; points and AddByPoint through the API.</summary>
+    sealed class NoFrameByCoord(ICsiLink inner, PointsAndFrames api) : Forward(inner)
+    {
+        public override string AddFrame(double x1, double y1, double z1, double x2, double y2, double z2, string section) => throw new EtabsException($"SAFE refused to add a frame with section {section}.");
+        public override object? Raw(string what, Func<dynamic, object?> work) => work(api);
+        public override IReadOnlyList<StoryRow> Stories() => [new StoryRow("Base", 0, 0), new StoryRow("Story1", 3.2, 3.2)];
+    }
+
+    public sealed class PointsAndFrames
+    {
+        public List<string> Asked { get; } = [];
+        public bool Refuse;
+        public PointApi PointObj => new(this);
+        public FrameApi FrameObj => new(this);
+        public sealed class PointApi(PointsAndFrames o)
+        {
+            int n;
+            public int AddCartesian(double x, double y, double z, ref string Name, string UserName = "", string CSys = "Global", bool MergeOff = false, int MergeNumber = 0)
+            {
+                o.Asked.Add(string.Join(",", new[] { x, y, z }.Select(v => v.ToString(System.Globalization.CultureInfo.InvariantCulture))));
+                Name = "P" + (o.Asked.Count(a => a.Contains(',')));
+                return 0;
+            }
+        }
+        public sealed class FrameApi(PointsAndFrames o)
+        {
+            public int AddByPoint(string Point1, string Point2, ref string Name, string PropName = "Default", string UserName = "")
+            {
+                if (o.Refuse) return 1;
+                o.Asked.Add($"{Point1}-{Point2} {PropName}");
+                Name = "F1";
+                return 0;
+            }
+        }
+    }
+
+    /// <summary>SAFE 20.1's story as the tester's run suggests: SetElevation keeps the height (the base moves), SetHeight keeps the base.</summary>
+    public sealed class BaseStoryApi(double elevation, double height)
+    {
+        public Stories Story { get; } = new() { Elevation = elevation, Height = height };
+        public sealed class Stories
+        {
+            public double Elevation, Height;
+            public int GetStories_2(ref double BaseElevation, ref int NumberStories, ref string[] StoryNames, ref double[] StoryElevations, ref double[] StoryHeights,
+                ref bool[] IsMasterStory, ref string[] SimilarToStory, ref bool[] SpliceAbove, ref double[] SpliceHeight, ref int[] color)
+            {
+                BaseElevation = Elevation - Height; NumberStories = 1; StoryNames = ["Story1"]; StoryElevations = [Elevation]; StoryHeights = [Height];
+                IsMasterStory = [true]; SimilarToStory = ["None"]; SpliceAbove = [false]; SpliceHeight = [0]; color = [0];
+                return 0;
+            }
+            public int SetElevation(string Name, double Elevation) { this.Elevation = Elevation; return 0; }
+            public int SetHeight(string Name, double Height) { Elevation += Height - this.Height; this.Height = Height; return 0; }
+        }
+    }
+
+    /// <summary>The unit calls of a CSI program's model.</summary>
+    public sealed class UnitsApi
+    {
+        public int Present, Database;
+        public int GetPresentUnits() => Present;
+        public int GetDatabaseUnits() => Database;
+        public int SetPresentUnits(int Units) { Present = Units; return 0; }
+    }
+
     /// <summary>A link that passes everything on, for a stand-in that changes one answer.</summary>
     class Forward(ICsiLink inner) : ICsiLink
     {
-        public CsiProgram Program => inner.Program;
+        public virtual CsiProgram Program => inner.Program;
         public virtual ModelInfo Info() => inner.Info();
         public virtual IReadOnlyList<StoryRow> Stories() => inner.Stories();
         public IReadOnlyList<FrameRow> Frames() => inner.Frames();
@@ -1938,7 +2112,7 @@ static class TesterBugTests
         public IReadOnlyList<LoadPatternRow> LoadPatterns() => inner.LoadPatterns();
         public IReadOnlyList<string> LoadCases() => inner.LoadCases();
         public IReadOnlyList<string> Combos() => inner.Combos();
-        public string AddFrame(double x1, double y1, double z1, double x2, double y2, double z2, string section) => inner.AddFrame(x1, y1, z1, x2, y2, z2, section);
+        public virtual string AddFrame(double x1, double y1, double z1, double x2, double y2, double z2, string section) => inner.AddFrame(x1, y1, z1, x2, y2, z2, section);
         public virtual string AddArea(IReadOnlyList<(double X, double Y, double Z)> corners, string section) => inner.AddArea(corners, section);
         public void SetFrameSection(string name, string section) => inner.SetFrameSection(name, section);
         public void SetAreaSection(string name, string section) => inner.SetAreaSection(name, section);
@@ -1950,7 +2124,7 @@ static class TesterBugTests
         public void AddCombo(string name, IReadOnlyList<(string Case, double Factor)> cases) => inner.AddCombo(name, cases);
         public virtual IReadOnlyList<TableName> Tables() => inner.Tables();
         public virtual TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => inner.ReadTable(key, cases, combos);
-        public object? Raw(string what, Func<dynamic, object?> work) => inner.Raw(what, work);
+        public virtual object? Raw(string what, Func<dynamic, object?> work) => inner.Raw(what, work);
         public void RunAnalysis() => inner.RunAnalysis();
         public void Save() => inner.Save();
         public void Refresh() => inner.Refresh();

@@ -13,7 +13,37 @@ namespace CsiProMax.Assistant.Safe;
 public static class SafeStory
 {
     /// <summary>Moves the model's top story to <paramref name="level"/> when no story is there, and says where its stories are.</summary>
-    public static string AtLevel(object model, double level)
+    public static string AtLevel(object model, double level, double? height = null)
+    {
+        var said = Level(model, level);
+        return height is { } h && h > 0 ? said + Height(model, level, h) : said;
+    }
+
+    /// <summary>
+    /// The story at the level also takes the file's story height, so the base is where the file's is: SAFE 20.1 kept the
+    /// height 1 of its blank story after the story was moved from 1 to 3.2, and refused the Modeler's columns from Z = 0
+    /// (tester's SAFE-only field test, 0.4.76, 2026-11-28: "SAFE refused to add a frame with section C500x500").
+    /// </summary>
+    internal static string Height(object model, double level, double height)
+    {
+        var at = Read(model).FirstOrDefault(s => Math.Abs(s.Elevation - level) < 1e-4);
+        if (at is null || at.Height <= 0 || Math.Abs(at.Height - height) < 1e-4) return "";
+        try
+        {
+            ApiCall.Must(model, "Story.SetHeight", new Dictionary<string, object?> { ["Name"] = at.Name, ["Height"] = height }, $"give the story {at.Name} the height {Number(height)}");
+            var now = Read(model);
+            // A program that keeps the base and moves the story with its height: the story goes back to the level.
+            if (!now.Any(s => Math.Abs(s.Elevation - level) < 1e-4))
+                ApiCall.Must(model, "Story.SetElevation", new Dictionary<string, object?> { ["Name"] = at.Name, ["Elevation"] = level }, $"move the story {at.Name} to {Number(level)}");
+            var after = Read(model).FirstOrDefault(s => s.Name == at.Name);
+            return after is not null && Math.Abs(after.Height - height) < 1e-4 && Math.Abs(after.Elevation - level) < 1e-4
+                ? $", height {Number(at.Height)} made the file's {Number(height)}"
+                : $", height {Number(at.Height)} asked to be {Number(height)} (it is {Number(after?.Height ?? 0)} at {Number(after?.Elevation ?? 0)})";
+        }
+        catch (Exception ex) when (ex is EtabsException or ToolInputException or MissingMethodException) { return $", height {Number(at.Height)} not the file's {Number(height)} ({ex.Message})"; }
+    }
+
+    private static string Level(object model, double level)
     {
         var stories = Read(model);
         if (stories.Count == 0) return "its stories could not be read";

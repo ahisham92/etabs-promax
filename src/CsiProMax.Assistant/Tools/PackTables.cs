@@ -73,13 +73,23 @@ public static class PackTables
         if (DesignResults.IsWallTable(t.Name)) return "result";
         if (IsMeshTable(n)) return "result";
         var input = InputWords.Any(w => n.Contains(w, StringComparison.Ordinal));
-        if (Verdict.IsInputTable(t.Name)) return input ? "input" : null;
+        if (Verdict.IsInputTable(t.Name)) return input || ProgramSummary(t, n) ? "input" : null;
         if (DesignResults.IsDesignTable(t.Name)) return "result";
         if (input) return "input";
         if (t.Import == 0) return "result";
         if (t.Import > 0) return null;
         return ResultWords.Any(w => n.Contains(w, StringComparison.Ordinal)) && !n.Contains("assign", StringComparison.Ordinal) && !n.Contains("definition", StringComparison.Ordinal) ? "result" : null;
     }
+
+    /// <summary>
+    /// A table the program works out from the model and gives only as output: "Frame Assignments - Summary", "Area
+    /// Section Property Definitions - Summary", "Material List by Section Property", SAFE's "Concrete Slab Design Summary -
+    /// Span Definition Data". No file carries them, so the pack takes them as the program gives them: the Engine brought
+    /// none of them back from SAFE 20.1 while SAFE's own run had them (tester's SAFE-only field test, 0.4.76, 2026-11-28).
+    /// The rule is for all three programs. An importable table (the program says so) is never one.
+    /// </summary>
+    internal static bool ProgramSummary(TableName t, string normalized) =>
+        t.Import <= 0 && (normalized.Contains("summary", StringComparison.Ordinal) || normalized.StartsWith("materiallist", StringComparison.Ordinal));
 
     /// <summary>
     /// The analysis mesh: the program divides each floor and wall into shell elements and gives their forces at the
