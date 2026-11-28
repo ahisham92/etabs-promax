@@ -83,6 +83,21 @@ public sealed class RunMonitor
         }
     }
 
+    private string _status = "";
+
+    /// <summary>
+    /// What the program's status bar says ("Creating Analysis Model - elements - shells - LVL 02-TOC"): while it changes,
+    /// the program is heard from, though it writes no log yet.
+    /// </summary>
+    public void Status(string text)
+    {
+        lock (_gate)
+        {
+            if (text.Length == 0 || text == _status) return;
+            _status = text; LastHeard = _now();
+        }
+    }
+
     /// <summary>The program's open windows, said in the run window so nothing it shows is unseen ("" when none).</summary>
     public void Windows(string said) { lock (_gate) _windows = said; }
     private readonly HashSet<string> _casesSeen = new(StringComparer.OrdinalIgnoreCase);
@@ -188,6 +203,7 @@ public sealed class RunMonitor
                 ["screen_title"] = _screenTitle,
                 ["screen"] = new JsonArray(_screen.TakeLast(most).Select(l => (JsonNode)l).ToArray()),
                 ["windows"] = _windows,
+                ["status_text"] = _status,
             };
             if (Report is not null) o["report"] = Report.DeepClone();
             return o;

@@ -232,7 +232,11 @@ public static class EngineRun
             Say(mustAnalyse
                 ? $"Starting {program.Name} in a window of its own, in the background (yours, if open, is not touched)"
                 : $"Starting {program.Name} on the model it analysed ({Path.GetFileName(file)}), in the background");
-            window = ScratchProgram.Start(program, ctx, file, asIs: !mustAnalyse);
+            // The program's copy is named after the engineer's own file (Ahmed 2026-11-28: "why is it not the same file
+            // name"), with ScratchProgram.RunMark so its windows are still told apart from any of the engineer's.
+            var copyName = mustAnalyse ? ScratchProgram.RunCopyName(RunName(_model!)) : null;
+            if (copyName is not null) ClearCopy(folder, copyName);
+            window = ScratchProgram.Start(program, ctx, file, asIs: !mustAnalyse, name: copyName);
             if (window is null)
             {
                 // A file the program rejected is the headline, in its own words (Ahmed's real model, 2026-11-27: the report
@@ -242,6 +246,8 @@ public static class EngineRun
                 return;
             }
             lock (Gate) { _starts++; _window = window; }
+            // The engineer's real model may take hours; Cancel Run stops it (the scratch link's 10 minutes gave Ahmed's run up).
+            if (window is ScratchProgram longRun) longRun.LongRuns(TimeSpan.FromHours(12));
             if (window.ModelPath.Length > 0) mon.ModelFile = window.ModelPath;
             tail.File = RunLog.FileOf(mon.ModelFile); mon.LogFile = tail.File;
             if (window is ScratchProgram sp) Say(sp.Hide() ? $"{program.Name} is running hidden" : $"{program.Name} is running (it could not be hidden)");
@@ -522,6 +528,7 @@ public static class EngineRun
             // What the program's own run window shows (ETABS's "Analyzing" window and its log box), and the windows it
             // has open: the Engine's run window shows them live (Ahmed 2026-11-28: "it is important to see what is happening").
             if (sp.RunWindow() is { } screen) mon.Screen(screen.Title, screen.Lines);
+            mon.Status(sp.StatusText());
             var shown = sp.OpenWindows();
             mon.Windows(shown.Count == 0 ? "" : string.Join(" | ", shown));
             var quiet = (DateTime.Now - mon.LastHeard).TotalSeconds;
@@ -678,9 +685,21 @@ public static class EngineRun
     {
         if (before.Length == 0 || string.Equals(before, now, StringComparison.OrdinalIgnoreCase)) return;
         var stem = Path.GetFileNameWithoutExtension(before);
-        if (!stem.StartsWith("cpm-field-test-", StringComparison.Ordinal) || Path.GetDirectoryName(before) is not { } dir || !Directory.Exists(dir)) return;
+        if (!(stem.StartsWith("cpm-field-test-", StringComparison.Ordinal) || stem.EndsWith(ScratchProgram.RunMark, StringComparison.Ordinal)) || Path.GetDirectoryName(before) is not { } dir || !Directory.Exists(dir)) return;
         foreach (var f in Directory.EnumerateFiles(dir, stem + ".*"))
             try { File.Delete(f); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>
+    /// The files an earlier run left under the copy's name (its model and its analysis files), in the run folder only:
+    /// the new copy is saved over them, and an old analysis must never be taken for this one's.
+    /// </summary>
+    internal static void ClearCopy(string folder, string copyName)
+    {
+        if (!copyName.EndsWith(ScratchProgram.RunMark, StringComparison.Ordinal) || !Directory.Exists(folder)) return;
+        foreach (var f in Directory.EnumerateFiles(folder, copyName + ".*"))
+            if (string.Equals(Path.GetFileNameWithoutExtension(f), copyName, StringComparison.OrdinalIgnoreCase))
+                try { File.Delete(f); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>The pack and its Viewer page: beside the model's own file, named after it; in the run folder for a model never saved.</summary>

@@ -17,6 +17,9 @@ Standing rules: never change or remove anything another user added unless Ahmed 
 
 ## Releases
 
+### Merged after 0.4.76 (goes out with the next release)
+Engine runs name the program's copy after the engineer's file ("FIXED 05-CHECK COLUMNS-00 1 (CSI ProMax run).EDB", ScratchProgram.RunMark; the run's window checks take it as their own, as cpm-field-test ones), clearing the copy an earlier run left. The run window reads only a multi-line text box of the program's run window as its log (ETABS's hidden form held "C:\Safe\MyModel.fdb", which showed as the log). Open: on Ahmed's real model ETABS sat 7+ minutes busy before writing any analysis file (building the analysis model), on 0.4.75 and 0.4.76.
+
 ### 0.4.76 (2026-11-28, on Ahmed's direct ask; everything else stays on hold): PR 355
 Engine run window shows what is happening (Ahmed, 2026-11-28; ETABS, SAP2000 and SAFE): the message box shows the program's own run window as it shows it (ETABS's "Analyzing" window title and log box, read off the screen every second, hidden or not), else its .LOG, and before either the Engine's own steps and the windows the program has open; Engine steps starts open and stays as left; Show program window brings the program up through Windows (the API does not answer during an analysis, and the 30 s wait used to give the run's program up) and it stays shown for the rest of the run; File Name is the engineer's own file, with the working copy (cpm-field-test-…) on a line of its own. Open: on Ahmed's 0.4.75 run ETABS wrote no .LOG in 4 minutes; the next run's window will show what ETABS was doing.
 

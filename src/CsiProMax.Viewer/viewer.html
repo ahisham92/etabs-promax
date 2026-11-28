@@ -718,7 +718,7 @@ async function engineMonitor(ask, what, prog) {
     const f = q(d, "#rmFill"); f.style.width = Math.round((st.running ? runProgress(mon) : 1) * 100) + "%"; f.className = st.running ? "" : st.error ? "bad" : (mon.report && !mon.report.ok) ? "bad" : "ok";
     q(d, "#rmSteps").innerHTML = (mon.steps || []).map(s => `<div class="rs ${esc(s.state)}"><span class="ri">${runIcons[s.state] || ""}</span><span class="rn">${esc(s.name)}</span><span class="rt">${s.seconds ? runTime(s.seconds) : ""}</span>${s.detail ? `<div class="rd">${esc(s.detail)}</div>` : ""}</div>`).join("");
     const w = q(d, "#rmWait"); w.hidden = !mon.waiting; w.textContent = mon.waiting || "";
-    q(d, "#rmHeard").textContent = st.running ? (mon.last_heard >= 5 ? `Last heard from ${prog} ${runTime(mon.last_heard)} ago` : `${prog} is working`) : "";
+    q(d, "#rmHeard").textContent = st.running ? runHeard(Object.assign({program: prog}, mon)) : "";
     const said = (mon.screen || []).length >= (mon.log || []).length ? (mon.screen || []) : (mon.log || []);
     const log = q(d, "#rmLog"), lines = tab === "log" ? (said.length ? said : (st.lines || []).map(t => "» " + t)) : (st.lines || []).concat(mon.windows && st.running ? [`${prog} shows: ${mon.windows}`] : []);
     log.innerHTML = lines.length ? lines.map(l => `<div class="${/error|unstable|ill-condition|abort|terminat/i.test(l) ? "bad" : /warning|accuracy|negative/i.test(l) ? "warn" : ""}">${esc(l)}</div>`).join("")
@@ -7291,14 +7291,16 @@ function runLines(st, done) {
   const more = [];
   if (!done) {
     const step = (mon.steps || []).find(s => s.state === "running");
-    if (step && step.key === "analysis") more.push({text: `» ${mon.program || "The program"} is preparing the analysis; its messages appear here as soon as it writes them${mon.log_file ? " (" + mon.log_file + ")" : ""}.`, engine: true});
+    if (step && step.key === "analysis") more.push({text: `» ${mon.program || "The program"} is preparing the analysis (on a large model it first builds its analysis model for many minutes); its messages appear here as soon as it writes them${mon.log_file ? " (" + mon.log_file + ")" : ""}.`, engine: true});
+    if (mon.status_text) more.push({text: `» ${mon.program || "The program"}'s status bar: ${mon.status_text}`, engine: true});
     if (mon.windows) more.push({text: `» ${mon.program || "The program"} shows: ${mon.windows}`, engine: true});
   }
   return own.concat(more);
 }
 function runHeard(mon) {
   const p = mon.program || "The program";
-  return mon.last_heard >= 5 ? `Last heard from ${p} ${runTime(mon.last_heard)} ago.` : `${p} is working.`;
+  // The program's status bar says what it is on even before it writes a log ("Creating Analysis Model - elements - ...").
+  return (mon.status_text ? `${p}: ${mon.status_text}. ` : "") + (mon.last_heard >= 5 ? `Last heard from ${p} ${runTime(mon.last_heard)} ago.` : `${p} is working.`);
 }
 // The run window as ETABS 23.2 shows it while analysing, and after (Analysis Complete / Analysis Incomplete).
 function etnRunWindow(run, asLog) {

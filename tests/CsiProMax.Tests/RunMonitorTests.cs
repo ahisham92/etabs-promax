@@ -188,5 +188,40 @@ static class RunMonitorTests
             Check(j["windows"]!.GetValue<string>() == "ETABS Ultimate 23.2.0", "windows");
             Check(mon.Case == "MODAL", "case from the screen: " + mon.Case);
         });
+        yield return ("run copy: an Engine run's copy is named after the engineer's file and is still the run's own; a label is never taken for the log (Ahmed 2026-11-28)", () =>
+        {
+            var name = CsiProMax.Assistant.ScratchProgram.RunCopyName("FIXED 05-CHECK COLUMNS-00 1");
+            Check(name == "FIXED 05-CHECK COLUMNS-00 1 (CSI ProMax run)", name);
+            Check(CsiProMax.Assistant.ScratchProgram.IsOwnCopy("ETABS Plus v23.2.0 - " + name), "the run's ETABS window is its own");
+            Check(CsiProMax.Assistant.ScratchProgram.IsOwnCopy("ETABS Plus v23.2.0 - cpm-field-test-da0d92"), "a field test's window is its own");
+            Check(!CsiProMax.Assistant.ScratchProgram.IsOwnCopy("ETABS Plus v23.2.0 - FIXED 05-CHECK COLUMNS-00 1"), "the engineer's own ETABS is never the run's");
+            Check(CsiProMax.Assistant.ScratchProgram.MayEnd(DateTime.Now, DateTime.Now.AddSeconds(-5), ["ETABS Plus v23.2.0 - " + name]), "the run's copy may be ended by the run");
+            Check(CsiProMax.Assistant.ScratchDialogs.IsLogBox("WindowsForms10.EDIT.app.0.141b42a_r6_ad1", 0x0004 | 0x00200000), "a multi-line text box is the log");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsLogBox("WindowsForms10.EDIT.app.0.141b42a_r6_ad1", 0x0080), "a one-line field is not");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsLogBox("WindowsForms10.STATIC.app.0.141b42a_r6_ad1", 0x0004), "a label is not");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-run-copy-" + Guid.NewGuid().ToString("N")[..6]);
+            Directory.CreateDirectory(folder);
+            try
+            {
+                foreach (var f in new[] { name + ".EDB", name + ".$et", name + ".LOG", "FIXED 05-CHECK COLUMNS-00 1.e2k", "FIXED 05-CHECK COLUMNS-00 1.cpme" }) File.WriteAllText(Path.Combine(folder, f), "x");
+                EngineRun.ClearCopy(folder, name);
+                var left = Directory.GetFiles(folder).Select(Path.GetFileName).OrderBy(x => x).ToList();
+                Check(left.SequenceEqual(new[] { "FIXED 05-CHECK COLUMNS-00 1.cpme", "FIXED 05-CHECK COLUMNS-00 1.e2k" }), "only the old copy's files go: " + string.Join(", ", left));
+                EngineRun.ClearCopy(folder, "FIXED 05-CHECK COLUMNS-00 1");
+                Check(Directory.GetFiles(folder).Length == 2, "a name without the run's mark is never cleared");
+            }
+            finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
+        });
+        yield return ("run window: the program's status bar is shown and counts as hearing from it, before any log (Ahmed's real model, 2026-11-28)", () =>
+        {
+            var at = new DateTime(2026, 11, 28, 12, 0, 0);
+            var mon = new RunMonitor(CsiProgram.Etabs, () => at);
+            at = at.AddMinutes(5);
+            mon.Status("Creating Analysis Model - elements - shells - LVL 02-TOC");
+            var j = mon.Json();
+            Check(j["status_text"]!.GetValue<string>().StartsWith("Creating Analysis Model"), "status text");
+            Check(j["last_heard"]!.GetValue<double>() == 0, "heard when the status bar changes: " + j["last_heard"]);
+            Check(CsiProMax.Assistant.Etabs.StatusBarText.Words(["Creating Analysis Model - elements", "", "Creating Analysis Model - elements", " Global "]) == "Creating Analysis Model - elements  |  Global", "status words");
+        });
     }
 }
