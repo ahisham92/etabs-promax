@@ -49,6 +49,8 @@ internal sealed class PanelWindow : Window
         Closed += (_, _) =>
         {
             try { _web.Dispose(); } catch (InvalidOperationException) { }
+            // Back to the window it came from: left to itself, Windows may bring another program's window forward.
+            try { if (Owner is { IsVisible: true } from) from.Activate(); } catch (InvalidOperationException) { }
         };
     }
 

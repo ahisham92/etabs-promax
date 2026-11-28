@@ -104,7 +104,7 @@ main{flex:1;display:flex;min-height:0}
 /* the model windows */
 #center{flex:1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}
 /* The view windows sit edge to edge, as the program tiles them: their own borders part them, with no grey frame. */
-#views{flex:1;position:relative;display:grid;gap:0;padding:0;min-width:0;min-height:0;background:var(--chrome)}
+#views{flex:1;position:relative;display:grid;gap:0;padding:0;min-width:0;min-height:0;background:var(--chrome);overflow:hidden}
 #gl{position:absolute;left:0;top:0;width:100%;height:100%;z-index:0;pointer-events:none;display:block}
 .pane{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--vcap-off);z-index:1;position:relative}
 .pane.act{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
@@ -160,6 +160,8 @@ body.popbody{display:flex;flex-direction:column;height:100vh;margin:0;overflow:h
 body.popbody .dock,body.popbody #tabs{-webkit-app-region:drag;app-region:drag}
 body.popbody .dock button,body.popbody #tabs button{-webkit-app-region:no-drag;app-region:no-drag}
 body.popbody #tabs button[data-tab]{flex:none;padding:3px 12px}body.popbody #rightDD{margin-left:auto}
+/* A view window in a window of its own fills it, and its caption moves that window. */
+body.popbody>.pane{border:0}body.popbody .pane .ptitle{-webkit-app-region:drag;app-region:drag}body.popbody .pane .ptitle button{-webkit-app-region:no-drag;app-region:no-drag}
 .dragging,.dragging *{cursor:move!important;user-select:none}
 .ddm{position:fixed;z-index:60;background:var(--menu);border:1px solid var(--line);box-shadow:var(--shadow);padding:3px 0;min-width:150px}
 .ddm div{padding:3px 24px;white-space:nowrap}.ddm div:hover{background:var(--hot)}.ddm div.off{opacity:.45;pointer-events:none}
@@ -571,7 +573,7 @@ let assign = {f: {}, a: {}, j: {}};
 const selGroups = new Set();
 const groupNames = () => [...new Set([assign.f, assign.a].flatMap(m => Object.values(m).flatMap(x => x.grp || [])))].sort();
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
-let panes = [], active = 0, layout = 2;
+let panes = [], active = 0, layout = 2, paneIds = 0;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
 const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false, dfam: "", dshow: "", dvalues: true, dnames: true, vt: "", vf: "", vcase: ""};
 const sel = new Set(), selJ = new Set(); let prevSel = {f: [], j: []}; let hover = 0; // selJ: the joints selected, by name
@@ -968,7 +970,7 @@ function load(pack, keep) {
   for (const k of selNames) { const o = (k[0] === "f" ? frames : areas).find(x => x.name === k.slice(2)); if (o) sel.add(o.id); }
   if (!keep) { layout = savedLayout ?? (program === "safe" ? 2 : innerWidth < 760 ? 1 : 2); }
   geometryDirty = true; geometryStamp++; shapeCache.clear();
-  buildPanes(before);
+  if (before) refreshPanes(); else buildPanes(null);
   buildTree(); drawChecks(); fillTables(); drawComments(); showPick(); syncTools(); draw();
 }
 function storyAt(a, list) {
@@ -2461,7 +2463,13 @@ function diagram(p, M) {
 
 // ---- drawing ----
 let waiting = false;
-function draw() { if (waiting) return; waiting = true; requestAnimationFrame(frame); }
+// The next frame comes from a window that shows: with CSI ProMax's window hidden or minimised, a view window in a window
+// of its own still draws, from that window's frames.
+function draw() {
+  if (waiting) return; waiting = true;
+  const out = document.hidden ? panes.find(p => p.pop && p.pop.doc && !p.pop.doc.hidden) : null;
+  (out ? out.pop.win : window).requestAnimationFrame(() => frame(performance.now()));
+}
 function frame(now) {
   waiting = false;
   let moving = false;
@@ -2521,26 +2529,36 @@ function render(now) {
     activeView(); useGeometry(used);
     if (colourDirty) buildColours();
     if (pointsDirty) uploadPoints();
-    const W = Math.round(vr.width * dpr), H = Math.round(vr.height * dpr);
-    if (glc.width !== W || glc.height !== H) { glc.width = W; glc.height = H; }
-    gl.disable(gl.SCISSOR_TEST); gl.viewport(0, 0, W, H);
-    gl.clearColor(...cssColour(getComputedStyle(views).backgroundColor), 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // The canvas is the views' size, or bigger when a view window in a window of its own is: that one is drawn at the
+    // canvas's top left first and copied out, and the views show only the canvas's top left.
+    let W = Math.round(vr.width * dpr), H = Math.round(vr.height * dpr);
+    for (const p of panes) if (p.pop && p.pop.doc) { const r = p.hold.getBoundingClientRect(), d = p.pop.win.devicePixelRatio || 1; W = Math.max(W, Math.round(r.width * d)); H = Math.max(H, Math.round(r.height * d)); }
+    if (glc.width !== W || glc.height !== H) { glc.width = W; glc.height = H; glc.style.width = W / dpr + "px"; glc.style.height = H / dpr + "px"; }
   }
   legendSeen = new Map();
-  // All windows share one 3D canvas behind them. A maximised window is drawn alone (the others are hidden); otherwise
-  // the docked windows are drawn first and the floating ones last, over them.
-  const maxed = panes.find(p => p.el.classList.contains("max"));
-  const order = panes.map((p, n) => [p, n]).filter(([p]) => !maxed || p === maxed).sort((a, b) => !!a[0].fl - !!b[0].fl);
-  for (const [p, n] of order) { useView(p); useGeometry(used); drawPane(p, n, vr, dpr, T, now); }
+  // All windows share one 3D canvas. The windows in windows of their own are drawn first, each copied out; then the
+  // canvas is cleared for the docked windows, and the floating ones are drawn last, over them. A maximised window is
+  // drawn alone (the other docked and floating ones are hidden).
+  const maxed = panes.find(p => !p.pop && p.el.classList.contains("max"));
+  const order = panes.map((p, n) => [p, n]).filter(([p]) => p.pop ? !!p.pop.doc : !maxed || p === maxed), out = order.filter(([p]) => p.pop);
+  for (const [p, n] of out) { useView(p); useGeometry(used); drawPane(p, n, vr, p.pop.win.devicePixelRatio || 1, T, now); }
+  if (gl && !glLost) {
+    gl.disable(gl.SCISSOR_TEST); gl.viewport(0, 0, glc.width, glc.height);
+    gl.clearColor(...cssColour(getComputedStyle(views).backgroundColor), 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  }
+  for (const [p, n] of order.filter(([p]) => !p.pop).sort((a, b) => !!a[0].fl - !!b[0].fl)) { useView(p); useGeometry(used); drawPane(p, n, vr, dpr, T, now); }
   activeView(); useGeometry(used);
   if (gl && !glLost) dropGeometry(used);
   drawLegend();
 }
 function cssColour(s) { const m = s.match(/[\d.]+/g); return m ? [m[0] / 255, m[1] / 255, m[2] / 255] : [0.5, 0.5, 0.5]; }
 let legendSeen = new Map();
+// A window's place: in the page (x, y, w, h) and in the canvas's pixels (X, Y from the canvas's bottom, W, H), with its
+// pixel ratio d. A window in a window of its own is drawn at the canvas's top left, in that window's pixels.
 function paneRect(p, vr, dpr) {
   const r = p.hold.getBoundingClientRect();
-  return {x: r.left - vr.left, y: r.top - vr.top, w: r.width, h: r.height, X: Math.round((r.left - vr.left) * dpr), Y: Math.round((vr.bottom - r.bottom) * dpr), W: Math.round(r.width * dpr), H: Math.round(r.height * dpr)};
+  if (p.pop) { const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr); return {x: 0, y: 0, w: r.width, h: r.height, X: 0, Y: glc.height - H, W, H, d: dpr}; }
+  return {x: r.left - vr.left, y: r.top - vr.top, w: r.width, h: r.height, X: Math.round((r.left - vr.left) * dpr), Y: glc.height - Math.round((r.bottom - vr.top) * dpr), W: Math.round(r.width * dpr), H: Math.round(r.height * dpr), d: dpr};
 }
 function setCommon(pr, M, R, dpr, mode) {
   gl.useProgram(pr.p);
@@ -2631,9 +2649,10 @@ function drawPane(p, n, vr, dpr, T, now) {
   p.el.classList.toggle("act", n === active);
   p.title.firstChild.textContent = paneTitle(p);
   if (n === active) { const v = $("vname"), t = paneTitle(p).split("  ·  ")[0]; if (v.textContent !== t) v.textContent = t; }
+  if (p.pop && p.pop.doc) { const t = paneTitle(p).split("  ·  ")[0] + " · " + document.title; if (p.pop.doc.title !== t) p.pop.doc.title = t; }
   if (cv.width !== R.W || cv.height !== R.H) { cv.width = R.W; cv.height = R.H; }
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, R.w, R.h);
-  if (p.fl) { g.fillStyle = css(T.canvas); g.fillRect(0, 0, R.w, R.h); } // a floating window is opaque whatever it shows
+  if (p.fl || p.pop) { g.fillStyle = css(T.canvas); g.fillRect(0, 0, R.w, R.h); } // a floating window (or one of its own) is opaque whatever it shows
   if (R.w < 4 || R.h < 4) return;
   const M = matrices(p, R.w, R.h); p.M = M; p.R = R;
   if (!P) { if (gl) { scissor(R); gl.clearColor(...T.canvas, 1); gl.clear(gl.COLOR_BUFFER_BIT); } else { g.fillStyle = css(T.canvas); g.fillRect(0, 0, R.w, R.h); } return; }
@@ -2653,8 +2672,8 @@ function drawPane(p, n, vr, dpr, T, now) {
     scissor(R); gl.clearColor(...T.canvas, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     drawScene(p, M, R, dpr, 0);
     // A floating window is drawn last; its picture is copied onto its own canvas, which makes the window opaque, so the
-    // captions and labels of the windows under it don't show through.
-    if (p.fl) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(glc, R.X, glc.height - R.Y - R.H, R.W, R.H, 0, 0, R.W, R.H); g.restore(); }
+    // captions and labels of the windows under it don't show through. A window in a window of its own is copied there.
+    if (p.fl || p.pop) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(glc, R.X, glc.height - R.Y - R.H, R.W, R.H, 0, 0, R.W, R.H); g.restore(); }
   } else {
     if (p.auxSig !== auxSig) { p.auxInfo = auxLines(p); p.auxSig = auxSig; }
     if (!p.vis || p.visSig !== visSig(p)) { p.vis = new Uint8Array(objCount() + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
@@ -3068,10 +3087,20 @@ function newPane(mode, n) {
   Object.assign(p.cam, planeCam(p));
   return p;
 }
+// The model changed under the same windows (an edit, a run): they stay as they are, floating ones and those in windows
+// of their own too; what each shows is worked out again, and a story or grid line that is gone gives way to one there.
+function refreshPanes() {
+  for (const p of panes) {
+    if (!stories.some(s => s.name === p.story)) p.story = topStory();
+    if (p.line) { const k = p.line.label + p.line.dir; p.line = allLines().find(g => g.label + g.dir === k) || allLines()[0] || null; }
+    p.sig = ""; p.vis = null; p.auxSig = ""; p.diagSig = null; p.pickOk = false;
+  }
+}
 function buildPanes(before) {
   const modes = layouts[layout] || layouts[1], host = $("views");
   host.querySelectorAll(".pane, .vsplit").forEach(e => e.remove());
-  for (const p of panes) { paneSizes.unobserve(p.el); if (gl && p.aux) for (const b of [p.aux.grid, p.aux.level, p.aux.sup, p.aux.ground]) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); } }
+  // New windows: those in windows of their own close too.
+  for (const p of panes) { if (p.pop) { p.pop = null; document.adoptNode(p.el); popClose("view-" + p.id); } paneSizes.unobserve(p.el); freePane(p); }
   panes = [];
   modes.forEach((mode, n) => {
     const p = newPane(program === "safe" && n === 0 ? "plan" : mode, n), was = before ? before[n] : null;
@@ -3080,13 +3109,15 @@ function buildPanes(before) {
       if (stories.some(s => s.name === was.story)) p.story = was.story;
       p.line = allLines().find(g => g.label + g.dir === was.line) || p.line;
     }
+    p.id = ++paneIds;
     const el = document.createElement("div"); el.className = "pane";
     el.innerHTML = `<div class="ptitle"><span></span><button class="dd" title="Window Position">&#9660;</button><button class="x" title="Close this window">&#10005;</button></div><div class="hold"><canvas></canvas><div class="nav"></div></div>`;
     host.appendChild(el);
     p.el = el; p.title = el.firstChild; p.hold = el.querySelector(".hold"); p.cv = el.querySelector("canvas"); p.g = p.cv.getContext("2d"); p.nav = el.querySelector(".nav");
     el.querySelector(".ptitle .x").onclick = e => { e.stopPropagation(); closePane(p); };
     const maximise = () => { if (p.fl) floatPane(p, false); el.classList.toggle("max"); placeViewSplits(); draw(); };
-    el.querySelector(".ptitle .dd").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, [[el.classList.contains("max") ? "Restore" : "Maximize", maximise], [p.fl ? "Dock" : "Float", () => floatPane(p, !p.fl)], ["Close", () => closePane(p)]]); };
+    el.querySelector(".ptitle .dd").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, p.pop ? [["Dock", () => paneBack(p)], ["Close", () => closePane(p)]]
+      : [[el.classList.contains("max") ? "Restore" : "Maximize", maximise], [p.fl ? "Dock" : "Float", () => floatPane(p, !p.fl)], ["Separate Window", () => popPane(p)], ["Close", () => closePane(p)]]); };
     // A double-click on the caption docks a floating window, and maximises or restores a docked one.
     p.title.ondblclick = e => { if (e.target.closest(".x, .dd")) return; if (p.fl) floatPane(p, false); else maximise(); };
     wirePaneDrag(p); paneSizes.observe(el);
@@ -3103,8 +3134,9 @@ function buildPanes(before) {
 // The share of each column (and, with four windows, each row), per number of docked windows, kept between visits.
 let viewFr = {};
 try { viewFr = JSON.parse(localStorage.getItem("cpm-view-fr") || "{}") || {}; } catch (e) { viewFr = {}; }
-// The docked view windows: a floating one has left the grid, and the docked ones share its room.
-const dockedPanes = () => panes.filter(p => !p.fl);
+// The docked view windows: a floating one, or one in a window of its own, has left the grid, and the docked ones share
+// its room.
+const dockedPanes = () => panes.filter(p => !p.fl && !p.pop);
 function viewShares() {
   const n = panes.length ? Math.max(1, dockedPanes().length) : layout;
   const cols = n === 4 ? 2 : n, rows = n === 4 ? 2 : 1, kept = viewFr[n] || {};
@@ -3146,10 +3178,12 @@ function showViewsHint(on) {
 // A caption dragged more than a few pixels floats its window under the pointer; a click stays a click.
 function wirePaneDrag(p) {
   p.title.addEventListener("pointerdown", e => {
-    if (e.button !== 0 || e.target.closest(".x, .dd")) return;
+    if (e.button !== 0 || e.target.closest(".x, .dd") || p.pop) return; // in a window of its own, the caption moves that window
     const x0 = e.clientX, y0 = e.clientY;
     let moving = false, offX = 0, offY = 0;
     const move = m => {
+      // The button was let go where the page didn't hear it: the drag ends there.
+      if (!(m.buttons & 1)) { removeEventListener("pointermove", move); removeEventListener("pointerup", up); if (moving) { document.body.classList.remove("dragging"); showViewsHint(false); draw(); } return; }
       if (!moving) {
         if (Math.hypot(m.clientX - x0, m.clientY - y0) < 6) return;
         moving = true; document.body.classList.add("dragging");
@@ -3167,6 +3201,8 @@ function wirePaneDrag(p) {
       document.body.classList.remove("dragging"); showViewsHint(false);
       const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
       addEventListener("click", eat, true); setTimeout(() => removeEventListener("click", eat, true), 0);
+      // Dropped outside CSI ProMax's window (on another screen, say): a window of its own there.
+      if (m.clientX < 0 || m.clientY < 0 || m.clientX >= innerWidth || m.clientY >= innerHeight) return popPane(p, m.screenX - offX, m.screenY - offY);
       if (nearViewsEdge(m.clientX, m.clientY)) floatPane(p, false); else draw();
     };
     addEventListener("pointermove", move); addEventListener("pointerup", up);
@@ -3228,12 +3264,20 @@ function placeViewSplits() {
   });
 }
 new ResizeObserver(() => placeViewSplits()).observe(document.getElementById("views"));
+// Closing a view window takes out that one only: the others, those in windows of their own too, stay as they are.
 function closePane(p) {
   if (panes.length < 2) return;
   saveView();
-  const keep = panes.filter(q => q !== p).map(q => ({mode: q.mode, story: q.story, line: q.line && q.line.label + q.line.dir, cam: q.cam, view: q.view}));
-  layout = keep.length; layouts[layout] = keep.map(k => k.mode); active = 0; buildPanes(keep); syncTools(); draw();
-  layouts[2] = ["plan", "3d"]; layouts[3] = ["plan", "3d", "elev"]; layouts[1] = ["3d"];
+  if (p.pop) { p.pop = null; document.adoptNode(p.el); popClose("view-" + p.id); }
+  paneSizes.unobserve(p.el); p.el.remove(); freePane(p);
+  const i = panes.indexOf(p); panes.splice(i, 1);
+  if (active > i || active >= panes.length) active = Math.max(0, active - 1);
+  layout = panes.length; retile(); syncTools();
+}
+// A window's own lines and diagram in the 3D canvas, let go.
+function freePane(p) {
+  if (!gl) return;
+  for (const b of [p.aux && p.aux.grid, p.aux && p.aux.level, p.aux && p.aux.sup, p.aux && p.aux.ground, p.diag && p.diag.tris, p.diag && p.diag.outl]) if (b && b.vao) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); }
 }
 new ResizeObserver(() => draw()).observe($("views"));
 
@@ -3292,7 +3336,7 @@ function pickRender(p) {
   try { return pickNow(p); } finally { activeView(); useGeometry(); }
 }
 function pickNow(p) {
-  const W = glc.width, H = glc.height, dpr = window.devicePixelRatio || 1, R = p.R;
+  const W = glc.width, H = glc.height, R = p.R, dpr = R.d || window.devicePixelRatio || 1;
   if (pickSize[0] !== W || pickSize[1] !== H) {
     gl.bindTexture(gl.TEXTURE_2D, pickTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.bindRenderbuffer(gl.RENDERBUFFER, pickDepth); gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, W, H);
@@ -3312,7 +3356,7 @@ function pickNow(p) {
 function idAt(p, x, y, r) {
   if (!gl) return idAt2D(p, x, y);
   const data = pickRender(p); if (!data) return 0;
-  const dpr = window.devicePixelRatio || 1, R = p.R, cx = Math.round(x * dpr), cy = R.H - 1 - Math.round(y * dpr), rad = Math.round((r ?? 5) * dpr);
+  const R = p.R, dpr = R.d || window.devicePixelRatio || 1, cx = Math.round(x * dpr), cy = R.H - 1 - Math.round(y * dpr), rad = Math.round((r ?? 5) * dpr);
   let best = 0, bd = 1e9;
   for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
     const px = cx + dx, py = cy + dy; if (px < 0 || py < 0 || px >= R.W || py >= R.H) continue;
@@ -3415,14 +3459,14 @@ function wire(p) {
     else if (drag.act === "walk") etvWalk(p, dx, dy);
     else if (drag.act === "orbit") orbitBy(p, dx, dy);
     else if (drag.act === "box" || drag.act === "rubberzoom") {
-      const rb = $("rubber"), l = Math.min(e.clientX, drag.sx), t = Math.min(e.clientY, drag.sy);
+      const rb = docEl(cv.ownerDocument, "rubber"), l = Math.min(e.clientX, drag.sx), t = Math.min(e.clientY, drag.sy);
       rb.style.display = "block"; rb.style.left = l + "px"; rb.style.top = t + "px"; rb.style.width = Math.abs(e.clientX - drag.sx) + "px"; rb.style.height = Math.abs(e.clientY - drag.sy) + "px";
       rb.className = drag.act === "rubberzoom" ? "" : e.clientX < drag.sx ? "cross" : "win";
     }
     drag.x = x; drag.y = y;
   });
   cv.addEventListener("pointerup", e => {
-    const [x, y] = local(e), d = drag; drag = null; $("rubber").style.display = "none";
+    const [x, y] = local(e), d = drag; drag = null; docEl(cv.ownerDocument, "rubber").style.display = "none";
     if (!d || !P) return;
     if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); return; }
     if (d.act === "wppick") { if (!d.moved) wpPickClick(p, x, y); return; }
@@ -3471,11 +3515,14 @@ function scheduleHover(p, x, y, cx, cy) {
     const id = idAt(p, x, y, 4);
     if (id !== hover) { hover = id; draw(); }
     $("hint").textContent = id ? describe(objOf(id)) : hintText();
-    if (id) showTip(cx, cy, tipText(objOf(id)));
+    if (id) showTip(cx, cy, tipText(objOf(id)), p.el.ownerDocument);
   }, 110);
 }
-function showTip(x, y, text) { const t = $("tip"); t.textContent = text; t.style.display = "block"; const r = t.getBoundingClientRect(); t.style.left = Math.min(x + 14, innerWidth - r.width - 6) + "px"; t.style.top = Math.min(y + 18, innerHeight - r.height - 6) + "px"; }
-function hideTip() { $("tip").style.display = "none"; }
+// The tip shows in the window the pointer is in (a view window may be in a window of its own).
+function showTip(x, y, text, doc) { const t = docEl(doc || document, "tip"), w = t.ownerDocument.defaultView; t.textContent = text; t.style.display = "block"; const r = t.getBoundingClientRect(); t.style.left = Math.min(x + 14, w.innerWidth - r.width - 6) + "px"; t.style.top = Math.min(y + 18, w.innerHeight - r.height - 6) + "px"; }
+function hideTip() { qsa("#tip").forEach(t => t.style.display = "none"); }
+// An element of this page's by id in another window's page (a view window's own), made there the first time.
+function docEl(doc, id) { return doc.getElementById(id) || doc.body.appendChild(Object.assign(doc.createElement("div"), {id})); }
 const kindWord = o => o ? ({column: "Column", beam: "Beam", brace: "Brace", floor: "Floor", wall: "Wall"}[o.kind] || (o.type === "f" ? "Frame" : "Shell")) : "";
 function describe(o) { return o ? `${kindWord(o)} ${o.name} · ${o.section || "no section"}${o.story ? " · " + o.story : ""}` : ""; }
 function tipText(o) {
@@ -3916,13 +3963,13 @@ document.querySelectorAll(".menu").forEach(el => {
   });
   el.addEventListener("mouseenter", () => { if (document.querySelector(".menu.open") && !el.classList.contains("open")) el.click(); });
 });
-function hideMenus() { document.querySelectorAll(".menu.open").forEach(m => m.classList.remove("open")); document.querySelectorAll(".ctx").forEach(m => m.remove()); }
+function hideMenus() { document.querySelectorAll(".menu.open").forEach(m => m.classList.remove("open")); qsa(".ctx").forEach(m => m.remove()); }
 document.addEventListener("pointerdown", e => { if (!e.target.closest(".menu") && !e.target.closest(".ctx")) hideMenus(); });
 
 // ---- the right-click menu ----
 function contextMenu(p, x, y, id) {
   hideMenus(); hideTip();
-  const o = objOf(id), m = document.createElement("div"); m.className = "ctx";
+  const doc = p.el.ownerDocument, o = objOf(id), m = doc.createElement("div"); m.className = "ctx"; // in the window the view is in
   const items = o ? [["Object Information...", () => infoWindow(id)], ["Show in Tables", () => showInTable(o)], ["Comment on It...", () => { showTab("comments"); opt.side = true; $("right").hidden = false; $("text").focus(); }], window.cpmChat ? ["Ask the Chat About It...", () => chatAbout(o)] : null, 0,
       ["Zoom to It", () => zoomTo(p, [id])], ["Hide It", () => hideObjs([id])], ["Select Same Section", () => { for (const q of frames.concat(areas)) if (q.type === o.type && q.section === o.section && (!p.vis || p.vis[q.id])) sel.add(q.id); selChanged(); }],
       o.story ? ["Open Its Story in Plan", () => setStory(o.story)] : null, 0, ["Clear Selection", () => act("selNone")], ["Show All Objects", () => act("showAll"), !hidden.objs.size]]
@@ -3930,8 +3977,8 @@ function contextMenu(p, x, y, id) {
   m.innerHTML = (o ? `<div class="head">${esc(describe(o))}</div>` : "") + items.filter(i => i !== null).map((i, n) => i ? `<div class="mi ${i[2] ? "off" : ""}" data-n="${n}">${esc(i[0])}</div>` : "<hr>").join("");
   const list = items.filter(i => i !== null);
   m.querySelectorAll("[data-n]").forEach(el => el.onclick = () => { hideMenus(); list[+el.dataset.n][1](); });
-  document.body.appendChild(m);
-  const r = m.getBoundingClientRect(); m.style.left = Math.min(x, innerWidth - r.width - 4) + "px"; m.style.top = Math.min(y, innerHeight - r.height - 4) + "px";
+  doc.body.appendChild(m);
+  const r = m.getBoundingClientRect(), w = doc.defaultView; m.style.left = Math.min(x, w.innerWidth - r.width - 4) + "px"; m.style.top = Math.min(y, w.innerHeight - r.height - 4) + "px";
 }
 function zoomTo(p, ids) {
   const pts = ids.map(objOf).filter(Boolean).flatMap(o => o.type === "f" ? [o.a, o.b] : o.pts); if (!pts.length) return;
@@ -6412,22 +6459,22 @@ function wireCaption(k) {
 // A page that goes away takes the handlers of every element still in it, so the panel is never left in a page that is
 // closing or being replaced: it waits in popStage (here, hidden) while its window's page changes, and comes back before
 // its window closes (the host asks first: cpmBeforeClose).
-const popWins = {}; // panel -> {win, doc, el}
+const popWins = {}; // panel (or "view-" + id) -> {win, doc, el}
 const popStage = document.createElement("div"); popStage.hidden = true; document.body.appendChild(popStage);
 // The host says when a panel's window has its own page (it may replace the first one): the panel goes in then.
 const popReady = new Set();
 window.cpmPopReady = name => { const k = String(name).replace(/^cpm-pop-/, ""); popReady.add(k); if (popWins[k]) popWins[k].fill(true); };
-function popOut(k, sx, sy) {
-  if (popWins[k]) { popWins[k].win.focus(); return; }
-  const s = panelState(k), el = panelInfo[k].el(), r = el.getBoundingClientRect();
-  const w = Math.round(Math.max(260, r.width || s.fw || 320)), h = Math.round(Math.max(260, r.height || s.fh || 480));
-  const x = Math.round(sx ?? window.screenX + r.left), y = Math.round(sy ?? window.screenY + r.top);
+// A window of its own for an element of this page (a panel, or a view window as "view-" + its id): the host opens it
+// as a CSI ProMax window. The element moves into the window's page once that page is the window's own (cpmPopReady),
+// waits in popStage while its page changes, and comes back before the window closes (cpmBeforeClose) or when it was
+// closed. onIn runs once the element is in, with the window's page; onBack when it must come back.
+function popWindow(k, el, title, x, y, w, h, onIn, onBack) {
   popReady.delete(k);
   const win = window.open("about:blank", "cpm-pop-" + k, `left=${x},top=${y},width=${w},height=${h}`);
   if (!win) return;
   let first = null; try { first = win.document; } catch (e) {}
   // CSI ProMax's window host (WebView2) may replace the window's first page with its own blank one once it has opened
-  // the window, so there the panel waits until the host says the page is ready (or 3 s); a browser keeps the first one.
+  // the window, so there the element waits until the host says the page is ready (or 3 s); a browser keeps the first one.
   const hosted = !!(window.chrome && chrome.webview), opened = Date.now();
   const p = popWins[k] = {win, doc: null, el};
   const rescue = () => { if (el.ownerDocument !== document) popStage.appendChild(el); if (p.doc) { popDocs.delete(p.doc); p.doc = null; } };
@@ -6439,26 +6486,18 @@ function popOut(k, sx, sy) {
     if (!doc || doc === p.doc || hosted && doc === first && !ready && !popReady.has(k) && Date.now() - opened < 3000) return;
     if (p.doc) popDocs.delete(p.doc);
     doc.open(); doc.write("<!doctype html><meta charset=\"utf-8\"><title></title><body class=\"popbody\">"); doc.close();
-    doc.title = panelTitles[k] + " · " + document.title;
+    doc.title = title + " · " + document.title;
     for (const st of document.querySelectorAll("style")) doc.head.appendChild(st.cloneNode(true));
     for (const a of ["data-theme", "data-program", "class"]) { const v = document.documentElement.getAttribute(a); if (v != null) doc.documentElement.setAttribute(a, v); }
     doc.body.dataset.prog = document.body.dataset.prog || "";
-    s.side = "window";
-    el.classList.remove("float", "max", "doff"); el.classList.add("popped");
-    Object.assign(el.style, {left: "", top: "", width: "", height: ""});
     doc.body.appendChild(el);
     p.doc = doc; popDocs.add(doc);
     win.addEventListener("pagehide", rescue); // a page leaving without the host asking first (a browser's own window)
     win.cpmBeforeClose = () => { rescue(); back(); }; // the host asks before it closes the window
-    placePanels(); dockSave();
+    onIn(doc);
   };
-  // Its window closed: the panel docks back in its place.
-  const back = () => {
-    if (popWins[k] !== p) return;
-    bringBack(k);
-    if (panelState(k).side === "window") panelState(k).side = "dock";
-    placePanels(); dockSave();
-  };
+  // Its window closed: the element comes back.
+  const back = () => { if (popWins[k] === p) onBack(); };
   p.fill = fill;
   if (!hosted || popReady.has(k)) fill(true);
   const watch = setInterval(() => {
@@ -6467,12 +6506,68 @@ function popOut(k, sx, sy) {
     if (Date.now() - opened < 5000) fill();
   }, 100);
 }
+// The window closed (its element is back in this page, or goes).
+function popClose(k) { const p = popWins[k]; if (!p) return; delete popWins[k]; popDocs.delete(p.doc); try { p.win.close(); } catch (e) {} }
+function popOut(k, sx, sy) {
+  if (popWins[k]) { popWins[k].win.focus(); return; }
+  const s = panelState(k), el = panelInfo[k].el(), r = el.getBoundingClientRect();
+  const w = Math.round(Math.max(260, r.width || s.fw || 320)), h = Math.round(Math.max(260, r.height || s.fh || 480));
+  const x = Math.round(sx ?? window.screenX + r.left), y = Math.round(sy ?? window.screenY + r.top);
+  popWindow(k, el, panelTitles[k], x, y, w, h, () => {
+    s.side = "window";
+    el.classList.remove("float", "max", "doff"); el.classList.add("popped");
+    Object.assign(el.style, {left: "", top: "", width: "", height: ""});
+    placePanels(); dockSave();
+  }, () => {
+    // Its window closed: the panel docks back in its place.
+    bringBack(k);
+    if (panelState(k).side === "window") panelState(k).side = "dock";
+    placePanels(); dockSave();
+  });
+}
 // The panel's elements back in this window, where placePanels then puts them; its own window closes.
 function bringBack(k) {
   const p = popWins[k], el = p ? p.el : panelInfo[k].el();
   if (el.ownerDocument !== document || el.parentElement === popStage) document.querySelector("main").appendChild(el);
   el.classList.remove("popped");
-  if (p) { delete popWins[k]; popDocs.delete(p.doc); try { p.win.close(); } catch (e) {} }
+  popClose(k);
+}
+// ---- a view window in a window of its own ----
+// Window Position > Separate Window, or its caption dropped outside CSI ProMax's window, puts a view window in a window
+// of its own, on any screen. This page still draws it: into the shared 3D canvas first, then copied onto its own canvas
+// there, as a floating window is. Its mouse, keys, tips and right-click menu work there; the other windows take its
+// room. Closing that window, or its Window Position > Dock, brings it back.
+function popPane(p, sx, sy) {
+  if (p.pop) { p.pop.win.focus(); return; }
+  if (p.fl) floatPane(p, false);
+  p.el.classList.remove("max");
+  const k = "view-" + p.id, r = p.el.getBoundingClientRect();
+  const w = Math.round(Math.max(360, r.width)), h = Math.round(Math.max(280, r.height));
+  const x = Math.round(sx ?? window.screenX + r.left), y = Math.round(sy ?? window.screenY + r.top);
+  popWindow(k, p.el, paneTitle(p).split("  ·  ")[0], x, y, w, h, doc => {
+    p.pop = popWins[k]; p.el.classList.add("popped");
+    forwardKeys(doc); doc.defaultView.addEventListener("resize", () => draw());
+    doc.addEventListener("pointerdown", e => { if (!e.target.closest(".ctx")) hideMenus(); });
+    retile();
+  }, () => paneBack(p));
+}
+// Back into the grid, in its place among the docked windows.
+function paneBack(p) {
+  if (!p.pop) return;
+  const views = $("views"), next = panes.slice(panes.indexOf(p) + 1).find(q => !q.pop && q.el.parentElement === views);
+  views.insertBefore(p.el, next ? next.el : views.querySelector(".vsplit"));
+  p.el.classList.remove("popped"); p.pop = null;
+  popClose("view-" + p.id);
+  retile();
+}
+// The docked windows share the views again (one has left or come back).
+function retile() { $("views").querySelectorAll(".vsplit").forEach(e => e.remove()); viewTemplate(); addViewSplits(); draw(); }
+// Keys pressed in a window of its own work as in this page, whose shortcuts listen here (not while typing in a field).
+function forwardKeys(doc) {
+  for (const type of ["keydown", "keyup"]) doc.addEventListener(type, e => {
+    if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    const c = new KeyboardEvent(type, e); document.body.dispatchEvent(c); if (c.defaultPrevented) e.preventDefault();
+  });
 }
 addEventListener("pagehide", () => { for (const k of Object.keys(popWins)) try { popWins[k].win.close(); } catch (e) {} });
 // Shown or hidden by the menus (Options > Model Explorer, the Tables button...): its group folds away or comes back, in
