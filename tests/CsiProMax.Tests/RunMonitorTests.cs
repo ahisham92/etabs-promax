@@ -212,6 +212,38 @@ static class RunMonitorTests
             }
             finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
         });
+        yield return ("run copy: the copy an earlier run of the same model left with its mesh is opened again, not imported anew (Ahmed's real model, 2026-11-28: 12.5 min of meshing)", () =>
+        {
+            var name = CsiProMax.Assistant.ScratchProgram.RunCopyName("FIXED 05-CHECK COLUMNS-00 1");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-run-mesh-" + Guid.NewGuid().ToString("N")[..6]);
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var e2k = Path.Combine(folder, "FIXED 05-CHECK COLUMNS-00 1.e2k");
+                File.WriteAllText(e2k, "$ File A saved 11/28/2026 5:10:06 PM\n$ STORIES\n  STORY \"L1\" HEIGHT 3\n");
+                var model = new OfflineEtabs();
+                var stamp = EngineRun.MeshStamp(e2k, model)!;
+                File.WriteAllText(e2k, "$ File A saved 11/28/2026 6:00:00 PM\n$ STORIES\n  STORY \"L1\" HEIGHT 3\n");
+                Check(EngineRun.MeshStamp(e2k, model) == stamp, "the file's saved-at line does not change the stamp");
+                var copy = Path.Combine(folder, name + ".EDB");
+                Check(EngineRun.MeshedCopy(folder, name, stamp, ".EDB") is null, "no copy yet");
+                var started = DateTime.UtcNow;
+                foreach (var f in new[] { name + ".EDB", name + ".Y07", name + ".msh" }) File.WriteAllText(Path.Combine(folder, f), "x");
+                EngineRun.KeepMeshStamp(folder, name, stamp, copy, started);
+                Check(!File.Exists(EngineRun.MeshStampFile(folder, name)), "no stamp before the program has started the analysis log");
+                File.WriteAllText(Path.Combine(folder, name + ".LOG"), "B E G I N   A N A L Y S I S");
+                EngineRun.KeepMeshStamp(folder, name, stamp, copy, started);
+                Check(EngineRun.MeshedCopy(folder, name, stamp, ".EDB") == copy, "the meshed copy is found for the same model");
+                File.WriteAllText(e2k, "$ File A saved\n$ STORIES\n  STORY \"L1\" HEIGHT 4\n");
+                Check(EngineRun.MeshedCopy(folder, name, EngineRun.MeshStamp(e2k, model)!, ".EDB") is null, "a changed model is imported afresh");
+                EngineRun.ClearCopy(folder, name, [copy, EngineRun.MeshStampFile(folder, name)]);
+                var left = Directory.GetFiles(folder).Select(Path.GetFileName).OrderBy(x => x, StringComparer.Ordinal).ToList();
+                Check(left.SequenceEqual(new[] { name + ".EDB", name + ".cpm-mesh", "FIXED 05-CHECK COLUMNS-00 1.e2k" }), "only the old results go: " + string.Join(", ", left));
+                EngineRun.ClearCopy(folder, name);
+                Check(Directory.GetFiles(folder).Length == 1, "a fresh copy clears the stamp with the rest");
+            }
+            finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
+        });
         yield return ("run window: the program's status bar is shown and counts as hearing from it, before any log (Ahmed's real model, 2026-11-28)", () =>
         {
             var at = new DateTime(2026, 11, 28, 12, 0, 0);
