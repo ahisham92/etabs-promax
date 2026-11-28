@@ -17,7 +17,7 @@ Standing rules: never change or remove anything another user added unless Ahmed 
 
 ## Releases
 
-### Merged after 0.4.75 (goes out with the next release)
+### 0.4.76 (2026-11-28, on Ahmed's direct ask; everything else stays on hold): PR 355
 Engine run window shows what is happening (Ahmed, 2026-11-28; ETABS, SAP2000 and SAFE): the message box shows the program's own run window as it shows it (ETABS's "Analyzing" window title and log box, read off the screen every second, hidden or not), else its .LOG, and before either the Engine's own steps and the windows the program has open; Engine steps starts open and stays as left; Show program window brings the program up through Windows (the API does not answer during an analysis, and the 30 s wait used to give the run's program up) and it stays shown for the rest of the run; File Name is the engineer's own file, with the working copy (cpm-field-test-…) on a line of its own. Open: on Ahmed's 0.4.75 run ETABS wrote no .LOG in 4 minutes; the next run's window will show what ETABS was doing.
 
 ### 0.4.75 (2026-11-28, published on Ahmed's order; everything else on hold after it)
