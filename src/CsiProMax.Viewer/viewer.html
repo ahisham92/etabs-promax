@@ -3393,6 +3393,31 @@ function jointsIn(p) {
   for (const s of supports) if (supportShown(p, s)) put(s.p, s);
   return [...out.values()];
 }
+// ETABS's Selection List (its help, Select > Pointer/Window): where objects lie one on another, Ctrl and a left click
+// list every one within reach of the click (the selection tolerance), nearest first, and the ones highlighted are
+// selected (double click takes one). With one object there, the click selects it as any click does.
+function objsAt(p, x, y) {
+  const to = p.M.to, tolPx = Math.max(5, +snapOpt.selTol || 3), out = []; visOf(p); // as far as a click picks (pickAt's 5 px), or the tolerance if larger
+  for (const j of jointsIn(p)) { const s = to(j.at), d = Math.hypot(s[0] - x, s[1] - y); if (s[3] && d <= tolPx) out.push({j: j.name, d, text: "Joint " + j.name}); }
+  for (const o of frames.concat(areas)) {
+    if (!p.vis || !p.vis[o.id]) continue;
+    const pts = (o.type === "f" ? [o.a, o.b] : o.pts).map(to), n = o.type === "f" ? 1 : pts.length; let d = Infinity;
+    for (let i = 0; i < n; i++) d = Math.min(d, segDist(x, y, pts[i], pts[(i + 1) % pts.length]));
+    if (o.type === "a" && inside(pts, x, y)) d = Math.min(d, tolPx); // a click inside a floor, or on a wall seen face on
+    if (d <= tolPx) out.push({id: o.id, d, text: describe(o)});
+  }
+  return out.sort((a, b) => a.d - b.d);
+}
+function selectionList(p, x, y) {
+  const list = objsAt(p, x, y); if (list.length < 2) return false;
+  const d = dialog("Selection List", `<select id="slL" multiple size="${Math.min(12, list.length)}" style="width:100%">${list.map((c, i) => `<option value="${i}"${i ? "" : " selected"}>${esc(c.text)}</option>`).join("")}</select>`,
+    [["OK", d => {
+      for (const op of q(d, "#slL").selectedOptions) { const c = list[+op.value]; if (c.j) jointsOnSimilar(p, [c.j]).forEach(n => selJ.add(n)); else onSimilar(p, [c.id]).forEach(i => sel.add(i)); }
+      lit = null; markTree(); selChanged();
+    }], ["Cancel"]], {width: 420});
+  q(d, "#slL").ondblclick = () => q(d, '[data-b="0"]').click();
+  return true;
+}
 function jointAt(p, x, y, r) {
   const to = p.M.to; let best = null, bd = r ?? 6;
   for (const j of jointsIn(p)) { const q = to(j.at); if (!q[3]) continue; const d = Math.hypot(q[0] - x, q[1] - y); if (d < bd) { bd = d; best = j.name; } }
@@ -3445,7 +3470,7 @@ function wire(p) {
     if (e.button === 1) { act = e.shiftKey ? "orbit" : "pan"; if (performance.now() - lastMid < 350) { fit(p); act = "none"; } lastMid = performance.now(); e.preventDefault(); }
     else if (e.button === 2) act = p.mode === "3d" && !e.shiftKey ? "orbit" : "pan";
     else act = tool.startsWith("measure:") ? "measure" : tool.startsWith("wp:") ? "wppick" : tool === "walk" ? "walk" : tool.startsWith("d:") ? "draw" : tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : tool === "iline" ? "iline" : e.altKey && p.mode === "3d" ? "orbit" : "box";
-    drag = {x, y, x0: x, y0: y, sx: e.clientX, sy: e.clientY, moved: false, act, button: e.button, ctrl: e.ctrlKey || e.metaKey || e.shiftKey};
+    drag = {x, y, x0: x, y0: y, sx: e.clientX, sy: e.clientY, moved: false, act, button: e.button, ctrl: e.ctrlKey || e.metaKey || e.shiftKey, list: e.ctrlKey || e.metaKey};
     hideTip();
   });
   cv.addEventListener("pointermove", e => {
@@ -3478,6 +3503,7 @@ function wire(p) {
     if (!d.moved) {
       if (d.button === 2) return rightClick(p, x, y, e.shiftKey, e.clientX, e.clientY);
       if (d.button === 0 && (d.act === "box" || d.act === "orbit" || d.act === "pan")) {
+        if (d.list && selectionList(p, x, y)) return;
         const {j, id} = pickAt(p, x, y, 5), js = j ? jointsOnSimilar(p, [j]) : [], ids = id ? onSimilar(p, [id]) : [];
         if (j) { if (selJ.has(j)) js.forEach(n => selJ.delete(n)); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } js.forEach(n => selJ.add(n)); } }
         else if (id) { if (sel.has(id)) ids.forEach(i => sel.delete(i)); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } ids.forEach(i => sel.add(i)); } }
