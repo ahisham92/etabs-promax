@@ -534,6 +534,21 @@ public static class ModelerFieldSteps
                     a => FieldContext.Expect(a["floors"]!.AsArray().Count == 2 && a["floors"]!.AsArray().All(f => m.AreaAssigns.Exists(x => x.Label + "@" + x.Story == f!.GetValue<string>() && x.Section == floor.Section)), "two floors with the section were expected: " + a.ToJsonString()),
                     "tool replace_floors, Edit > Edit Shells > Divide Shells into 2 by 1");
             }
+            {
+                var slabSec = m.ShellSections.FirstOrDefault(x => !x.IsWall && !x.IsDeck)?.Name;
+                var low = stories.Count > 2 ? stories[^2] : top;
+                ctx.Tool("add_template", $$"""{"kind":"2d_frame","type":"eccentric","top_story":{{Q(top)}},"bottom_story":{{Q(low)}},"bays":2,"bay_width":6,"gap_width":1,"columns":{{Q(section)}},"beams":{{Q(section)}},"braces":{{Q(section)}},"restraints":"pinned","x":{{N(maxX + 60)}},"y":{{N(maxY + 60)}},"angle":30}""",
+                    a => FieldContext.Expect(a["frames"]!.AsArray().Count == (low == top ? 1 : 2) * 9, "a 2-bay braced frame on each story was expected: " + a.ToJsonString()),
+                    "tool add_template, Edit > Add to Model from Template > 2D Frame");
+                ctx.Tool("add_template", $$"""{"kind":"2d_truss","type":"pratt","story":{{Q(top)}},"divisions":4,"length":2,"height":1.5,"chords":{{Q(section)}},"diagonals":{{Q(section)}},"verticals":{{Q(section)}},"x":{{N(maxX + 80)}},"y":{{N(maxY + 80)}},"angle":0}""",
+                    a => FieldContext.Expect(a["frames"]!.AsArray().Count == 4 * 3 + 5, "a 4-panel truss was expected: " + a.ToJsonString()),
+                    "tool add_template, Edit > Add to Model from Template > 2D Truss");
+                ctx.Refused("add_template", $$"""{"kind":"2d_wall","top_story":{{Q(top)}},"bottom_story":{{Q(top)}},"bays":1,"bay_width":3,"section":"No such wall"}""", "no wall section", "tool add_template says no to a wall section the model does not have");
+                if (slabSec is not null)
+                    ctx.Tool("add_template", $$$"""{"kind":"flat_slab","top_story":{{{Q(top)}}},"bottom_story":{{{Q(top)}}},"use":{"column":{{{Q(section)}}},"slab":{{{Q(slabSec)}}}},"quick":{"drop_panels":false,"restraints":"none"}}""",
+                        a => FieldContext.Expect(a["floors"]!.GetValue<int>() > 0, "no floor was added: " + a.ToJsonString()),
+                        "tool add_template, Edit > Add to Model from Template > 3D Flat Slab with the model's own sections");
+            }
             ctx.Tool("relabel_objects", "{}", a => FieldContext.Expect(a["relabelled"] is not null, "no count: " + a.ToJsonString()), "tool relabel_objects, Edit > Auto Relabel All");
             // Drawing by points at story levels, as on a work plane in the 3-D view: a brace from the base to the top as
             // one object, and a ramp up one story.
@@ -830,6 +845,13 @@ public static class ModelerFieldSteps
         if (dofTable is not null)
             ctx.Tool("set_program_form", $$$"""{"table":{{{Q(dofTable)}}},"values":{"UX":"Yes","UY":"Yes","UZ":"Yes","RX":"Yes","RY":"Yes","RZ":"Yes"}}""", null, "tool set_program_form, Set Active Degrees of Freedom");
         ctx.Refused("set_program_form", $$$"""{"table":{{{Q(fTable)}}},"values":{"No Such Item":"1"}}""", "no item", "tool set_program_form says no to an item the form does not have");
+        // ETABS keeps every design preference on its .e2k lines too (some only there): Design > Steel Frame Design >
+        // View/Revise Preferences sets them as the form shows them; 0.95 is ETABS's own default D/C limit.
+        if (modeler.Model.Target == CsiProMax.Model.ProgramOptions.Etabs)
+        {
+            ctx.Tool("set_program_form", """{"design":"steel","items":{"e2k:SRLIMIT":"0.95"}}""", null, "tool set_program_form, a steel preference on the design's .e2k line (Demand/Capacity Ratio Limit)");
+            ctx.Refused("set_program_form", """{"design":"steel","items":{"e2k:BAD WORD":"1"}}""", "not an .e2k word", "tool set_program_form says no to a word the .e2k cannot hold");
+        }
         // The Options menu's forms (Preferences, Colors) are forms of the same kind; a blank value goes back to the default.
         var tolTable = modeler.Model.Target == CsiProMax.Model.ProgramOptions.Sap2000 ? "Preferences - Dimensional" : "Preferences - Tolerance";
         ctx.Tool("set_program_form", $$$"""{"table":{{{Q(tolTable)}}},"values":{"Auto Merge Tolerance":"0.001"}}""", null, "tool set_program_form, Options > Preferences > Dimensions/Tolerances");

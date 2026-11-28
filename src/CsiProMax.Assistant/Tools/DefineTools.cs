@@ -42,8 +42,8 @@ public static class DefineTools
             """{"type":"object","properties":{"table":{"type":"string"},"design":{"type":"string"},"code":{"type":"string"}}}""",
             Ask.Never, Forms),
         new("set_program_form",
-            "Sets a form of the Analyze, Design or Options menu (program_forms lists them): 'design' with 'code' sets that design's code (Design > ... > View/Revise Preferences, Design Code); 'table' with 'values' (item by field or by the name the program shows; blank = the program's default) sets that form's items, e.g. a design code's preferences or Analyze > Set Active Degrees of Freedom.",
-            """{"type":"object","properties":{"design":{"type":"string"},"code":{"type":"string"},"table":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}}}""",
+            "Sets a form of the Analyze, Design or Options menu (program_forms lists them): 'design' with 'code' sets that design's code (Design > ... > View/Revise Preferences, Design Code); 'table' with 'values' (item by field or by the name the program shows; blank = the program's default) sets that form's items, e.g. a design code's preferences or Analyze > Set Active Degrees of Freedom. Designs that keep their preferences on .e2k lines: 'design' with 'items' {'e2k:WORD': value} sets a word of the design's .e2k preference lines (blank removes it), {'kept:Item': value} an item the program's form has outside its table and known .e2k words.",
+            """{"type":"object","properties":{"design":{"type":"string"},"code":{"type":"string"},"table":{"type":"string"},"items":{"type":"object","additionalProperties":{"type":"string"}},"values":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}}}""",
             Ask.Changes, SetForm, a => a.Text("table") is { Length: > 0 } t ? t : $"{a.Text("design")} design code {a.Text("code")}"),
         new("definition_data",
             "Reads the Define items above: rebar sizes, each concrete section's rebar, the definition tables with their fields, and the rows the model has.",
@@ -61,12 +61,17 @@ public static class DefineTools
     {
         var m = Offline(e).Model;
         if (a.Text("table") is { Length: > 0 } table) return Core(() => FormJson(m, table));
+        if (ProgramForms.ObjectKept.Contains(a.Text("design") ?? "")) return new JsonObject { ["kept"] = new JsonObject(ProgramForms.PreferenceExtras(m, a.Text("design")!).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) };
         if (a.Text("design") is { Length: > 0 } kind)
         {
             var d = Core(() => ProgramForms.Design(m.Target, kind));
             var code = a.Text("code") is { Length: > 0 } c ? c : ProgramForms.Code(m, kind);
             if (code.Length == 0) code = ProgramForms.Codes(m.Target, kind).FirstOrDefault() ?? "";
-            return Core(() => FormJson(m, d.TablePrefix + code));
+            var form = Core(() => FormJson(m, d.TablePrefix + code));
+            // ETABS keeps every preference on its .e2k lines too, and some only there: the form reads them.
+            form["e2k"] = new JsonObject(ProgramForms.E2kPreferences(m, kind).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value)));
+            form["kept"] = new JsonObject(ProgramForms.PreferenceExtras(m, kind).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value)));
+            return form;
         }
         return new JsonObject
         {
@@ -87,7 +92,11 @@ public static class DefineTools
         var table = a.Text("table") ?? "";
         var kind = a.Text("design") ?? "";
         var code = a.Text("code") ?? "";
-        if (table.Length == 0 && (kind.Length == 0 || code.Length == 0)) throw new ToolInputException("Give 'table' with 'values', or 'design' with 'code'.");
+        var items = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (a.TryGetProperty("items", out var it) && it.ValueKind == JsonValueKind.Object)
+            foreach (var p in it.EnumerateObject()) items[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString();
+        if (items.Count > 0 && kind.Length == 0) throw new ToolInputException("Give 'design' with 'items'.");
+        if (table.Length == 0 && items.Count == 0 && (kind.Length == 0 || code.Length == 0)) throw new ToolInputException("Give 'table' with 'values', or 'design' with 'code'.");
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         if (a.TryGetProperty("values", out var v) && v.ValueKind == JsonValueKind.Object)
             foreach (var p in v.EnumerateObject())
@@ -99,6 +108,7 @@ public static class DefineTools
             var copy = ModelFile.FromJson(ModelFile.ToJson(link.Model));
             if (kind.Length > 0 && code.Length > 0) ProgramForms.SetCode(copy, kind, code);
             if (table.Length > 0) ProgramForms.Set(copy, table, values);
+            if (items.Count > 0) ProgramForms.SetPreferenceItems(copy, kind, items);
             return 0;
         });
         return Core(() => link.Edit(m =>
@@ -106,6 +116,7 @@ public static class DefineTools
             var o = new JsonObject();
             if (kind.Length > 0 && code.Length > 0) { ProgramForms.SetCode(m, kind, code); o["design"] = kind; o["code"] = ProgramForms.Code(m, kind); }
             if (table.Length > 0) { ProgramForms.Set(m, table, values); o["form"] = FormJson(m, table); }
+            if (items.Count > 0) { ProgramForms.SetPreferenceItems(m, kind, items); o["items"] = items.Count; }
             return (JsonNode)o;
         }));
     }

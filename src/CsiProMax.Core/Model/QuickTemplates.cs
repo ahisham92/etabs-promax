@@ -71,6 +71,12 @@ public sealed class QuickTemplate
     public string Restraints { get; set; } = "pinned";
     /// <summary>rigid, semi-rigid or none.</summary>
     public string Diaphragm { get; set; } = "rigid";
+
+    /// <summary>Edit > Add to Model from Template: the model's own sections picked in Structural System Properties, by
+    /// key (column, beam, slab, drop; lat_col, lat_bm, grav_col, grav_bm, sec_bm, deck; t1..t12 for the staggered truss).
+    /// A key not given makes the template's own section, unless the model already has one of that name.</summary>
+    public Dictionary<string, string> Use { get; set; } = [];
+    internal bool Adding { get; set; }
 }
 
 public sealed record QuickGrid(string Label, double At, bool Visible = true, string? Bubble = null);
@@ -131,8 +137,50 @@ public static class QuickTemplates
         }
         if (dia is not null && t.Diaphragm.StartsWith("semi", StringComparison.OrdinalIgnoreCase))
             foreach (var d in m.Diaphragms.Where(d => d.Name == dia)) d.Type = "SEMIRIGID";
-        Supports(m, t, xs, ys, kind);
+        Supports(m, t, xs, ys, kind, "Base");
         return m;
+    }
+
+    /// <summary>Edit > Add to Model from Template > 3D Structure: the template's members on these stories of the model
+    /// (lowest first) over these grid lines, with the model's own sections where picked.</summary>
+    public static void AddTo(StructuralModel m, QuickTemplate t, IReadOnlyList<string> stories, double[] xs, double[] ys)
+    {
+        var kind = Kinds.FirstOrDefault(k => k.Equals(t.Kind, StringComparison.OrdinalIgnoreCase));
+        if (kind is null or "blank" or "grid_only" or "beam") throw new ArgumentException($"A 3D template is steel_deck, staggered_truss, flat_slab, flat_slab_perimeter_beams, waffle_slab or two_way_or_ribbed_slab, not '{t.Kind}'.");
+        if (stories.Count == 0) throw new ArgumentException("Pick the top and bottom stories.");
+        var low = m.Stories.FindIndex(s => s.Name == stories[0]);
+        if (low < 1) throw new ArgumentException($"'{stories[0]}' is not a story above the base.");
+        xs = xs.Distinct().OrderBy(v => v).ToArray(); ys = ys.Distinct().OrderBy(v => v).ToArray();
+        if (xs.Length == 0 || ys.Length == 0) throw new ArgumentException("The grid system needs at least one grid line each way.");
+        foreach (var (key, name) in t.Use)
+            if (!m.FrameSections.Exists(f => f.Name == name) && !m.ShellSections.Exists(f => f.Name == name))
+                throw new ArgumentException($"The model has no section '{name}' (for {key}).");
+        string? dia = t.Diaphragm.ToLowerInvariant() switch
+        {
+            "rigid" or "semi-rigid" or "semirigid" => m.Diaphragms.FirstOrDefault()?.Name ?? "D1",
+            "none" or "no diaphragm" => null,
+            _ => throw new ArgumentException("The floor diaphragm is rigid, semi-rigid or none."),
+        };
+        var list = stories.ToList();
+        t.Adding = true;
+        switch (kind)
+        {
+            case "steel_deck": SteelDeck(m, t, xs, ys, list, dia); break;
+            case "staggered_truss": StaggeredTruss(m, t, xs, ys, list, dia); break;
+            default: Concrete(m, t, kind, xs, ys, list, dia); break;
+        }
+        if (dia is not null && t.Diaphragm.StartsWith("semi", StringComparison.OrdinalIgnoreCase))
+            foreach (var d in m.Diaphragms.Where(d => d.Name == dia)) d.Type = "SEMIRIGID";
+        Supports(m, t, xs, ys, kind, m.Stories[low - 1].Name);
+    }
+
+    /// <summary>The section for this key: the one picked (Add to Model), else the template's own, made unless the model has it.</summary>
+    private static string Sec(StructuralModel m, QuickTemplate t, string key, string name, Action make)
+    {
+        if (t.Use.TryGetValue(key, out var use) && !string.IsNullOrWhiteSpace(use)) return use;
+        // A new model makes the template's sections over the seed's; adding to a model keeps the model's own of that name.
+        if (!t.Adding || !m.FrameSections.Exists(f => f.Name == name) && !m.ShellSections.Exists(f => f.Name == name)) make();
+        return name;
     }
 
     // ---- concrete floors: flat slab, flat slab with perimeter beams, waffle, two way or ribbed ----
@@ -141,40 +189,40 @@ public static class QuickTemplates
     {
         Positive(t.SlabThickness, "The slab thickness"); Positive(t.ColumnSize, "The column size");
         const string conc = ModelEdit.DefaultConcrete;
-        var col = "ConcCol"; m.AddRectangularSection(col, conc, t.ColumnSize, t.ColumnSize, beam: false);
+        var col = Sec(m, t, "column", "ConcCol", () => m.AddRectangularSection("ConcCol", conc, t.ColumnSize, t.ColumnSize, beam: false));
         string slab;
         if (kind == "waffle_slab" || kind == "two_way_or_ribbed_slab" && t.Ribbed)
         {
             Positive(t.RibDepth, "The rib depth"); Positive(t.RibSpacing, "The rib spacing");
-            slab = kind == "waffle_slab" ? "Waffle1" : "Ribbed1";
             var ribs = new PropertyDefs.Ribs(t.RibDepth, t.RibWidthTop, t.RibWidthBottom, t.RibSpacing, t.RibDirection.Equals("Y", StringComparison.OrdinalIgnoreCase) ? 2 : 1);
-            if (kind == "waffle_slab") Waffle(m, slab, t.SlabThickness, conc, ribs);
-            else PropertyDefs.SetShellType(m, slab, null, false, "Ribbed", "ShellThin", t.SlabThickness, conc, false, ribs);
+            slab = kind == "waffle_slab" ? Sec(m, t, "slab", "Waffle1", () => Waffle(m, "Waffle1", t.SlabThickness, conc, ribs))
+                : Sec(m, t, "slab", "Ribbed1", () => PropertyDefs.SetShellType(m, "Ribbed1", null, false, "Ribbed", "ShellThin", t.SlabThickness, conc, false, ribs));
         }
         else
-        {
-            slab = "Slab1";
-            PropertyDefs.SetShellType(m, slab, null, false, "Slab", kind == "two_way_or_ribbed_slab" ? "ShellThin" : "ShellThick", t.SlabThickness, conc, false);
-        }
+            slab = Sec(m, t, "slab", "Slab1", () => PropertyDefs.SetShellType(m, "Slab1", null, false, "Slab", kind == "two_way_or_ribbed_slab" ? "ShellThin" : "ShellThick", t.SlabThickness, conc, false));
         string? drop = null, stiff = null;
         var drops = t.DropPanels && kind is "flat_slab" or "flat_slab_perimeter_beams" or "waffle_slab";
         if (drops)
         {
             Positive(t.DropSize, "The drop panel size"); Positive(t.DropThickness, "The drop panel thickness");
-            drop = "Drop1"; PropertyDefs.SetShellType(m, drop, null, false, "Drop", "ShellThick", t.DropThickness, conc, false);
+            drop = Sec(m, t, "drop", "Drop1", () => PropertyDefs.SetShellType(m, "Drop1", null, false, "Drop", "ShellThick", t.DropThickness, conc, false));
         }
-        if (t.StiffAtColumns) { stiff = "Stiff1"; PropertyDefs.SetShellType(m, stiff, null, false, "Stiff", "ShellThin", Math.Max(t.SlabThickness, t.DropPanels ? t.DropThickness : 0) * 2, conc, false); }
+        if (t.StiffAtColumns) stiff = Sec(m, t, "stiff", "Stiff1", () => PropertyDefs.SetShellType(m, "Stiff1", null, false, "Stiff", "ShellThin", Math.Max(t.SlabThickness, t.DropPanels ? t.DropThickness : 0) * 2, conc, false));
         string? beamX = null, beamY = null;
         if (kind == "flat_slab_perimeter_beams")
         {
             Positive(t.BeamXDepth, "The X-direction beam depth"); Positive(t.BeamYDepth, "The Y-direction beam depth");
-            beamX = "ConcBmX"; m.AddRectangularSection(beamX, conc, t.BeamXDepth, t.BeamXWidth, beam: true);
-            beamY = "ConcBmY"; m.AddRectangularSection(beamY, conc, t.BeamYDepth, t.BeamYWidth, beam: true);
+            if (t.Use.TryGetValue("beam", out var b) && !string.IsNullOrWhiteSpace(b)) beamX = beamY = b;
+            else
+            {
+                beamX = Sec(m, t, "beam_x", "ConcBmX", () => m.AddRectangularSection("ConcBmX", conc, t.BeamXDepth, t.BeamXWidth, beam: true));
+                beamY = Sec(m, t, "beam_y", "ConcBmY", () => m.AddRectangularSection("ConcBmY", conc, t.BeamYDepth, t.BeamYWidth, beam: true));
+            }
         }
         else if (kind == "two_way_or_ribbed_slab")
         {
             Positive(t.BeamXDepth, "The transverse beam depth");
-            beamX = beamY = "ConcBm"; m.AddRectangularSection(beamX, conc, t.BeamXDepth, t.BeamXWidth, beam: true);
+            beamX = beamY = Sec(m, t, "beam", "ConcBm", () => m.AddRectangularSection("ConcBm", conc, t.BeamXDepth, t.BeamXWidth, beam: true));
         }
 
         double x0 = xs[0] - t.LeftEdge, x1 = xs[^1] + t.RightEdge, y0 = ys[0] - t.BottomEdge, y1 = ys[^1] + t.TopEdge;
@@ -217,14 +265,14 @@ public static class QuickTemplates
     private static void SteelDeck(StructuralModel m, QuickTemplate t, double[] xs, double[] ys, List<string> stories, string? dia)
     {
         const string steel = "S355";
-        if (!m.Materials.Exists(x => x.Name == steel)) throw new ArgumentException("The steel S355 is missing from the seed model.");
-        I(m, "A-LatCol", steel, 0.36, 0.37, 0.02, 0.012);
-        I(m, "A-LatBm", steel, 0.45, 0.19, 0.015, 0.009);
-        I(m, "A-GravCol", steel, 0.26, 0.26, 0.0125, 0.0075);
-        I(m, "A-GravBm", steel, 0.36, 0.17, 0.0127, 0.008);
-        I(m, "A-CompBm", steel, 0.3, 0.15, 0.0107, 0.0071);
-        PropertyDefs.SetDeck(m, "Deck1", null, new PropertyDefs.Deck("Filled", ModelEdit.DefaultConcrete, steel,
-            0.0889, 0.0762, 0.1524, 0.1143, 0.3048, 0.000875, 0, 0.01905, 0.1524, 413685));
+        void Steel() { if (!m.Materials.Exists(x => x.Name == steel)) throw new ArgumentException("The steel S355 is missing from the model: pick the model's own sections."); }
+        var latCol = Sec(m, t, "lat_col", "A-LatCol", () => { Steel(); I(m, "A-LatCol", steel, 0.36, 0.37, 0.02, 0.012); });
+        var latBm = Sec(m, t, "lat_bm", "A-LatBm", () => { Steel(); I(m, "A-LatBm", steel, 0.45, 0.19, 0.015, 0.009); });
+        var gravCol = Sec(m, t, "grav_col", "A-GravCol", () => { Steel(); I(m, "A-GravCol", steel, 0.26, 0.26, 0.0125, 0.0075); });
+        var gravBm = Sec(m, t, "grav_bm", "A-GravBm", () => { Steel(); I(m, "A-GravBm", steel, 0.36, 0.17, 0.0127, 0.008); });
+        var secBm = Sec(m, t, "sec_bm", "A-CompBm", () => { Steel(); I(m, "A-CompBm", steel, 0.3, 0.15, 0.0107, 0.0071); });
+        var deck = Sec(m, t, "deck", "Deck1", () => { Steel(); PropertyDefs.SetDeck(m, "Deck1", null, new PropertyDefs.Deck("Filled", ModelEdit.DefaultConcrete, steel,
+            0.0889, 0.0762, 0.1524, 0.1143, 0.3048, 0.000875, 0, 0.01905, 0.1524, 413685)); });
 
         var momentAll = t.MomentFrame.Equals("intersecting", StringComparison.OrdinalIgnoreCase);
         var momentPerimeter = t.MomentFrame.Equals("perimeter", StringComparison.OrdinalIgnoreCase);
@@ -237,11 +285,11 @@ public static class QuickTemplates
         foreach (var story in stories)
         {
             foreach (var x in xs) foreach (var y in ys)
-                m.AddColumn(x, y, story, momentAll || momentPerimeter && (EdgeX(x) || EdgeY(y)) ? "A-LatCol" : "A-GravCol");
+                m.AddColumn(x, y, story, momentAll || momentPerimeter && (EdgeX(x) || EdgeY(y)) ? latCol : gravCol);
             foreach (var y in ys) for (var i = 0; i + 1 < xs.Length; i++)
-                Gravity(m.AddBeam(xs[i], y, xs[i + 1], y, story, momentAll || momentPerimeter && EdgeY(y) ? "A-LatBm" : "A-GravBm"));
+                Gravity(m.AddBeam(xs[i], y, xs[i + 1], y, story, momentAll || momentPerimeter && EdgeY(y) ? latBm : gravBm));
             foreach (var x in xs) for (var j = 0; j + 1 < ys.Length; j++)
-                Gravity(m.AddBeam(x, ys[j], x, ys[j + 1], story, momentAll || momentPerimeter && EdgeX(x) ? "A-LatBm" : "A-GravBm"));
+                Gravity(m.AddBeam(x, ys[j], x, ys[j + 1], story, momentAll || momentPerimeter && EdgeX(x) ? latBm : gravBm));
             if (t.SecondaryBeams)
             {
                 var alongX = t.SecondaryDirection.Equals("X", StringComparison.OrdinalIgnoreCase);
@@ -257,7 +305,7 @@ public static class QuickTemplates
                         var c = across[j] + width * k / (n + 1);
                         for (var i = 0; i + 1 < spans.Length; i++)
                         {
-                            var b = alongX ? m.AddBeam(spans[i], c, spans[i + 1], c, story, "A-CompBm") : m.AddBeam(c, spans[i], c, spans[i + 1], story, "A-CompBm");
+                            var b = alongX ? m.AddBeam(spans[i], c, spans[i + 1], c, story, secBm) : m.AddBeam(c, spans[i], c, spans[i + 1], story, secBm);
                             PropertyDefs.SetReleases(b, ["M2", "M3"], ["M2", "M3"]);
                         }
                     }
@@ -266,12 +314,12 @@ public static class QuickTemplates
             for (var i = 0; i + 1 < px.Length; i++)
                 for (var j = 0; j + 1 < py.Length; j++)
                 {
-                    var a = m.AddSlab([(px[i], py[j]), (px[i + 1], py[j]), (px[i + 1], py[j + 1]), (px[i], py[j + 1])], story, "Deck1", dia);
+                    var a = m.AddSlab([(px[i], py[j]), (px[i + 1], py[j]), (px[i + 1], py[j + 1]), (px[i], py[j + 1])], story, deck, dia);
                     Loads(m, t, a.Label, story);
                 }
         }
 
-        void Gravity(LineAssign b) { if (b.Section == "A-GravBm") PropertyDefs.SetReleases(b, ["M2", "M3"], ["M2", "M3"]); }
+        void Gravity(LineAssign b) { if (b.Section == gravBm && gravBm != latBm) PropertyDefs.SetReleases(b, ["M2", "M3"], ["M2", "M3"]); }
     }
 
     // ---- staggered truss ----
@@ -279,11 +327,13 @@ public static class QuickTemplates
     private static void StaggeredTruss(StructuralModel m, QuickTemplate t, double[] xs, double[] ys, List<string> stories, string? dia)
     {
         const string steel = "S355";
-        I(m, "A-TrChdW10", steel, 0.26, 0.256, 0.0173, 0.0107);
-        I(m, "A-TrWebW10", steel, 0.25, 0.146, 0.0091, 0.0061);
-        I(m, "A-LatCol", steel, 0.36, 0.37, 0.02, 0.012);
-        I(m, "A-LatBm", steel, 0.45, 0.19, 0.015, 0.009);
-        PropertyDefs.SetShellType(m, "Plank1", null, false, "Slab", "Membrane", 0.2, ModelEdit.DefaultConcrete, true);
+        void Chd() => I(m, "A-TrChdW10", steel, 0.26, 0.256, 0.0173, 0.0107);
+        void Web() => I(m, "A-TrWebW10", steel, 0.25, 0.146, 0.0091, 0.0061);
+        string topChd = Sec(m, t, "t1", "A-TrChdW10", Chd), topVier = Sec(m, t, "t2", "A-TrChdW10", Chd), botChd = Sec(m, t, "t3", "A-TrChdW10", Chd), botVier = Sec(m, t, "t4", "A-TrChdW10", Chd);
+        string diag = Sec(m, t, "t5", "A-TrWebW10", Web), vert = Sec(m, t, "t6", "A-TrWebW10", Web);
+        var latCol = Sec(m, t, "t10", "A-LatCol", () => I(m, "A-LatCol", steel, 0.36, 0.37, 0.02, 0.012));
+        var latBm = Sec(m, t, "t11", "A-LatBm", () => I(m, "A-LatBm", steel, 0.45, 0.19, 0.015, 0.009));
+        var plank = Sec(m, t, "t12", "Plank1", () => PropertyDefs.SetShellType(m, "Plank1", null, false, "Slab", "Membrane", 0.2, ModelEdit.DefaultConcrete, true));
         if (t.PanelsBefore < 1 || t.PanelsAfter < 1) throw new ArgumentException("A truss has at least one panel before and after the Vierendeel panel.");
         if (t.VierendeelWidth < 0) throw new ArgumentException("The Vierendeel panel width is 0 or more.");
         if (ys.Length < 2) throw new ArgumentException("A staggered truss spans between two grid lines in Y at least.");
@@ -299,16 +349,17 @@ public static class QuickTemplates
 
         double x0 = xs[0] - t.LeftEdge, x1 = xs[^1] + t.RightEdge, y0 = yA - t.BottomEdge, y1 = yB + t.TopEdge;
         var px = Edges(xs, x0, x1); var py = Edges([yA, yB], y0, y1);
-        var levels = new List<string> { "Base" }; levels.AddRange(stories);
+        var low = m.Stories.FindIndex(s => s.Name == stories[0]);
+        var levels = new List<string> { low > 0 ? m.Stories[low - 1].Name : "Base" }; levels.AddRange(stories);
         for (var s = 1; s < levels.Count; s++)
         {
             var story = levels[s];
-            foreach (var x in xs) { m.AddColumn(x, yA, story, "A-LatCol"); m.AddColumn(x, yB, story, "A-LatCol"); }
-            foreach (var y in new[] { yA, yB }) for (var i = 0; i + 1 < xs.Length; i++) m.AddBeam(xs[i], y, xs[i + 1], y, story, "A-LatBm");
+            foreach (var x in xs) { m.AddColumn(x, yA, story, latCol); m.AddColumn(x, yB, story, latCol); }
+            foreach (var y in new[] { yA, yB }) for (var i = 0; i + 1 < xs.Length; i++) m.AddBeam(xs[i], y, xs[i + 1], y, story, latBm);
             for (var i = 0; i + 1 < px.Length; i++)
                 for (var j = 0; j + 1 < py.Length; j++)
                 {
-                    var a = m.AddSlab([(px[i], py[j]), (px[i + 1], py[j]), (px[i + 1], py[j + 1]), (px[i], py[j + 1])], story, "Plank1", dia);
+                    var a = m.AddSlab([(px[i], py[j]), (px[i + 1], py[j]), (px[i + 1], py[j + 1]), (px[i], py[j + 1])], story, plank, dia);
                     Loads(m, t, a.Label, story);
                 }
         }
@@ -324,26 +375,26 @@ public static class QuickTemplates
                 string below = levels[s - 1], story = levels[s];
                 for (var k = 0; k + 1 < nodes.Count; k++)
                 {
-                    m.AddBeam(x, nodes[k], x, nodes[k + 1], story, "A-TrChdW10");
-                    m.AddBeam(x, nodes[k], x, nodes[k + 1], below, "A-TrChdW10");
+                    m.AddBeam(x, nodes[k], x, nodes[k + 1], story, k == vierendeel ? topVier : topChd);
+                    m.AddBeam(x, nodes[k], x, nodes[k + 1], below, k == vierendeel ? botVier : botChd);
                     if (k == vierendeel) continue;
                     var up = k < t.PanelsBefore;
-                    PropertyDefs.SetReleases(up ? m.AddBrace(x, nodes[k], x, nodes[k + 1], story, "A-TrWebW10") : m.AddBrace(x, nodes[k + 1], x, nodes[k], story, "A-TrWebW10"), ["M2", "M3"], ["M2", "M3"]);
+                    PropertyDefs.SetReleases(up ? m.AddBrace(x, nodes[k], x, nodes[k + 1], story, diag) : m.AddBrace(x, nodes[k + 1], x, nodes[k], story, diag), ["M2", "M3"], ["M2", "M3"]);
                 }
-                for (var k = 1; k + 1 < nodes.Count; k++) m.AddColumn(x, nodes[k], story, "A-TrWebW10");
+                for (var k = 1; k + 1 < nodes.Count; k++) m.AddColumn(x, nodes[k], story, vert);
             }
         }
     }
 
     // ---- shared ----
 
-    private static void Supports(StructuralModel m, QuickTemplate t, double[] xs, double[] ys, string kind)
+    private static void Supports(StructuralModel m, QuickTemplate t, double[] xs, double[] ys, string kind, string level)
     {
         var r = t.Restraints.ToLowerInvariant();
         if (r == "none") return;
         if (r is not ("pinned" or "fixed")) throw new ArgumentException("The restraints at the bottom are none, pinned or fixed.");
         var at = kind == "staggered_truss" ? xs.SelectMany(x => new[] { (x, ys[0]), (x, ys[^1]) }) : xs.SelectMany(x => ys.Select(y => (x, y)));
-        foreach (var (x, y) in at.Distinct()) m.AddSupport(x, y, "Base", r == "fixed");
+        foreach (var (x, y) in at.Distinct()) m.AddSupport(x, y, level, r == "fixed");
     }
 
     private static void Loads(StructuralModel m, QuickTemplate t, string area, string story)
