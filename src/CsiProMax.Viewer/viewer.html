@@ -28378,30 +28378,62 @@ function secLines(bay) {
   for (let i = 1; i <= n; i++) { const t = i / (n + 1); lines.push(hm.secDir === "X" ? [x0, y0 + (y1 - y0) * t, x1, y0 + (y1 - y0) * t] : [x0 + (x1 - x0) * t, y0, x0 + (x1 - x0) * t, y1]); }
   return lines.map(l => l.map(v => Math.round(v * 1e4) / 1e4));
 }
-// ETABS's rubber band for Draw Joint Objects and the Quick Draw commands, in a plan (its help: "drag the mouse to
-// rubber band a window around" grid line intersections, grid line segments or grid line spaces): a window dragged in
-// the draw tool draws the object at each grid crossing, grid line segment or bay wholly inside it, all in one change.
-const winKinds = ["joint", "column", "qbeam", "qwall", "qsec", "qfloor"];
-const winDraws = p => drawing() && p.mode === "plan" && winKinds.includes(drawKind());
+// ETABS's rubber band for Draw Joint Objects and the Quick Draw commands (its help: "drag the mouse to rubber band a
+// window around" grid line intersections, grid line segments or grid line spaces): a window dragged in the draw tool
+// draws the object at each grid crossing, grid line segment or bay wholly inside it, all in one change. In a plan the
+// grid is the plan's at its story; in an elevation, its grid line's crossings and the story levels (Quick Draw
+// Beams/Columns and Quick Draw Floor/Wall, the two ETABS marks Elev).
+const winKinds = ["joint", "column", "qbeam", "qwall", "qsec", "qfloor"], elevWinKinds = ["qbeam", "qfloor"];
+const winDraws = p => drawing() && (p.mode === "plan" ? winKinds : elevDraws(p) ? elevWinKinds : []).includes(drawKind());
 const winWhat = k => ({joint: "crossing", column: "crossing", qbeam: "line segment", qwall: "line segment"})[k] || "bay";
 const winHint = () => winKinds.includes(drawKind()) ? ` Or drag a window: one at each grid ${winWhat(drawKind())} wholly inside it.` : "";
 async function drawWindow(p, r) {
-  const k = drawKind(), kind = drawKinds[k], z = elevationOf(p.story) ?? 0, M = p.M; if (!M) return;
-  const inR = q => { const s = M.to([q[0], q[1], z]); return s[0] >= r.x0 && s[0] <= r.x1 && s[1] >= r.y0 && s[1] <= r.y1; };
-  const xs = grids.X.map(g => g.at).sort((a, b) => a - b), ys = grids.Y.map(g => g.at).sort((a, b) => a - b), pts = [], spans = [], bays = [];
-  for (const x of xs) for (const y of ys) if (inR([x, y])) pts.push([x, y]);
-  for (const x of xs) for (let i = 0; i + 1 < ys.length; i++) if (inR([x, ys[i]]) && inR([x, ys[i + 1]])) spans.push([x, ys[i], x, ys[i + 1]]);
-  for (const y of ys) for (let i = 0; i + 1 < xs.length; i++) if (inR([xs[i], y]) && inR([xs[i + 1], y])) spans.push([xs[i], y, xs[i + 1], y]);
-  for (let i = 0; i + 1 < xs.length; i++) for (let j = 0; j + 1 < ys.length; j++) { const b = [[xs[i], ys[j]], [xs[i + 1], ys[j]], [xs[i + 1], ys[j + 1]], [xs[i], ys[j + 1]]]; if (b.every(inR)) bays.push(b); }
+  const k = drawKind(), kind = drawKinds[k], M = p.M; if (!M) return;
+  const elev = elevDraws(p), z = elevationOf(p.story) ?? 0, eg = elev && elevGrid(p), sorted = l => l.map(g => g.at).sort((a, b) => a - b);
+  const us = elev ? eg.along : sorted(grids.X), vs = elev ? eg.levels : sorted(grids.Y), P = elev ? eg.at : (u, v) => [u, v, z];
+  const inR = q => { const s = M.to(q); return s[0] >= r.x0 && s[0] <= r.x1 && s[1] >= r.y0 && s[1] <= r.y1; }, pts = [], spans = [], bays = [];
+  for (const u of us) for (const v of vs) if (inR(P(u, v))) pts.push(P(u, v));
+  for (const u of us) for (let i = 0; i + 1 < vs.length; i++) if (inR(P(u, vs[i])) && inR(P(u, vs[i + 1]))) spans.push([P(u, vs[i]), P(u, vs[i + 1])]);
+  for (const v of vs) for (let i = 0; i + 1 < us.length; i++) if (inR(P(us[i], v)) && inR(P(us[i + 1], v))) spans.push([P(us[i], v), P(us[i + 1], v)]);
+  for (let i = 0; i + 1 < us.length; i++) for (let j = 0; j + 1 < vs.length; j++) { const b = [P(us[i], vs[j]), P(us[i + 1], vs[j]), P(us[i + 1], vs[j + 1]), P(us[i], vs[j + 1])]; if (b.every(inR)) bays.push(b); }
   const got = {joint: pts, column: pts, qbeam: spans, qwall: spans}[k] || bays;
   if (!got.length) return hmSay(`The window holds no whole grid ${winWhat(k)}.`, true);
-  const st = drawStories(p), sec = (await drawSection(kind)).now;
+  if (elev) return elevQuickDraw(k, got);
+  const xy = q => [q[0], q[1]], st = drawStories(p), sec = (await drawSection(kind)).now;
   if (k !== "joint" && !sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
-  if (k === "joint") return hmRun("add_joints", {points: pts, stories: st});
-  if (k === "column") return hmRun("add_columns", {points: pts, stories: st, section: sec});
-  if (k === "qbeam" || k === "qwall") return hmRun(k === "qbeam" ? "add_beams" : "add_walls", {lines: spans, stories: st, section: sec});
-  if (k === "qsec") return hmRun("add_beams", {lines: bays.flatMap(secLines), stories: st, section: sec});
-  return hmRun("add_slabs", {outlines: bays, stories: st, section: sec});
+  if (k === "joint") return hmRun("add_joints", {points: pts.map(xy), stories: st});
+  if (k === "column") return hmRun("add_columns", {points: pts.map(xy), stories: st, section: sec});
+  if (k === "qbeam" || k === "qwall") return hmRun(k === "qbeam" ? "add_beams" : "add_walls", {lines: spans.map(([a, b]) => [a[0], a[1], b[0], b[1]]), stories: st, section: sec});
+  if (k === "qsec") return hmRun("add_beams", {lines: bays.map(b => b.map(xy)).flatMap(secLines), stories: st, section: sec});
+  return hmRun("add_slabs", {outlines: bays.map(b => b.map(xy)), stories: st, section: sec});
+}
+// Quick Draw in an elevation: its grid, as positions along it (the crossing grid lines) and story levels, and the
+// point at (u, z); the segment under the pointer (a story line between two grid lines makes a beam, a grid line between
+// two levels a column, as the frame's inclination says); the bay under it (a wall).
+function elevGrid(p) {
+  const l = p.line, ax = l.dir === "X" ? 1 : 0, along = (ax ? grids.Y : grids.X).map(g => g.at).sort((a, b) => a - b);
+  const levels = [...new Set(stories.map(s => s.elevation))].sort((a, b) => a - b);
+  return {ax, along, levels, at: (u, z) => { const q = [l.at, l.at, z]; q[ax] = u; return q; }};
+}
+function elevSpanAt(p, x, y) {
+  const g = elevGrid(p), M = p.M; let best = null, bd = 10;
+  const near = (a, b) => { const d = segDist(x, y, M.to(a), M.to(b)); if (d < bd) { bd = d; best = [a, b]; } };
+  for (const z of g.levels) for (let i = 0; i + 1 < g.along.length; i++) near(g.at(g.along[i], z), g.at(g.along[i + 1], z));
+  for (const u of g.along) for (let j = 0; j + 1 < g.levels.length; j++) near(g.at(u, g.levels[j]), g.at(u, g.levels[j + 1]));
+  return best;
+}
+function elevBayAt(p, x, y) {
+  const g = elevGrid(p), raw = p.M.back(x, y), u = raw[g.ax], z = raw[2], A = g.along, L = g.levels;
+  for (let i = 0; i + 1 < A.length; i++) for (let j = 0; j + 1 < L.length; j++)
+    if (u > A[i] && u < A[i + 1] && z > L[j] && z < L[j + 1]) return [g.at(A[i], L[j]), g.at(A[i + 1], L[j]), g.at(A[i + 1], L[j + 1]), g.at(A[i], L[j + 1])];
+  return null;
+}
+async function elevQuickDraw(k, items) {
+  const kind = drawKinds[k], sec = (await drawSection(kind)).now;
+  if (!sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
+  if (k === "qbeam") return hmRun("add_frames_by_points", {frames: items.map(([a, b]) => [...a, ...b]), section: sec});
+  const wall = (await drawSection("wall")).now;
+  return hmRun("add_areas_by_points", {areas: items, section: sec, ...(wall ? {wall_section: wall} : {})});
 }
 async function drawSection(kind) {
   if (kind === "joint" || kind === "reshape") return {list: [], now: ""};
@@ -28524,6 +28556,7 @@ function drawPreview(p, g, M) {
   const h = hm.hover;
   if (h && h.bay) { g.beginPath(); h.bay.forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); g.stroke(); }
   if (h && h.span) { const a = to([h.span[0], h.span[1]]), b = to([h.span[2], h.span[3]]); g.setLineDash([]); g.lineWidth = 4; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); }
+  if (h && h.seg) { const a = to(h.seg[0]), b = to(h.seg[1]); g.save(); g.setLineDash([]); g.lineWidth = 4; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); g.restore(); } // an elevation's segment
   if (k === "circ" && hm.chain.length && h && h.snap) {
     const c = hm.chain[0], r = Math.hypot(h.snap.q[0] - c[0], h.snap.q[1] - c[1]);
     if (r > 1e-6) { g.beginPath(); circleOutline(c, r, hm.circN).forEach((q, i) => { const s = to(q); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); g.stroke(); }
@@ -28546,7 +28579,7 @@ function drawPreview(p, g, M) {
   g.restore();
 }
 function drawMove(p, x, y) {
-  if (elevDraws(p)) { hm.hover = elevKinds.includes(drawKind()) ? {snap: elevSnap(p, x, y)} : null; draw(); return; }
+  if (elevDraws(p)) { const k = drawKind(); hm.hover = k === "qbeam" ? {seg: elevSpanAt(p, x, y)} : k === "qfloor" ? {bay: elevBayAt(p, x, y)} : elevKinds.includes(k) ? {snap: elevSnap(p, x, y)} : null; draw(); return; }
   if (p.mode === "3d" && program === "etabs") { hm.hover = draw3dKinds.includes(drawKind()) ? {snap: snap3d(p, x, y)} : null; draw(); return; }
   if (p.mode !== "plan") { hm.hover = null; return; }
   const k = drawKind(); drawCtl.at = {p, x, y};
@@ -28565,9 +28598,10 @@ const draw3dKinds = ["joint", "column", "beam", "wall", "brace", "floor", "rect"
 // An elevation of a grid line draws as the 3-D view does on a work plane standing on that line (the 3-D view's own work
 // plane is set aside): points at grid crossings and joints on the line, at any story levels; a frame comes out a column,
 // beam or brace by its inclination, an area a wall (Options > Tolerances). As ETABS's help says for elevations, a frame
-// or wall drawn across story levels is broken at each one, all in one change. Quick Draw, Draw Walls and Reshape stay
-// in a plan view, as their names in the menu say; joints are drawn in an elevation too.
-const elevKinds = ["joint", "beam", "brace", "floor", "rect"];
+// or wall drawn across story levels is broken at each one, all in one change. Quick Draw Beams/Columns and Quick Draw
+// Floor/Wall work on the elevation's own grid (elevGrid, by click or window); Quick Draw Columns, Secondary Beams and
+// Walls, Draw Walls and Reshape stay in a plan view, as their names in the menu say. Joints are drawn here too.
+const elevKinds = ["joint", "beam", "brace", "floor", "rect", "qbeam", "qfloor"];
 const elevDraws = p => !!p && p.mode === "elev" && !!p.line && program === "etabs";
 function elevPlane(p) { const l = p.line, x = l.dir === "X"; return {name: "Elevation " + l.label, normal: x ? [1, 0, 0] : [0, 1, 0], points: [x ? [l.at, 0, 0] : [0, l.at, 0]]}; }
 function elevSnap(p, x, y) { const was = hm.wp; hm.wp = ""; try { return snap3d(p, x, y, wpOnly(p)); } finally { hm.wp = was; } }
@@ -28706,7 +28740,9 @@ function rectCorners(a, b, w = wpOf(hm.wp)) {
 }
 function draw3dHint() {
   const k = drawKind(), p = panes[active], elev = elevDraws(p), plane = elev ? ` on elevation ${p.line.label}` : hm.wp && wpOf(hm.wp) ? ` on the work plane ${hm.wp}` : "";
-  if (elev && !elevKinds.includes(k)) return "In an elevation, joints, beams, columns, braces, floors and walls are drawn by their points. Quick Draw, Draw Walls and Reshape work in a plan view.";
+  if (elev && !elevKinds.includes(k)) return "In an elevation, joints, beams, columns, braces, floors and walls are drawn by their points, and Quick Draw Beams/Columns and Quick Draw Floor/Wall work. Quick Draw Columns, Secondary Beams and Walls, Draw Walls and Reshape work in a plan view.";
+  if (elev && k === "qbeam") return `Click a story line between two grid lines for a beam, or a grid line between two story levels for a column${plane}. Or drag a window: one at each such segment wholly inside it.`;
+  if (elev && k === "qfloor") return `Click inside a bay${plane}: a wall fills it, between its two grid lines and two story levels. Or drag a window: one in each bay wholly inside it.`;
   if (elev && k === "rect") return `Click two opposite corners${plane}: its sides run level and upright, and it is cut at the story levels it crosses.`;
   if (!draw3dKinds.includes(k)) return "In the 3-D view, joints, columns, beams, walls, braces and floors are drawn by their points. Quick Draw and Reshape work in a plan view.";
   if (k === "beam") return `Click the start, then each next point of the frames${plane}, at any story levels: ${wpInclText("frame")}. Right click or Esc ends the line.`;
@@ -28720,6 +28756,10 @@ function draw3dHint() {
 async function draw3dClick(p, x, y, dbl) {
   const k = drawKind(), kind = drawKinds[k], elev = elevDraws(p);
   if (!(elev ? elevKinds : draw3dKinds).includes(k)) return hmSay(draw3dHint(), true);
+  if (elev && (k === "qbeam" || k === "qfloor")) {
+    const got = k === "qbeam" ? elevSpanAt(p, x, y) : elevBayAt(p, x, y);
+    return got ? elevQuickDraw(k, [got]) : hmSay(k === "qbeam" ? "Click a story line between two grid lines, or a grid line between two story levels." : "Click inside a bay: between two grid lines and two story levels.", true);
+  }
   const w = elev ? elevPlane(p) : wpOf(hm.wp), s = elev ? elevSnap(p, x, y) : snap3d(p, x, y);
   if (!s) return hmSay(elev ? `Click a grid crossing or joint on elevation ${p.line.label}.` : w ? `Click a grid crossing or joint on the work plane ${hm.wp}.` : "Click a grid crossing or joint.", true);
   if (!s.story) return hmSay("That point is between stories: members are drawn between points at story levels.", true);
