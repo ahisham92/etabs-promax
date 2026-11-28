@@ -3504,7 +3504,7 @@ function wire(p) {
     if (d.act === "measure") { if (!d.moved && d.button === 0) etvMeasureClick(p, x, y, false); else if (d.button === 2) { if (etv.measure && etv.measure.cancel) etv.measure.cancel(); etv.measure = null; } return; }
     if (d.act === "walk") return;
     if (d.act === "iline") { p.iline = null; if (d.moved) { const n = lineSelect(p, [d.x0, d.y0], [x, y]); $("hint").textContent = n + " objects crossed by the line selected."; } else draw(); return; }
-    if (!d.moved && d.button === 2 && tool.startsWith("d:") && hm.chain.length) { hm.chain = []; draw(); return; }
+    if (!d.moved && d.button === 2 && tool.startsWith("d:") && hm.chain.length) { hm.chain = []; hm.reshape = null; drawCtl.k = ""; ctlShow(); draftShow(p); draw(); return; } // ends the line as Esc does
     if (!d.moved) {
       if (d.button === 2) return rightClick(p, x, y, e.shiftKey, e.clientX, e.clientY);
       if (d.button === 0 && (d.act === "box" || d.act === "orbit" || d.act === "pan")) {
