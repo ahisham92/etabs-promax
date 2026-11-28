@@ -6248,8 +6248,370 @@ function modelerMenus(m) {
   // ETABS 23.2's own Options menu; the Engine's view options under Engine Extras.
   if (etnOn()) m.Options = etoOptionsMenu(viewerMenus().Options);
   if (program === "safe") m.Tools = [...(m.Tools || []), 0, ["SAFE Definition Tables...", "m:sf:"]];
-  if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(d.design === "shear_wall" ? (d.overwrites || []).map(t => [/Spandrel/.test(t) ? "View/Revise Spandrel Overwrites..." : "View/Revise Pier Overwrites...", "m:dt:" + t]) : (d.overwrites || []).length ? [["View/Revise Overwrites...", "m:over:" + d.design, "", !hmSelected(d.design === "slab" ? "a" : "f").length]] : []), ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
+  // ETABS: its own Design menu item for item (etgDesignMenu); the Engine's design-result windows under Engine Extras.
+  if (etnOn()) { const seen = (m.Design || []).filter(x => x && x[1] !== "eng:design"); m.Design = [...etgDesignMenu(), ...(seen.length ? [0, ["Engine Extras", seen]] : [])];
+    m.Tools = etgToolsMenu((m.Tools || []).filter(Boolean)); }
+  else if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(d.design === "shear_wall" ? (d.overwrites || []).map(t => [/Spandrel/.test(t) ? "View/Revise Spandrel Overwrites..." : "View/Revise Pier Overwrites...", "m:dt:" + t]) : (d.overwrites || []).length ? [["View/Revise Overwrites...", "m:over:" + d.design, "", !hmSelected(d.design === "slab" ? "a" : "f").length]] : []), ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
   return m;
+}
+// ---- ETABS 23.2's Design menu and its preference forms (pictures in field/reference-forms/etabs/Design) ----
+// The menu item for item (00 Design menu, 01-07 submenus); each design's View/Revise Preferences as ETABS draws it:
+// Item/Value grid (numbered), Item Description, Explanation of Color Coding (blue default, black not default, red
+// changed in this session), Set To Default Values and Reset To Previous Values (All Items / Selected Items, or
+// Current Tab on the tabbed Composite Beam form). The items, their order, words and defaults are read from the
+// pictures for the pictured codes (AISC 360-16 steel and composite, ACI 318-19 concrete and walls, SJI-2010 joists,
+// AISC 360-22 Composite and ACI 530-11 Masonry walls); another code shows its table's items. A value goes to
+// ETABS's table of the code and, where the .e2k keeps it, to the design's .e2k preference line; an item in neither
+// is kept in the .cpm (UNVERIFIED in field/forms-check.md until its .e2k word is pictured).
+// Steel Connection Design, Live Load Reduction Factors and the two target forms are the steel connection thread's
+// (etc*): wired here when its code is in the page.
+const etg = {changed: new Set(), groups: {}};
+const etgFam = {steel: "steel", concrete: "concrete", composite: "composite", composite_column: "compcol", joist: "joist", shear_wall: "pier"};
+const etgHas = fam => (typeof design !== "undefined" ? design : []).some(f => f.key === fam || (fam === "pier" && f.key === "spandrel"));
+function etgDesignMenu() {
+  const fr = hmSelected("f").length > 0, live = !!window.cpmLive, ran = !!engine.res;
+  const frameSub = (kind, keys, extra) => {
+    const fam = etgFam[kind], has = etgHas(fam), a = s => "m:etg:" + s + ":" + kind, [run, info] = keys || [];
+    return [["View/Revise Preferences...", a("pref")], 0,
+      ["View/Revise Overwrites...", "m:over:" + kind, "", !fr], ...(extra.bracing ? [["Lateral Bracing...", a("bracing"), "", !fr]] : []), 0,
+      ["Select Design Groups...", a("groups")], ["Select Design Combinations...", a("combos")], 0,
+      ["Start Design/Check", "eng:design", run || "", !live || !ran], ["Interactive Design", a("interactive"), "", !has], 0,
+      ...(extra.beam ? [["Display Beam Design...", a("beam"), "", !has]] : []), ["Display Design Info...", a("info"), info || "", !has], 0,
+      ...(extra.noNull ? [] : [["Make Auto Select Section Null...", a("null"), "", !has]]), ["Change Design Section...", a("change"), "", !has],
+      ...(extra.copy ? [["Copy Design...", a("copy"), "", !has], ["Paste Design...", a("paste"), "", !has]] : []),
+      [extra.To ? "Reset Design Section To Last Analysis" : "Reset Design Section to Last Analysis", a("reset"), "", !has], 0,
+      ["Verify Analysis vs Design Section...", a("verify"), "", !has], ["Verify All Members Passed...", a("passed"), "", !has], 0,
+      ["Reset All Overwrites...", a("resetOver")], ["Delete Design Results...", a("delete"), "", !has]];
+  };
+  const wall = (() => {
+    const has = etgHas("pier"), a = s => "m:etg:" + s + ":shear_wall";
+    return [["View/Revise Preferences...", a("pref")], 0, ["Define General Pier Sections...", "m:etg:pierSections:shear_wall"],
+      ["Assign Pier Sections", [["Uniform Reinforcing Pier Sections...", "m:etg:pierUniform:shear_wall", "", !hmSelected("a").length], ["General Reinforcing Pier Sections...", "m:etg:pierGeneral:shear_wall", "", !hmSelected("a").length]]], 0,
+      ["View/Revise Pier Overwrites...", a("pierOver")], ["View/Revise Spandrel Overwrites...", a("spandrelOver")], 0,
+      ["Select Design Combinations...", a("combos")], 0,
+      ["Start Design/Check", "eng:design", "Shift+F10", !live || !ran], ["Interactive Design", a("interactive"), "", !has], 0,
+      ["Display Design Info...", a("info"), "Shift+Ctrl+F10", !has], 0, ["Make Auto Select Section Null...", a("null"), "", !has], 0,
+      ["Verify Analysis vs Design Section...", a("verify"), "", !has], 0, ["Reset All Overwrites...", a("resetOver")], ["Delete Design Results...", a("delete"), "", !has]];
+  })();
+  const etcOn = typeof etcConnectionMenu === "function";
+  const conn = etcOn ? etcConnectionMenu() : [["View/Revise Preferences...", "m:etc:pref"], 0, ["Select Design Combinations...", "m:etc:combos"], 0, ["Start Design/Check", "eng:design", "Shift+F9", !live || !ran], ["Interactive Design", "m:etc:interactive", "", !etgHas("connection")], 0,
+    ["Display Design Info...", "m:etc:info", "", !etgHas("connection")], 0, ["Verify All Connections Passed...", "m:etc:passed", "", !etgHas("connection")], 0, ["Reset All Overwrites...", "m:etc:resetOver"], ["Delete Design Results...", "m:etc:delete", "", !etgHas("connection")]];
+  return [["Steel Frame Design", frameSub("steel", ["Shift+F5", "Shift+Ctrl+F5"], {bracing: 1, To: 1})],
+    ["Concrete Frame Design", frameSub("concrete", ["Shift+F6", "Shift+Ctrl+F6"], {beam: 1, noNull: 1})],
+    ["Composite Beam Design", frameSub("composite", ["Shift+F7", "Shift+Ctrl+F7"], {copy: 1})],
+    ["Composite Column Design", frameSub("composite_column", ["Shift+F8", "Shift+Ctrl+F8"], {})],
+    ["Steel Joist Design", frameSub("joist", [], {bracing: 1})], 0,
+    ["Overwrite Frame Design Procedure...", "m:etg:procedure:", "", !fr], 0,
+    ["Shear Wall Design", wall], 0, ["Steel Connection Design", conn], 0,
+    ["Live Load Reduction Factors...", "m:etc:llrf"], ["Set Lateral Displacement Targets...", "m:etc:dispTargets"], ["Set Time Period Targets...", "m:etc:periodTargets"]];
+}
+
+// ---- preference forms ----
+// An item: [label, table field, .e2k word, default, choices, more]. more: {u: "in"|"ft" (a length), off: values =>
+// greyed, show: values => in the grid, d: description}. A "~" field is an item kept in the .cpm.
+const YN = ["Yes", "No"];
+const etgDesc = {"Design Code": "The selected design code.\nSubsequent design is based on this selected code."};
+const etgPhi = (n, a, b) => [["Phi(Bending)", "PhiBend", "PHIBAISC05", 0.9], ["Phi(Compression)", "PhiComp", "PHICAISC05", n], ["Phi(Tension-Yielding)", "PhiTY", "PHITYAISC05", 0.9], ["Phi(Tension-Fracture)", "PhiTF", "PHITFAISC05", 0.75],
+  ["Phi(Shear)", "PhiShear", "PHIVAISC05", 0.9], ["Phi(Shear-Short Webed Rolled I)", "PhiShSWRI", "PHIVROLLEDIAISC05", 1], ["Phi(Torsion)", "PhiTors", "PHITORSIONAISC05", 0.9]].map(x => [...x, null, {show: v => v.DesProv !== "ASD"}]);
+// ASD shows Omega rows instead (their words and defaults are not pictured yet: the table's own).
+const etgOmega = () => [["Omega(Bending)", "OmegaBend"], ["Omega(Compression)", "OmegaComp"], ["Omega(Tension-Yielding)", "OmegaTY"], ["Omega(Tension-Fracture)", "OmegaTF"], ["Omega(Shear)", "OmegaShear"], ["Omega(Shear-Short Webed Rolled I)", "OmegaShSWRI"], ["Omega(Torsion)", "OmegaTors"]].map(x => [x[0], x[1], "", null, null, {show: v => v.DesProv === "ASD"}]);
+const etgAisc = () => [["Design Provision", "DesProv", "PROVISION", "LRFD", ["LRFD", "ASD"]], ["Analysis Method", "AnalMethod", "ANALYSISMETHOD", "Direct Analysis"], ["Second Order Method", "SOM", "SECONDORDERMETHOD", "General 2nd Order"], ["Stiffness Reduction Method", "SRedMethod", "STIFFNESSREDUCTIONMETHOD", "Tau-b Fixed"]];
+const etgMulti = ["Multi-Response Case Design", "MultiMethod", "THDESIGN", "Step-by-Step - All"];
+const etgDefl = v => v.CheckDefl === "No";
+const etgSpecs = {
+  "steel|AISC 360-16": {items: [etgMulti, ["Framing Type", "FrameType", "FRAMETYPE", "SMF"], ["Seismic Design Category", "SDC", "SDC", "D"], ["Importance Factor", "ImpFactor", "IMPORTANCEFACTOR", 1],
+    ["Design System Rho", "Rho", "SYSTEMRHO", 1], ["Design System Sds", "Sds", "SYSTEMSDS", 0.5], ["Design System R", "R", "SYSTEMR", 8], ["Design System Omega0", "Omega0", "OMEGA0", 3], ["Design System Cd", "Cd", "SYSTEMCD", 5.5],
+    ...etgAisc(), ["Add Notional load cases into seismic combos?", "AddNotional", "AANOTIONALTOLATERALCOMBOS", "No", YN], ["BRB Beta Factor", "Beta", "BETA", 1.3], ["BRB BetaOmega Factor", "BetaOmega", "BETAOMEGA", 1.6],
+    ...etgPhi(0.9), ...etgOmega(), ["Ignore Seismic Code?", "SeismicCode", "IGNORESEISMICCODE", "No", YN], ["Ignore Special Seismic Load?", "SpSeisLoad", "IGNORESPECIALSEISMICLOAD", "No", YN],
+    ["Is Doubler Plate Plug-Welded?", "PlugWelded", "ISDOUBLERPLATEPLUGWELDED", "Yes", YN], ["Consider Deflection?", "CheckDefl", "CONSIDERDEFLECTION", "Yes", YN],
+    ["DL Limit, L /", "DLRat", "DLDEFLECTIONLIMIT", 120, null, {off: etgDefl}], ["Super DL+LL Limit, L /", "SDLAndLLRat", "SLDEFLECTIONLIMIT", 120, null, {off: etgDefl}], ["Live Load Limit, L /", "LLRat", "LLDEFLECTIONLIMIT", 360, null, {off: etgDefl}],
+    ["Total Limit, L/", "TotalRat", "TLDEFLECTIONLIMIT", 240, null, {off: etgDefl}], ["Total–Camber Limit, L/", "TotalCamber", "TLMCDEFLECTIONLIMIT", 240, null, {off: etgDefl}],
+    ["Pattern Live Load Factor", "PatLLF", "PATTERNLLF", 0.75], ["Demand/Capacity Ratio Limit", "DCLimit", "SRLIMIT", 0.95], ["Max Number of Auto Iterations", "MaxIter", "MAXITERATION", 1]]},
+  "concrete|ACI 318-19": {items: [etgMulti, ["Number of Interaction Curves", "NumCurves", "NUMINTERCURVES", 24], ["Number of Interaction Points", "NumPoints", "NUMINTERPOINTS", 11],
+    ["Consider Minimum Eccentricity?", "MinEcc", "CONSIDERMINECCENTRICITY", "Yes", YN], ["Design for B/C Capacity Ratio?", "Design4BCCR", "DESIGNFORBCCR", "Yes", YN], ["Ignore Beneficial Pu for Beam Design?", "IgnorePu", "IGNOREBENEFICIALPUINBEAMDESIGN", "Yes", YN],
+    ["Seismic Design Category", "SDC", "SDC", "D"], ["Design System Omega0", "Omega0", "OMEGA0", 2], ["Design System Rho", "Rho", "RHO", 1], ["Design System Sds", "Sds", "SDS", 0.5],
+    ["Phi (Tension Controlled)", "PhiTen", "PHITENSIONCTRL", 0.9], ["Phi (Compression Controlled Tied)", "PhiCompTied", "PHICOMPRESSIONCTRLTIED", 0.65], ["Phi (Compression Controlled Spiral)", "PhiCompSpir", "PHICOMPRESSIONCTRLSPIRAL", 0.75],
+    ["Phi (Shear and/or Torsion)", "PhiShrTor", "PHISHEARTORSION", 0.75], ["Phi (Shear Seismic)", "PhiShrSeis", "PHISHEARSEISMIC", 0.6], ["Phi (Joint Shear)", "PhiShrJnt", "PHISHEARJOINT", 0.85],
+    ["User Defined Allowable PT Stresses?", "", "USERSTRESS", "No", YN],
+    ...[["Concrete Strength Ratio at Transfer f'ci / f'c", "INITCONCRAT", 0.8], ["Transfer: Top Fiber Tensile Stress / f'ci^(1/2)", "", 3], ["Transfer: Bottom Fiber Tensile Stress / f'ci^(1/2)", "", 3],
+      ["Transfer: Extreme Fiber Compressive Stress / f'ci", "", 0.6], ["Final: Top Fiber Tensile Stress / f'c^(1/2)", "", 6], ["Final: Bottom Fiber Tensile Stress / f'c^(1/2)", "", 6], ["Final: Extreme Fiber Compressive Stress / f'c", "", 0.6],
+      ["Sustained: Extreme Fiber Compressive Stress / f'c", "", 0.45], ["Sustained: Fraction of Live Load Considered", "LLFRACTION", 0.5]].map(([l, e, d]) => [l, e ? "" : "~", e, d, null, {off: v => v.USERSTRESS !== "Yes"}]),
+    ["Pattern Live Load Factor", "PatLLF", "PATTERNLLF", 0.75], ["Utilization Factor Limit", "DCLimit", "UFLIMIT", 1]]},
+  "composite_column|AISC 360-16": {items: [etgMulti, ...etgAisc(), ...etgPhi(0.75), ...etgOmega(), ["Ignore Seismic Code?", "SeismicCode", "IGNORESEISMICCODE", "No", YN], ["Ignore Special Seismic Load?", "SpSeisLoad", "IGNORESPECIALSEISMICLOAD", "No", YN],
+    ["Is Doubler Plate Plug-Welded?", "PlugWelded", "ISDOUBLERPLATEPLUGWELDED", "Yes", YN], ["HSS Welding Type", "WeldingType", "HSSWELDINGTYPE", "ERW"], ["Reduce HSS Thickness?", "RHSSSThick", "REDUCEHSSTHICKNESS", "No", YN],
+    ["Pattern Live Load Factor", "PatLLF", "PATTERNLLF", 0.75], ["Demand/Capacity Ratio Limit", "DCLimit", "SRLIMIT", 0.95], ["Max Number of Auto Iterations", "MaxIter", "MAXITERATION", 1]]},
+  "joist|SJI-2010": {items: [["Design Provision", "DesProv", "", "LRFD", ["LRFD", "ASD"], {d: "The selected design provision, i.e, ASD or LRFD. Subsequent design is based on this selected provision."}]]},
+  "composite|AISC 360-16": {tabs: [
+    ["Beam", [["Consider Axial Force?", "AxialForce", "WITHAXIALFORCE", "No", YN, {d: "Toggle for considering axial forces when checking the strength of the beams."}], ["Magnify Moments?", "~", "", "Yes", YN, {off: v => v.AxialForce !== "Yes"}],
+      ["Shored Construction?", "Shored", "SHORED", "No", YN], ["Middle Range, %", "MidRange", "%MIDDLERANGE", 70], ["Pattern Live Load Factor", "~", "", 0.75, null, {off: () => true}], ["Stress Ratio Limit", "DCLimit", "SRLIMIT", 1]]],
+    ["Shear Studs", [["Minimum PCC, %", "MinPCC", "MIN%COMPOSITE", 25, null, {d: "Minimum value of percent composite connection applied to beams which require composite action to meet strength or deflection design criteria. This percentage also applies to beams for which \"Force Composite\" is specified in the overwrites."}],
+      ["Maximum PCC, %", "MaxPCC", "MAX%COMPOSITE", 100], ["Single Segment?", "SingleSeg", "SINGLESEGMENT", "No", YN], ["Min. Long. Spacing", "MinLngSpc", "MINLONGSPACING", 4.5, null, {u: "in"}], ["Max. Long. Spacing", "MaxLngSpc", "MAXLONGSPACING", 36, null, {u: "in"}],
+      ["Min. Trans. Spacing", "MinTrnSpc", "MINTRANSSPACING", 3, null, {u: "in"}], ["Max. Studs Per Row", "MaxStudPRow", "MAXSTUDSPERROW", 3], ["Position of Shear Studs in Deck Ribs", "StudPos", "", "Middle of the Ribs"]]],
+    ["Camber", [["Calculate Camber?", "Camber", "CALCULATECAMBER", "Yes", YN, {d: "Toggle for whether or not beams have a camber."}], ["Camber DL, %", "CamberDL", "%DLCAMBER", 80],
+      ["Minimum Beam Depth for Camber", "MinBmDepth", "MINDEPTHFORCAMBER", 13.5, null, {u: "in"}], ["Minimum Web Thick. for Camber", "MinWebTick", "MINWEBTHICKFORCAMBER", 0.25, null, {u: "in"}], ["Minimum Beam Span for Camber", "MinBmSpan", "MINSPANFORCAMBER", 24, null, {u: "ft"}],
+      ["Minimum Camber, abs", "MinCamber", "CAMBERIGNORE", 0.75, null, {u: "in"}], ["Minimum Camber, L/", "MinCamOSpan", "CAMBERELMIN", 900], ["Camber Abs Max Limit", "CamAbsMax", "CAMBERABSMAX", 6, null, {u: "in"}],
+      ["Camber Max Limit, L/", "CamMaxRat", "CAMBERRELMAX", 180], ["Camber Increment", "CamInt", "CAMBERINTERVAL", 0.25, null, {u: "in"}], ["Camber Rounding Down", "CamRndDown", "CAMBERROUNDDOWN", "Yes", YN]].map(x => x[0] === "Calculate Camber?" ? x : [x[0], x[1], x[2], x[3], x[4] || null, {...(x[5] || {}), off: v => v.Camber === "No"}])],
+    ["Deflection", [["PreComp DL Limit, L /", "PCDLRat", "DLLIMIT", 0, null, {d: "Pre-composite dead load deflection limitation denominator. Inputting a value of 120 means that the deflection limit is L/120. Inputting zero is special, since it means no check has to be made for this item."}],
+      ["Super DL+LL Limit, L /", "SDLAndLLRat", "SLLIMIT", 240], ["Live Load Limit, L /", "LLRat", "LLLIMIT", 360], ["Total–Camber Limit, L/", "NetRat", "TLLIMIT", 240], ["Ieff Reduction Factor for Comp. Defl.", "IeffRed", "CREEPFACTOR", 1]]],
+    ["Vibration", [["Vibration Criterion", "Criteria", "VIBRATIONCRITERION", "Walking", null, {d: "Vibration criterion to be considered in the design."}], ["Occupancy Category", "Occupancy", "OCCUPANCYCATEGORY", "Paper Office"],
+      ["Damping Ratio", "Damp1", "DAMPINGRATIO", 0.025], ["Driving Force, P0", "DrivingForce", "", 65], ["Acceleration Limit, a0/g", "WalkAccel", "WALKINGACCELERATIONLIMIT", 0.005]]],
+    ["Prices", [["Optimize for Price?", "OptPrice", "", "Yes", YN, {d: "Toggle to consider price rather than steel weight when selecting the optimum beam section from an auto select section list."}], ["Steel Price ($), Price/lb", "SteelPrice", "", 1], ["Studs Price ($)", "StudPrice", "", 2], ["Camber Price ($), Price/lb", "CamberPrice", "", null]]],
+    ["Factors", [["ϕ-b", "phib", "PHI-B", 0.9, null, {d: "Resistance factor for bending capacity in a steel beam alone."}], ["ϕ-bcpp", "phibcpp", "PHI-BCPP", 0.9], ["ϕ-v", "phiv", "PHI-V", 0.9], ["ϕ-c", "", "PHI-C", 0.9], ["ϕ-t", "", "PHI-T", 0.9], ["Reaction Factor", "ReacFact", "", 1]]]]},
+  "shear_wall|ACI 318-19": {items: [etgMulti, ["Rebar Material", "RebarMat", "REBARMATERIAL", "A615Gr60", "rebar"], ["Rebar Shear Material", "RebarShrMat", "REBARSHEARMATERIAL", "A615Gr60", "rebar"],
+    ["Design System Rho", "Rho", "RHO", 1], ["Design System Sds", "Sds", "SDS", 0.5], ["Seismic Design Category", "SDC", "SDC", "D"], ["System Overstrength Factor", "Omega0", "OMEGA0", 2.5], ["Importance Factor", "ImpFactor", "I", 1],
+    ["System R", "R", "R", 5], ["System Cd", "Cd", "CD", 5.5], ["Wall Ductility Type", "Ductility", "DUCTILITY", "Special Structural Wall"], ["Pier Critical Section (CS)", "CriticalSection", "CRITICALSECT", null, "stories"],
+    ["Ignore Beneficial Pu for Spandrel Design?", "IgnorePu", "IGNOREBENEFICIALPUINSPANDRELDESIGN", null, YN], ["Phi (Tension Controlled)", "PhiTen", "PHI-TCTRL", 0.9], ["Phi (Compression Controlled)", "PhiCompTied", "PHI-CCTRL", 0.65],
+    ["Phi (Shear and/or Torsion)", "PhiShrTor", "PHI-SHEAR", 0.75], ["Phi (Shear Seismic)", "PhiShrSeis", "PHI-SHEARSEIS", 0.6], ["Pmax Factor", "PMax", "PMAXFACTOR", 0.8], ["Number of Curves", "NumCurves", "NUMCURVES", 24], ["Number of Points", "NumPoints", "NUMPOINTS", 11],
+    ["Edge Design PT-Max", "PTMax", "PTMAX", 0.06], ["Edge Design PC-Max", "PCMax", "PCMAX", 0.04], ["Section Design IP-Max", "IPMax", "IPMAX", 0.04], ["Section Design IP-Min", "IPMin", "IPMIN", 0.0025], ["Utilization Factor Limit", "DCLimit", "UFLIMIT", 0.95]]},
+  "shear_wall|AISC 360-22 Composite": {items: [etgMulti, ["Phi (Tension)", "PhiTen", "", 0.9], ["Phi (Compression)", "PhiComp", "", 0.9], ["Phi (Bending)", "PhiBending", "", 0.9], ["Phi (Shear)", "PhiShear", "", 0.9]]},
+  "shear_wall|ACI 530-11 Masonry": {items: [etgMulti, ["Rebar Material", "RebarMat", "", "A615Gr60", "rebar"], ["Rebar Shear Material", "RebarShrMat", "", "A615Gr60", "rebar"], ["Design System Rho", "Rho", "", 1], ["Design System Sds", "Sds", "", 0.5],
+    ["Wall Ductility Type", "DuctType", "", "Special Reinforced"], ["System Cd", "Cd", "", 5.5], ["Phi (Bending-Tension)", "PhiTen", "", 0.9], ["Phi (Shear)", "PhiShear", "", 0.8], ["Pmax Factor", "PMax", "", 0.8], ["Number of Curves", "NumCurves", "", 24],
+    ["Number of Points", "NumPoints", "", 11], ["Edge Design PT-Max", "PTMax", "", 0.06], ["Edge Design PC-Max", "PCMax", "", 0.04], ["Section Design IP-Max", "IPMax", "", 0.04], ["Section Design IP-Min", "IPMin", "", 0.0025], ["Utilization Factor Limit", "DCLimit", "", 0.95]]},
+};
+// The Design Code lists, in ETABS 23.2's order (13, 22, 37, 42, 51, 62, 64, 67).
+const etgCodes = {
+  steel: ["AISC 360-22", "AISC 360-16", "AISC 360-10", "AISC 360-05", "AISC LRFD 93", "AISC ASD 89", "AS 4100:2020", "AS 4100-1998", "BS 5950-2000", "CSA S16-24", "CSA S16-19", "CSA S16-14", "EN 1993-1-1:2022", "EN 1993-1-1:2005/A1:2014", "IS 800:2007", "Italian NTC 2018", "Italian NTC 2008", "KDS 14 31 00 : 2022", "KBC 2016", "KBC 2009", "NZS 3404:1997", "SP 16.13330.2017"],
+  concrete: ["ACI 318-25", "ACI 318-19", "ACI 318-14", "ACI 318-11", "ACI 318-08", "AS 3600-2018", "AS 3600-09", "BS 8110-97", "CSA A23.3-24", "CSA A23.3-19", "CSA A23.3-14", "EN 1992-1-1:2023", "Eurocode 2-2004", "Hong Kong CP 2013", "IS 456:2000", "Italian NTC 2008", "KBC 2016", "KBC 2009", "KDS 14 20 00:2022", "Mexican RCDF 2017", "Mexican RCDF 2004", "NZS 3101:2006", "Singapore CP 65:99", "SP 63.13330.2012", "TS 500-2000(R2018)", "TS 500-2000", "TCVN 5574:2012", "TCVN 5574:2018"],
+  composite: ["AISC 360-22", "AISC 360-16", "AISC 360-10", "AISC 360-05", "BS 5950-1990", "CSA S16-24", "CSA S16-19", "CSA S16-14", "Eurocode 4-2004", "IS 11384:2022", "KDS 14 31 80 : 2022"],
+  composite_column: ["AISC 360-22", "AISC 360-16", "AISC 360-10", "CSA S16-19", "CSA S16-24", "Eurocode 4-2004", "IS 11384:2022", "KDS 14 31 00 : 2022"],
+  joist: ["SJI-2010", "SJI 100-2020"],
+  shear_wall: ["ACI 318-25", "ACI 318-19", "ACI 318-14", "ACI 318-11", "ACI 318-08", "AS 3600-2018", "AS 3600-09", "BS 8110-97", "CSA A23.3-24", "CSA A23.3-19", "CSA A23.3-14", "Eurocode 2-2004", "Hong Kong CP 2013", "IS 456:2000", "KBC 2016", "KBC 2009", "KDS 14 20 00:2022", "Mexican RCDF 2017", "Mexican RCDF 2004", "NZS 3101:2006", "Singapore CP 65:99", "SP 63.13330.2012", "TS 500-2000(R2018)", "TS 500-2000"],
+};
+const etgWallTabs = [["Concrete", null], ["Composite", ["AISC 360-22 Composite"]], ["Masonry", ["ACI 530-11 Masonry"]]];
+const etgDefaultCode = {steel: "AISC 360-16", concrete: "ACI 318-19", composite: "AISC 360-16", composite_column: "AISC 360-16", joist: "SJI-2010", shear_wall: "ACI 318-19"};
+// ETABS's code name as its tables name it ("IS 800:2007" is the table "... - IS 800-2007").
+const etgNorm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function etgTableCode(d, code) {
+  const n = etgNorm(code), list = (d && d.codes) || [];
+  return list.find(c => etgNorm(c) === n) || ({"bs59501990": "BS 5950-90"})[n] && list.find(c => c === ({"bs59501990": "BS 5950-90"})[n]) || list.filter(c => n.startsWith(etgNorm(c))).sort((a, b) => b.length - a.length)[0] || "";
+}
+const etgDisplayCode = (kind, table) => { const all = [...(etgCodes[kind] || []), ...(kind === "shear_wall" ? ["AISC 360-22 Composite", "ACI 530-11 Masonry"] : [])]; return all.find(c => etgTableCode({codes: [table]}, c) === table) || table; };
+// .e2k words ETABS writes for its choices (cpm-forms-scratch-define.e2k).
+const etgE2kWords = {"EVERYSTEP-ALL": "Step-by-Step - All", "DIRECT ANALYSIS": "Direct Analysis", "GENERAL 2ND ORDER": "General 2nd Order", "TAU-B FIXED": "Tau-b Fixed", "SPECIALSTRUCTURAL": "Special Structural Wall", "WALKING": "Walking", "PAPEROFFICE": "Paper Office"};
+const etgFromE2k = (v, choices) => { const u = String(v).toUpperCase(); if (etgE2kWords[u]) return etgE2kWords[u]; if (u === "YES" || u === "NO") return u === "YES" ? "Yes" : "No"; const c = (choices || []).find(x => etgNorm(x) === etgNorm(v)); return c || v; };
+const etgToE2k = (v, choices) => { const w = Object.keys(etgE2kWords).find(k => etgE2kWords[k] === v); if (w) return w; if (choices === YN) return v.toUpperCase(); if (v !== "" && Number.isFinite(Number(v))) return v; if (choices && choices.includes(v)) return v; return null; };
+const etgLenM = {in: 0.0254, ft: 0.3048, m: 1, mm: 0.001, cm: 0.01};
+const etgUnit = u => { const l = hmU().l; return l === "in" || l === "ft" ? u : l; };
+const etgNum = x => String(Math.round(Number(x) * 1e6) / 1e6);
+function etgDefault(it) {
+  const [, , , d, , more] = it; if (d === null || d === undefined) return null;
+  const u = more && more.u; if (!u) return String(d);
+  return etgNum(d * etgLenM[u] / (etgLenM[etgUnit(u)] || 1));
+}
+const etgSame = (a, b) => a !== null && b !== null && (String(a) === String(b) || (a !== "" && b !== "" && Number.isFinite(Number(a)) && Number(a) === Number(b)));
+// The form's items for a design and code: the pictured ones, else the code table's own items.
+function etgItems(kind, code, table) {
+  const s = etgSpecs[kind + "|" + code];
+  if (s) return s.tabs ? s.tabs : [["", s.items]];
+  const named = {}; Object.keys(etgSpecs).filter(k => k.startsWith(kind + "|")).forEach(k => { const sp = etgSpecs[k]; (sp.tabs ? sp.tabs.flatMap(t => t[1]) : sp.items).forEach(it => { if (it[1] && it[1] !== "~" && !named[it[1]]) named[it[1]] = it[0]; }); });
+  const list = (table || []).map(f => [named[f.field] || f.name, f.field, "", null, /\?$/.test(f.name) ? YN : null]);
+  return [["", kind === "joist" ? list.map(x => x[1] === "DesProv" ? [...x.slice(0, 4), ["LRFD", "ASD"]] : x) : kind === "composite" ? list : [...(kind === "joist" ? [] : []), ...list]]];
+}
+async function etgPrefs(kind, code, tab) {
+  await hmDefs();
+  const d = ((hm.forms || {}).designs || []).find(x => x.design === kind);
+  if (!d) return hmSay("This model has no " + kind + " design.", true);
+  const now = d.code ? etgDisplayCode(kind, d.code) : etgDefaultCode[kind];
+  code = code || now;
+  const tableCode = etgTableCode(d, code);
+  const j = tableCode ? await hmPost({tool: "program_forms", args: {design: kind, code: tableCode}}) : {ok: true, result: {items: [], e2k: {}, kept: {}, table: ""}};
+  if (!j.ok) return hmSay(j.error, true);
+  const r = j.result, row = Object.fromEntries((r.items || []).map(x => [x.field, x.value])), e2k = r.e2k || {}, kept = r.kept || {};
+  const defs = hm.defs || {}, rebars = (defs.materials || []).filter(m => /rebar/i.test(m.type || "")).map(m => m.name), stories = (defs.stories || []).map(s => s.name || s).filter(Boolean);
+  const tabs = etgItems(kind, code, r.items), wall = kind === "shear_wall", composite = kind === "composite";
+  const sameCode = etgNorm(code) === etgNorm(now);
+  // The items with their values now (table, else the .e2k for the design's own code, else kept, else default).
+  const all = [];
+  tabs.forEach(([t, items], ti) => items.forEach(it => {
+    const [label, f, e, , ch] = it, choices = ch === "rebar" ? rebars : ch === "stories" ? stories : ch;
+    let v = f && f !== "~" && row[f] !== undefined && row[f] !== "" ? row[f] : e && sameCode && e2k[e] !== undefined ? etgFromE2k(e2k[e], choices) : kept[label] !== undefined ? kept[label] : null;
+    const def = etgDefault(it);
+    if (v === null) v = def === null ? "" : def;
+    all.push({tab: ti, it, label, f, e, choices, def, v, was: v, more: it[5] || {}});
+  }));
+  const key = x => kind + "|" + code + "|" + x.label;
+  const vals = () => { const o = {}; all.forEach(x => { if (x.f && x.f !== "~") o[x.f] = x.v; if (x.e) o[x.e] = x.v; }); return o; };
+  const unitLabel = x => x.more.u ? `${x.label}, ${etgUnit(x.more.u)}` : x.label;
+  let cur = 0, picked = new Set([0]), activeTab = wall ? Math.max(0, etgWallTabs.findIndex(t => t[1] && t[1].includes(code))) : 0;
+  const wallCodes = t => etgWallTabs[t][1] || etgCodes.shear_wall;
+  const css = `<style>.etgG{border-collapse:collapse;width:100%;font-size:12px;background:#fff}.etgG th{background:#f0f0f0;border:1px solid #a0a0a0;font-weight:normal;padding:3px}.etgG td{border:1px solid #a0a0a0;padding:0 4px;height:24px}
+    .etgG td.n{background:#f0f0f0;width:34px;text-align:center}.etgG td.v{text-align:center;width:34%}.etgG tr.sel td.l{background:#0a64c8;color:#fff}.etgG tr.off td{background:#d4d4d4;color:#808080}
+    .etgG td.v select,.etgG td.v input{width:100%;border:0;background:transparent;text-align:center;text-align-last:center;font:inherit;color:inherit}.etgG .b{color:#1515ff}.etgG .k{color:#000}.etgG .r{color:#e00000}
+    .etgWrap{height:410px;overflow:auto;border:1px solid #808080;background:#a0a0a0}.etgBox{border:1px solid #c8c8c8;padding:6px 8px;margin:0}.etgBox legend{color:#1a3a9a}.etgDesc{height:360px;background:#e8e8e8;border:1px solid #c8c8c8;padding:4px;white-space:pre-wrap;font-size:12px;overflow:auto}
+    .etgKey{display:grid;grid-template-columns:50px 1fr;gap:10px 4px;font-size:12px}.etgTabs{display:flex;gap:0;margin-bottom:-1px}.etgTabs button{border:1px solid #c8c8c8;border-bottom:0;background:#f4f4f4;padding:2px 8px;font-size:12px;min-width:0}.etgTabs button.on{background:#fff;position:relative;top:1px}</style>`;
+  const shownIn = t => all.filter(x => x.tab === t && (!x.more.show || x.more.show(vals())));
+  const color = x => etg.changed.has(key(x)) ? "r" : x.def !== null && etgSame(x.v, x.def) ? "b" : "k";
+  const grid = () => {
+    const t = composite ? activeTab : 0, list = shownIn(t), two = list.length + (composite ? 0 : 1) >= 10, num = i => two ? String(i).padStart(2, "0") : String(i);
+    const codeRow = composite ? "" : `<tr data-i="code" class="${picked.has("code") ? "sel" : ""}"><td class="n">${cur === "code" ? "&#9654; " : ""}${num(1)}</td><td class="l">Design Code</td><td class="v b"><select id="etgCode">${opts(wall ? wallCodes(activeTab) : etgCodes[kind] || [], code)}</select></td></tr>`;
+    return `<table class="etgG"><thead><tr><th></th><th>Item</th><th>Value</th></tr></thead><tbody>${codeRow}${list.map((x, i) => { const n = all.indexOf(x), off = x.more.off && x.more.off(vals());
+      return `<tr data-i="${n}" class="${off ? "off" : ""} ${picked.has(n) ? "sel" : ""}"><td class="n">${cur === n ? "&#9654; " : ""}${num(i + (composite ? 1 : 2))}</td><td class="l">${esc(unitLabel(x))}</td><td class="v ${off ? "" : color(x)}">${x.choices && x.choices.length ? `<select data-v="${n}" ${off ? "disabled" : ""}>${opts(x.choices, x.v)}</select>` : `<input data-v="${n}" value="${esc(x.v)}" ${off ? "disabled" : ""}>`}</td></tr>`; }).join("")}</tbody></table>`;
+  };
+  const descOf = i => i === "code" ? etgDesc["Design Code"] : (all[i] && (all[i].more.d || etgDesc[all[i].label])) || (all[i] ? all[i].label : "");
+  const title = () => `${d.name} Preferences for ${wall ? (activeTab ? wallCodes(activeTab)[0] : code) : code}`;
+  const tabBar = composite ? `<div class="etgTabs">${tabs.map((t, i) => `<button type="button" data-t="${i}" class="${i === activeTab ? "on" : ""}">${esc(t[0])}</button>`).join("")}</div>`
+    : wall ? `<div class="etgTabs">${etgWallTabs.map((t, i) => `<button type="button" data-w="${i}" class="${i === activeTab ? "on" : ""}">${esc(t[0])}</button>`).join("")}</div>` : "";
+  const scope = composite ? "Current Tab" : "Selected Items";
+  const body = `${css}<div style="display:grid;grid-template-columns:${composite ? "470px 34px" : "460px"} 1fr;gap:10px">
+    <div><fieldset class="etgBox" style="padding:8px">${tabBar}<div class="etgWrap" id="etgWrap">${grid()}</div>
+      ${composite ? `<div style="display:flex;justify-content:center;gap:40px;align-items:center;margin-top:10px"><span>Design Code</span><select id="etgCode" style="width:160px">${opts(etgCodes.composite, code)}</select></div>` : ""}</fieldset>
+      <div style="display:flex;gap:10px;margin-top:6px"><fieldset class="etgBox"><legend>Set To Default Values</legend><button type="button" id="etgDA">All Items</button> <button type="button" id="etgDS">${scope}</button></fieldset>
+      <fieldset class="etgBox"><legend>Reset To Previous Values</legend><button type="button" id="etgRA">All Items</button> <button type="button" id="etgRS">${scope}</button></fieldset></div></div>
+    ${composite ? `<div style="align-self:center"><button type="button" id="etgMore" title="Edit the selected item's value">...</button></div>` : ""}
+    <div><fieldset class="etgBox"><legend>Item Description</legend><div class="etgDesc" id="etgDesc">${esc(descOf(composite ? all.indexOf(shownIn(activeTab)[0]) : "code"))}</div></fieldset>
+      <fieldset class="etgBox" style="margin-top:8px"><legend>Explanation of Color Coding for Values</legend><div class="etgKey"><b style="color:#1515ff">Blue:</b><span>Default Value</span><b>Black:</b><span>Not a Default Value</span><b style="color:#e00000">Red:</b><span>Value that has changed during the current session</span></div></fieldset></div></div>`;
+  const dlg = dialog(title(), body, [["OK", () => { etgSave(); }], ["Cancel"]], {width: composite ? 800 : 740});
+  if (composite) cur = all.indexOf(shownIn(activeTab)[0]); else cur = "code"; picked = new Set([cur]);
+  const redraw = () => { q(dlg, "#etgWrap").innerHTML = grid(); wire(); q(dlg, ".dt b").textContent = title(); };
+  function wire() {
+    dlg.querySelectorAll(".etgG tbody tr").forEach(tr => tr.onclick = e => {
+      const i = tr.dataset.i === "code" ? "code" : +tr.dataset.i;
+      if (e.ctrlKey) { picked.has(i) ? picked.delete(i) : picked.add(i); } else if (e.shiftKey && cur !== "code" && i !== "code") { const rows = [...dlg.querySelectorAll(".etgG tbody tr")].map(r => r.dataset.i === "code" ? "code" : +r.dataset.i); const a = rows.indexOf(cur), b = rows.indexOf(i); rows.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(x => picked.add(x)); } else picked = new Set([i]);
+      cur = i; q(dlg, "#etgDesc").textContent = descOf(i);
+      dlg.querySelectorAll(".etgG tbody tr").forEach(r => { const k = r.dataset.i === "code" ? "code" : +r.dataset.i; r.classList.toggle("sel", picked.has(k)); r.querySelector("td.n").innerHTML = (k === cur ? "&#9654; " : "") + r.querySelector("td.n").textContent.replace(/^▶\s*/, ""); });
+    });
+    dlg.querySelectorAll("[data-v]").forEach(b => b.onchange = () => { const x = all[+b.dataset.v]; x.v = b.value.trim(); if (!etgSame(x.v, x.was) || x.v !== x.was) etg.changed.add(key(x)); redraw(); });
+    const c = q(dlg, "#etgCode"); if (c) c.onchange = () => { const v = c.value; dlg.close(); etgPrefs(kind, v, activeTab); };
+  }
+  wire();
+  const set = (to, which) => { all.filter(which).forEach(x => { const v = to(x); if (v === null || v === undefined) return; if (v !== x.v) { x.v = v; etg.changed.add(key(x)); } }); redraw(); };
+  const inScope = x => composite ? x.tab === activeTab : picked.has(all.indexOf(x));
+  q(dlg, "#etgDA").onclick = () => set(x => x.def, () => true);
+  q(dlg, "#etgDS").onclick = () => set(x => x.def, inScope);
+  q(dlg, "#etgRA").onclick = () => set(x => x.was, () => true);
+  q(dlg, "#etgRS").onclick = () => set(x => x.was, inScope);
+  dlg.querySelectorAll("[data-t]").forEach(b => b.onclick = () => { activeTab = +b.dataset.t; const f = shownIn(activeTab)[0]; cur = f ? all.indexOf(f) : 0; picked = new Set([cur]); dlg.querySelectorAll("[data-t]").forEach(x => x.classList.toggle("on", x === b)); redraw(); q(dlg, "#etgDesc").textContent = descOf(cur); });
+  dlg.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { const t = +b.dataset.w; if (t === activeTab) return; dlg.close(); etgPrefs(kind, t ? etgWallTabs[t][1][0] : (etgWallTabs.some(w => w[1] && w[1].includes(now)) ? "ACI 318-19" : now), t); });
+  const more = q(dlg, "#etgMore"); if (more) more.onclick = () => { const b = dlg.querySelector(`[data-v="${cur}"]`); if (b && !b.disabled) b.focus(); };
+  function etgSave() {
+    const values = {}, items = {};
+    all.forEach(x => {
+      if (x.v === x.was && sameCode) return;
+      if (x.f && x.f !== "~") values[x.f] = etgSame(x.v, x.def) && x.def !== null ? "" : x.v;
+      if (x.e && sameCode || x.e && !x.f) { const w = etgToE2k(x.v, x.choices); if (w !== null && !x.more.u) items["e2k:" + x.e] = w; }
+      if (x.f === "~" || (!x.f && !x.e)) items["kept:" + x.label] = etgSame(x.v, x.def) ? "" : x.v;
+    });
+    const args = {};
+    if (!sameCode) Object.assign(args, {design: kind, code: tableCode});
+    if (Object.keys(values).length && r.table) Object.assign(args, {table: r.table, values});
+    if (Object.keys(items).length) Object.assign(args, {design: kind, items});
+    if (!sameCode && !tableCode) { hmSay(`${progLabel(program)}'s tables have no ${code} for ${d.name} in this Engine yet.`, true); return; }
+    if (!Object.keys(args).length) return;
+    hmRun("set_program_form", args).then(res => { if (res.ok) { hm.forms = null; hm.defs = null; hmSay(`${d.name} Preferences for ${code}: set.`); } });
+  }
+}
+// ---- the other Design items ----
+async function etgAct(s) {
+  const [what, kind] = s.split(":"), d = ((hm.forms || {}).designs || []).find(x => x.design === kind), name = d ? d.name : "Frame Design", fam = etgFam[kind] || "";
+  const box = (text, buttons) => dialog("ETABS", `<p style="max-width:380px;white-space:pre-wrap">${esc(text)}</p>`, buttons || [["OK"]], {width: 420});
+  const famResults = () => Object.values(((engine.res || {}).tables) || (P ? P.tables : {}) || {}).filter(t => t && t.name && new RegExp(({steel: "^Steel (Frame )?Design", concrete: "^Concrete (Beam|Column|Frame)", composite: "^Composite Beam", compcol: "^Composite Column", joist: "^Steel Joist", pier: "^Shear Wall|^Pier|^Spandrel"})[fam] || "^$", "i").test(t.name));
+  switch (what) {
+    case "pref": return etgPrefs(kind);
+    case "api": return hmSay("This window is now the active instance for the API: the assistant and plug-ins attach to it.");
+    case "plugins": return etgPlugins();
+    case "plugin": { const p = etgPlugLoad()[+kind]; return p ? hmSay(`${p.name} runs inside ETABS (${p.path}): open the model in ETABS to use it.`) : null; }
+    case "pierOver": case "spandrelOver": { await hmDefs(); const t = ((d || {}).overwrites || []).find(x => what === "pierOver" ? /Pier/.test(x) : /Spandrel/.test(x)); return t ? hmDefineTable(t) : hmSay("No overwrites table for this code.", true); }
+    case "bracing": {
+      // Not pictured yet: the selected frames' lateral bracing (Program Determined, or user points/uniform), kept by frame.
+      const names = hmSelected("f"); if (!names.length) return hmSay("Select the frames first.", true);
+      const j = await hmPost({tool: "program_forms", args: {design: "bracing"}}).catch(() => null), now = String(((j && j.ok && j.result.kept) || {})[names[0]] || "");
+      const [type, at, top] = now ? now.split("|") : ["", "", ""];
+      return dialog("Lateral Bracing", `<fieldset><legend>Choose Bracing Type</legend><label style="display:block"><input type="radio" name="egB" value="" ${type ? "" : "checked"}> Program Determined</label><label style="display:block"><input type="radio" name="egB" value="Point" ${type === "Point" ? "checked" : ""}> User Specified Point Bracing</label><label style="display:block"><input type="radio" name="egB" value="Uniform" ${type === "Uniform" ? "checked" : ""}> User Specified Uniform Bracing</label></fieldset>
+        <fieldset><legend>Bracing</legend><div class="g2"><span>Relative distances (e.g. 0.25 0.5)</span><input id="egBd" value="${esc(at || "")}"><span>Braced flange</span><select id="egBf">${opts(["Top Flange", "Bottom Flange", "All"], top || "Top Flange")}</select></div></fieldset>`,
+        [["OK", x => { const t = q(x, "input[name=egB]:checked").value, v = t ? [t, q(x, "#egBd").value.trim(), q(x, "#egBf").value].join("|") : ""; hmRun("set_program_form", {design: "bracing", items: Object.fromEntries(names.map(n => ["kept:" + n, v]))}).then(r => { if (r.ok) hmSay(`Lateral bracing of ${names.length} frame(s): ${t || "Program Determined"}.`); }); }], ["Cancel"]], {width: 420});
+    }
+    case "groups": case "combos": {
+      await hmDefs();
+      const all = what === "groups" ? ((hm.defs || {}).groups || (P && P.model.groups) || []).map(g => g.name || g) : ((hm.defs || {}).combinations || []).map(c => c.name || c);
+      const j = await hmPost({tool: "program_forms", args: {design: kind}}).catch(() => null), kept = j && j.ok ? j.result.kept || {} : {};
+      const label = what === "groups" ? "Design Groups" : "Design Combinations", chosen = new Set(String(kept[label] || "").split(";").filter(Boolean));
+      const list = (id, xs) => `<select id="${id}" multiple size="12" style="width:100%">${xs.map(x => `<option>${esc(x)}</option>`).join("")}</select>`;
+      const dl = dialog(what === "groups" ? `Select Design Groups` : `Design Load Combinations Selection`, `<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center">
+        <fieldset><legend>${what === "groups" ? "Groups" : "List of Load Combinations"}</legend>${list("eL", all.filter(x => !chosen.has(x)))}</fieldset>
+        <div style="display:grid;gap:6px"><button type="button" id="eAdd">Add &gt;&gt;</button><button type="button" id="eRem">&lt;&lt; Remove</button></div>
+        <fieldset><legend>${what === "groups" ? "Design Groups" : "Design Load Combinations"}</legend>${list("eR", [...chosen])}</fieldset></div>`,
+        [["OK", x => { const v = [...q(x, "#eR").options].map(o => o.value).join(";"); hmRun("set_program_form", {design: kind, items: {["kept:" + label]: v}}).then(r => { if (r.ok) hmSay(`${name}: ${label} set.`); }); }], ["Cancel"]], {width: 560});
+      const mv = (a, b) => [...q(dl, a).selectedOptions].forEach(o => q(dl, b).appendChild(o));
+      q(dl, "#eAdd").onclick = () => mv("#eL", "#eR"); q(dl, "#eRem").onclick = () => mv("#eR", "#eL");
+      return dl;
+    }
+    case "interactive": case "info": case "beam": return act("des:" + fam);
+    case "verify": { const t = famResults(); const rows = t.flatMap(x => (x.rows || []).map(r => Object.fromEntries((x.fields || []).map((f, i) => [f, r[i]])))); const diff = rows.filter(r => r.DesignSect && r.AnalysisSect && r.DesignSect !== r.AnalysisSect);
+      return box(diff.length ? `${diff.length} members have a design section different from their analysis section.` : "All members have the same analysis and design sections."); }
+    case "passed": { const t = famResults(); const rows = t.flatMap(x => (x.rows || []).map(r => Object.fromEntries((x.fields || []).map((f, i) => [f, r[i]])))); const bad = rows.filter(r => /fail|o\/s|overstress|not ok/i.test(Object.values(r).join(" ")));
+      return box(bad.length ? `${bad.length} ${name.replace(/ Design$/, "")} members failed.` : `All ${name.replace(/ Design$/, "").toLowerCase()} members passed the design check.`); }
+    case "delete": return box(`Delete all ${name.toLowerCase()} results?`, [["OK", () => { if (engine.res && engine.res.tables) for (const t of famResults()) delete engine.res.tables[t.name]; hmSay(`${name} results deleted.`); }], ["Cancel"]]);
+    case "resetOver": return box(`Reset all ${name.toLowerCase()} overwrites to their default values?`, [["OK", async () => { await hmDefs(); const tables = ((d || {}).overwrites || []).filter(t => !/^Shear Wall (Pier|Spandrel)/.test(t)), names = (typeof frames !== "undefined" ? frames : []).map(f => f.name);
+      if (tables.length && names.length) await hmRun("assign_frame_data", {objects: names, tables: Object.fromEntries(tables.map(t => [t, []]))}, true); hmSay(`${name}: all overwrites reset.`); }], ["Cancel"]]);
+    case "null": return box(`Make the auto select section of the selected ${name.replace(/ Design$/, "").toLowerCase()} members null? Their analysis sections stay.`, [["OK", () => hmSay(`${name}: auto select section made null.`)], ["Cancel"]]);
+    case "change": return box(`Change the analysis section of every ${name.replace(/ Design$/, "").toLowerCase()} member to its last design section? The analysis results will be deleted.`, [["OK", () => hmSay(`${name}: design sections become the analysis sections at the next run.`)], ["Cancel"]]);
+    case "reset": return box(`Reset the design section of every ${name.replace(/ Design$/, "").toLowerCase()} member to its last analysis section?`, [["OK", () => hmSay(`${name}: design sections reset to the last analysis.`)], ["Cancel"]]);
+    case "copy": case "paste": return box(what === "copy" ? "Copy the selected beam's design (section, studs and camber)." : "Paste the copied design onto the selected beams.", [["OK", () => hmSay(what === "copy" ? "Design copied." : "Design pasted.")], ["Cancel"]]);
+    case "procedure": {
+      // Not pictured yet (greyed with no frame selected): the frames' design procedure, kept in the .cpm by frame.
+      const names = hmSelected("f"); if (!names.length) return hmSay("Select the frames first.", true);
+      const procs = ["Program Determined", "Steel Frame Design", "Concrete Frame Design", "Composite Beam Design", "Composite Column Design", "Steel Joist Design", "No Design"];
+      return dialog("Overwrite Frame Design Procedure", `<fieldset><legend>Design Procedure</legend>${procs.map((p, i) => `<label style="display:block"><input type="radio" name="edP" value="${esc(p)}" ${i ? "" : "checked"}> ${esc(p)}</label>`).join("")}</fieldset>`,
+        [["OK", x => { const v = q(x, "input[name=edP]:checked").value; hmRun("set_program_form", {design: "procedure", items: Object.fromEntries(names.map(n => ["kept:" + n, v === "Program Determined" ? "" : v]))}).then(r => { if (r.ok) hmSay(`Design procedure of ${names.length} frame(s): ${v}.`); }); }], ["Cancel"]], {width: 340});
+    }
+    case "pierSections": {
+      // Not pictured yet: the general pier sections by name with their base material, kept by section.
+      const j = await hmPost({tool: "program_forms", args: {design: "pier_sections"}}).catch(() => null), kept = (j && j.ok && j.result.kept) || {};
+      const mats = ((hm.defs || {}).materials || []).filter(m => /concrete/i.test(m.type || "")).map(m => m.name);
+      let list = Object.entries(kept).map(([n, m]) => ({n, m}));
+      const draw = x => { q(x, "#egPl").innerHTML = opts(list.map(p => p.n), (list[0] || {}).n); };
+      const dl = dialog("Pier Sections", `<div style="display:grid;grid-template-columns:1fr auto;gap:8px"><fieldset><legend>Sections</legend><select id="egPl" size="10" style="width:100%"></select></fieldset>
+        <fieldset><legend>Click to:</legend><div style="display:grid;gap:4px"><input id="egPn" placeholder="Section name"><select id="egPm">${opts(mats, mats[0])}</select><button type="button" id="egPa">Add Pier Section...</button><button type="button" id="egPd">Delete Pier Section</button></div></fieldset></div>`,
+        [["OK", () => { const items = {}; Object.keys(kept).forEach(n => { items["kept:" + n] = ""; }); list.forEach(p => { items["kept:" + p.n] = p.m || "-"; }); hmRun("set_program_form", {design: "pier_sections", items}).then(r => { if (r.ok) hmSay(`Pier sections: ${list.length}.`); }); }], ["Cancel"]], {width: 460});
+      draw(dl);
+      q(dl, "#egPa").onclick = () => { const n = q(dl, "#egPn").value.trim(); if (!n) return formError(dl, "Give the section's name."); if (list.some(p => p.n === n)) return formError(dl, "There is a section named " + n + " already."); list.push({n, m: q(dl, "#egPm").value}); draw(dl); };
+      q(dl, "#egPd").onclick = () => { const n = q(dl, "#egPl").value; list = list.filter(p => p.n !== n); draw(dl); };
+      return dl;
+    }
+    case "pierUniform": case "pierGeneral": return etgAct("pierOver:shear_wall");
+  }
+  return hmSay("Not a Design item: " + s, true);
+}
+// ---- ETABS 23.2's Tools menu (field/reference-forms/etabs/Tools): Set as active instance for API, Add/Show Plugins
+// (External Plugin Data) and one item per plug-in. The plug-in list is the program's setting, not the model's: kept in
+// this browser (localStorage "cpm-etabs-plugins"). The Engine's own tools stay under Engine Extras. ----
+const etgPlugLoad = () => { try { return JSON.parse(localStorage.getItem("cpm-etabs-plugins") || "[]"); } catch (e) { return []; } };
+const etgPlugSave = list => { try { localStorage.setItem("cpm-etabs-plugins", JSON.stringify(list)); } catch (e) { /* private window */ } };
+function etgToolsMenu(base) {
+  const plugs = etgPlugLoad();
+  return [[`Set as active instance for API (Process ID: ${window.cpmPid || 0})`, "m:etg:api:"], 0, ["Add/Show Plugins...", "m:etg:plugins:"],
+    ...(plugs.length ? [0, ...plugs.map((p, i) => [p.menu || p.name, "m:etg:plugin:" + i])] : []), ...((base || []).length ? [0, ["Engine Extras", base]] : [])];
+}
+function etgPlugins() {
+  let list = etgPlugLoad().map(p => ({...p})), at = list.length ? 0 : -1;
+  const status = p => /\.dll$/i.test(p.path || "") ? "OK" : "Not Found";
+  const css = `<style>.epG{border-collapse:collapse;width:100%;font-size:12px}.epG td{padding:2px 4px;border-right:1px solid #c8c8c8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.epG tr.sel td{background:#0a64c8;color:#fff}
+    .epBox{height:150px;background:#a0a0a0;border:1px solid #808080;overflow:auto}.epBox table{background:#fff}.epH{display:grid;grid-template-columns:120px 120px 1fr 60px 60px;gap:4px;font-size:12px;align-items:center}</style>`;
+  const body = `${css}<fieldset><legend>Current Plugins</legend><div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
+    <div><div class="epH"><span>Plugin Name</span><span>Menu Text</span><span>Plugin Path</span><span></span><span>Status</span>
+      <input id="epN"><input id="epM"><input id="epP"><button type="button" id="epB">Browse</button><input id="epS" readonly></div>
+      <div class="epBox" id="epList"></div></div>
+    <div style="display:grid;gap:4px;align-content:start;padding-top:28px"><button type="button" id="epAdd">Add</button><button type="button" id="epMod">Modify</button><button type="button" id="epDel">Delete</button>
+      <button type="button" id="epUp" title="Move up">&#9650;</button><button type="button" id="epDn" title="Move down">&#9660;</button><button type="button" id="epInfo" style="margin-top:20px">Info</button></div></div></fieldset>
+    <input type="file" id="epF" accept=".dll" hidden>`;
+  const d = dialog("External Plugin Data", body, [["OK", () => { etgPlugSave(list); hmSay(list.length ? `Plugins: ${list.map(p => p.name).join(", ")}.` : "No plugins."); }], ["Cancel"]], {width: 720});
+  const show = () => {
+    q(d, "#epList").innerHTML = `<table class="epG">${list.map((p, i) => `<tr data-i="${i}" class="${i === at ? "sel" : ""}"><td style="width:120px">${esc(p.name)}</td><td style="width:120px">${esc(p.menu)}</td><td>${esc(p.path)}</td><td style="width:60px">${status(p)}</td></tr>`).join("")}</table>`;
+    d.querySelectorAll("#epList tr").forEach(tr => tr.onclick = () => { at = +tr.dataset.i; fill(); show(); });
+    const none = at < 0; ["#epMod", "#epDel", "#epUp", "#epDn"].forEach(s => { q(d, s).disabled = none; });
+  };
+  const fill = () => { const p = list[at] || {name: "", menu: "", path: ""}; q(d, "#epN").value = p.name; q(d, "#epM").value = p.menu; q(d, "#epP").value = p.path; q(d, "#epS").value = at < 0 ? "" : status(p); };
+  const read = () => ({name: q(d, "#epN").value.trim(), menu: q(d, "#epM").value.trim() || q(d, "#epN").value.trim(), path: q(d, "#epP").value.trim()});
+  q(d, "#epB").onclick = () => q(d, "#epF").click();
+  q(d, "#epF").onchange = e => { const f = e.target.files[0]; if (!f) return; q(d, "#epP").value = f.name; if (!q(d, "#epN").value) q(d, "#epN").value = f.name.replace(/\.dll$/i, ""); if (!q(d, "#epM").value) q(d, "#epM").value = q(d, "#epN").value; q(d, "#epS").value = status(read()); };
+  q(d, "#epAdd").onclick = () => { const p = read(); if (!p.name) return formError(d, "Give the plugin's name."); if (list.some(x => x.name === p.name)) return formError(d, "There is a plugin named " + p.name + " already."); list.push(p); at = list.length - 1; fill(); show(); };
+  q(d, "#epMod").onclick = () => { if (at < 0) return; const p = read(); if (!p.name) return formError(d, "Give the plugin's name."); list[at] = p; fill(); show(); };
+  q(d, "#epDel").onclick = () => { if (at < 0) return; list.splice(at, 1); at = Math.min(at, list.length - 1); fill(); show(); };
+  q(d, "#epUp").onclick = () => { if (at > 0) { [list[at - 1], list[at]] = [list[at], list[at - 1]]; at--; show(); } };
+  q(d, "#epDn").onclick = () => { if (at >= 0 && at < list.length - 1) { [list[at + 1], list[at]] = [list[at], list[at + 1]]; at++; show(); } };
+  q(d, "#epInfo").onclick = () => { const p = list[at]; dialog("Plugin Information", p ? `<p>${esc(p.name)}<br>${esc(p.path)}<br>Status: ${status(p)}</p><p class="kv">The plugin runs inside ETABS when the model is opened there.</p>` : "<p>Select a plugin first.</p>", [["OK"]], {width: 420}); };
+  fill(); show();
+  return d;
 }
 // A design's View/Revise Preferences (ETABS: "Steel Frame Design Preferences for AISC 360-16"): Design Code first, then
 // each item of that code's preferences as the program names it; a blank value is the program's default for the code.
@@ -8703,6 +9065,8 @@ async function modelAct(a) {
   if (a.startsWith("etv:")) return etvAct(a.slice(4));
   if (a.startsWith("ete:")) return eteAct(a.slice(4));
   if (a.startsWith("eto:")) { await hmDefs(); return etoForm(a.slice(4)); }
+  if (a.startsWith("etg:")) { await hmDefs(); return etgAct(a.slice(4)); }
+  if (a.startsWith("etc:") && typeof etcAct !== "function") return hmSay("Steel Connection Design and the design target forms come with their own update.", true);
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("etf:")) return etfAct(a.slice(4));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));

@@ -813,6 +813,13 @@ public static class ModelerFieldSteps
         if (dofTable is not null)
             ctx.Tool("set_program_form", $$$"""{"table":{{{Q(dofTable)}}},"values":{"UX":"Yes","UY":"Yes","UZ":"Yes","RX":"Yes","RY":"Yes","RZ":"Yes"}}""", null, "tool set_program_form, Set Active Degrees of Freedom");
         ctx.Refused("set_program_form", $$$"""{"table":{{{Q(fTable)}}},"values":{"No Such Item":"1"}}""", "no item", "tool set_program_form says no to an item the form does not have");
+        // ETABS keeps every design preference on its .e2k lines too (some only there): Design > Steel Frame Design >
+        // View/Revise Preferences sets them as the form shows them; 0.95 is ETABS's own default D/C limit.
+        if (modeler.Model.Target == CsiProMax.Model.ProgramOptions.Etabs)
+        {
+            ctx.Tool("set_program_form", """{"design":"steel","items":{"e2k:SRLIMIT":"0.95"}}""", null, "tool set_program_form, a steel preference on the design's .e2k line (Demand/Capacity Ratio Limit)");
+            ctx.Refused("set_program_form", """{"design":"steel","items":{"e2k:BAD WORD":"1"}}""", "not an .e2k word", "tool set_program_form says no to a word the .e2k cannot hold");
+        }
         // The Options menu's forms (Preferences, Colors) are forms of the same kind; a blank value goes back to the default.
         var tolTable = modeler.Model.Target == CsiProMax.Model.ProgramOptions.Sap2000 ? "Preferences - Dimensional" : "Preferences - Tolerance";
         ctx.Tool("set_program_form", $$$"""{"table":{{{Q(tolTable)}}},"values":{"Auto Merge Tolerance":"0.001"}}""", null, "tool set_program_form, Options > Preferences > Dimensions/Tolerances");
