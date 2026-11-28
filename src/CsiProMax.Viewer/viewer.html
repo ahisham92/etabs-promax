@@ -112,6 +112,9 @@ main{flex:1;display:flex;min-height:0}
 .pane.act .ptitle{background:var(--vcap);color:var(--vcap-ink)}
 .pane.act .ptitle .x{color:var(--vcap-ink)}
 .pane .hold{flex:1;position:relative;min-height:0}
+.pane .hold .draft{position:absolute;left:8px;bottom:8px;z-index:4;display:flex;align-items:center;gap:6px;padding:3px 6px;background:var(--form);border:1px solid var(--formline);box-shadow:0 2px 8px rgba(0,0,0,.3);font-size:12px}
+.pane .hold .draft[hidden]{display:none}
+.pane .hold .draft input{width:140px}
 /* The program's docked windows: a grey caption with the window's name on a tab, then the drop-down and close buttons.
    Their greys are the theme's (--cap...), so the dark theme darkens them too. */
 :root{--cap:#d8d8d8;--capline:#a0a0a0;--captab:#e9e9e9;--captabon:#fff;--capink:#000}
@@ -28311,7 +28314,7 @@ function snapOptionsForm() {
       <span>Plan Nudge Value (${esc(ul)})</span><input id="snNudge" type="number" step="any" value="${lenOf(o.nudgeM)}">
       <span>Screen Selection Tolerance (pixels)</span><input id="snSel" type="number" min="1" step="1" value="${o.selTol}">
       <span>Screen Snap To Tolerance (pixels)</span><input id="snTol" type="number" min="1" step="1" value="${o.snapTol}"></div>
-      ${cb("scale", "Drawing Scale", true)}${cb("follow", "Move Draft Helper Controls with Mouse", true)}</fieldset>`,
+      ${cb("scale", "Drawing Scale", true)}${cb("follow", "Move Draft Helper Controls with Mouse")}</fieldset>`,
     [["Apply", t => { applySnap(t); return false; }, true], ["Close"]], {width: 520, float: true});
   q(d, "#snAll").onclick = () => d.querySelectorAll("[data-s]:not([disabled])").forEach(x => { if (!x.dataset.s.startsWith("inc")) x.checked = true; });
   q(d, "#snNone").onclick = () => d.querySelectorAll("[data-s]:not([disabled])").forEach(x => { if (!x.dataset.s.startsWith("inc")) x.checked = false; });
@@ -28391,6 +28394,50 @@ function ctlKey(k) {
     }
   }
   ctlSet(k === " " ? "" : k);
+}
+// ---- The draft helper: ETABS's "L,theta edit box" (Snap Options' Move Draft Helper Controls with Mouse) ----
+// While a line is drawn in a plan, a box at the view's lower left corner (by the pointer, with that option) shows the
+// length and angle from the last point to the pointer. Typing a number starts an entry in it: "L, θ" (θ in degrees
+// from global X, counterclockwise; L alone keeps the angle shown), and Enter places the next point exactly there; Esc
+// goes back to following the pointer. ETABS's help names the box and where it stands; how it is typed into is ours.
+const draftKinds = ["beam", "wall", "brace", "floor", "reshape"];
+const draftOn = () => ctlOn() && draftKinds.includes(drawKind()) && hm.chain.length > 0 && !!panes[active] && panes[active].mode === "plan";
+function draftEl(p) {
+  if (p.draft && p.draft.isConnected) return p.draft;
+  const d = p.hold.ownerDocument.createElement("div"), inp = p.hold.ownerDocument.createElement("input");
+  d.className = "draft"; d.innerHTML = "<span>L, θ</span>"; inp.spellcheck = false; d.appendChild(inp); p.hold.appendChild(d); p.draft = d;
+  inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); draftCommit(p, inp.value); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); inp.blur(); }
+  });
+  inp.addEventListener("input", () => d.classList.add("typing"));
+  inp.addEventListener("blur", () => { d.classList.remove("typing"); draftShow(p); });
+  return d;
+}
+function draftShow(p, x, y) {
+  for (const o of panes) if (o.draft && (o !== p || !draftOn())) o.draft.hidden = true;
+  if (!p || !draftOn()) return;
+  const d = draftEl(p), inp = q(d, "input"); d.hidden = false;
+  if (snapOpt.follow && x !== undefined) { d.style.left = (x + 18) + "px"; d.style.top = (y + 18) + "px"; d.style.bottom = "auto"; }
+  else if (!snapOpt.follow) d.style.left = d.style.top = d.style.bottom = "";
+  const last = hm.chain[hm.chain.length - 1], h = hm.hover && hm.hover.snap;
+  if (d.classList.contains("typing") || !h) return;
+  const dx = h.q[0] - last[0], dy = h.q[1] - last[1];
+  inp.value = `${num(Math.hypot(dx, dy))}, ${num(Math.atan2(dy, dx) * 180 / Math.PI)}`;
+}
+function draftType(k) {
+  const p = panes[active], d = draftEl(p), inp = q(d, "input");
+  draftShow(p); d.classList.add("typing"); inp.value = k; inp.focus(); inp.setSelectionRange(1, 1);
+}
+async function draftCommit(p, text) {
+  const m = /^\s*(-?\d*\.?\d+)\s*(?:[,<]\s*(-?\d*\.?\d+)\s*)?$/.exec(text), last = hm.chain[hm.chain.length - 1], h = hm.hover && hm.hover.snap;
+  if (!m || !last) return hmSay("Type the length, a comma and the angle in degrees from global X, as 5000, 30; then Enter.", true);
+  const L = +m[1], th = m[2] !== undefined ? +m[2] * Math.PI / 180 : h ? Math.atan2(h.q[1] - last[1], h.q[0] - last[0]) : 0;
+  if (!(L > 0)) return hmSay("The length must be more than 0.", true);
+  drawCtl.typed = [last[0] + L * Math.cos(th), last[1] + L * Math.sin(th)].map(v => Math.round(v * 1000) / 1000);
+  q(p.draft, "input").blur();
+  try { await drawClick(p, 0, 0, false); } finally { drawCtl.typed = null; }
+  draftShow(p);
 }
 function spanAt(p, x, y) {
   // The grid line span under the pointer: from one crossing to the next.
@@ -28486,6 +28533,7 @@ async function drawSection(kind) {
   return {list, now: hm.sec[kind]};
 }
 async function showObjBox() {
+  draftShow(panes[active]); // the draft helper goes with the line being drawn
   const box = $("pobj"); if (!box) return;
   if (tool !== hm.pobjTool) { hm.pobjTool = tool; hm.pobjShut = false; } // a draw command started again shows the box again
   if (!window.cpmLive || !drawing() || hm.pobjShut) { box.hidden = true; return; }
@@ -28531,16 +28579,16 @@ async function drawClick(p, x, y, dbl) {
   if (p.mode === "3d" && program === "etabs" || elevDraws(p)) return draw3dClick(p, x, y, dbl);
   if (p.mode !== "plan") { hmSay(drawHint(), true); return; }
   const k = drawKind(), kind = drawKinds[k], sec = (await drawSection(kind)).now, st = drawStories(p);
-  if (hm.snapOnly && etnOn() && !["qbeam", "qwall", "qfloor", "qsec", "reshape"].includes(k) && !snapAt(p, x, y).what) return hmSay("Draw Using Snap Only is on: click a grid crossing, a joint or a grid line.", true);
+  if (!drawCtl.typed && hm.snapOnly && etnOn() && !["qbeam", "qwall", "qfloor", "qsec", "reshape"].includes(k) && !snapAt(p, x, y).what) return hmSay("Draw Using Snap Only is on: click a grid crossing, a joint or a grid line.", true);
   if (k === "joint") return hmRun("add_joints", {points: [snapAt(p, x, y).q], stories: st});
   if (k === "reshape") {
     // Draw > Reshape Object: an end or corner of an object on this story, then where it goes.
     if (!hm.reshape) { const r = reshapeAt(p, x, y); if (!r) return hmSay("Click on the end of a frame or the corner of a floor or wall in this plan.", true); hm.reshape = r; hm.chain = [r.from]; draw(); $("hint").textContent = hintText(); return; }
-    const r = hm.reshape, to = ctlPoint(snapAt(p, x, y)).q; hm.reshape = null; hm.chain = []; drawCtl.k = ""; ctlShow();
+    const r = hm.reshape, to = drawCtl.typed || ctlPoint(snapAt(p, x, y)).q; hm.reshape = null; hm.chain = []; drawCtl.k = ""; ctlShow();
     return hmRun("reshape_object", {object: r.name, from: r.from, to});
   }
   if (!sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
-  const s = ctlPoint(snapAt(p, x, y)); if (drawCtl.k && hm.chain.length) { drawCtl.k = ""; ctlShow(); } // a drawing constraint ends with the point it placed
+  const s = drawCtl.typed ? {q: drawCtl.typed, what: "typed"} : ctlPoint(snapAt(p, x, y)); if (drawCtl.k && hm.chain.length) { drawCtl.k = ""; ctlShow(); } // a drawing constraint ends with the point it placed
   if (k === "column") return hmRun("add_columns", {points: [s.q], stories: st, section: sec});
   if (k === "qbeam" || k === "qwall") { const sp = spanAt(p, x, y); if (!sp) return hmSay("Click on a grid line, between two crossing grid lines.", true); return hmRun(k === "qbeam" ? "add_beams" : "add_walls", {lines: [sp], stories: st, section: sec}); }
   if (k === "qsec") {
@@ -28640,7 +28688,7 @@ function drawMove(p, x, y) {
   if (p.mode !== "plan") { hm.hover = null; return; }
   const k = drawKind(); drawCtl.at = {p, x, y};
   hm.hover = k === "qfloor" || k === "qsec" ? {bay: bayAt(p, x, y)} : k === "reshape" && !hm.chain.length ? (() => { const r = reshapeAt(p, x, y); return r ? {snap: {q: r.from, what: "reshape " + r.name.replace(/@.*$/, "")}} : null; })() : k === "qbeam" || k === "qwall" ? {span: spanAt(p, x, y)} : {snap: ctlPoint(snapAt(p, x, y))};
-  draw();
+  draftShow(p, x, y); draw();
 }
 // ---- drawing in the 3-D view, and work planes (an ETABS model) ----
 // In the 3-D view, members are drawn by their points at story levels: grid crossings at every level, and joints.
@@ -29007,7 +29055,7 @@ function modelerStart() {
   document.addEventListener("keydown", e => {
     if (e.target.closest && e.target.closest("input, textarea, select") || document.querySelector(".veil")) return;
     const k = e.key, ctrl = e.ctrlKey || e.metaKey;
-    if (k === "Escape" && hm.chain.length) { e.stopImmediatePropagation(); hm.chain = []; hm.reshape = null; drawCtl.k = ""; ctlShow(); draw(); return; }
+    if (k === "Escape" && hm.chain.length) { e.stopImmediatePropagation(); hm.chain = []; hm.reshape = null; drawCtl.k = ""; ctlShow(); draftShow(panes[active]); draw(); return; }
     if (ctrl && k.toLowerCase() === "z") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("undo"); }
     else if (ctrl && k.toLowerCase() === "y") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("redo"); }
     // ETABS's File shortcuts: Shift+Ctrl+S Save As, Shift+Ctrl+E Close, Ctrl+P Print Graphics.
@@ -29021,6 +29069,8 @@ function modelerStart() {
     else if (ctrl && !e.shiftKey && /^Arrow(Left|Right|Up|Down)$/.test(k) && sel.size && panes[active] && panes[active].mode === "plan") { e.preventDefault(); e.stopImmediatePropagation(); nudge(k); }
     // ETABS's drawing constraints while a line is drawn in a plan: X, Y, D, A, L, S, and the space bar for none.
     else if (!ctrl && !e.altKey && k.length === 1 && "xydals ".includes(k.toLowerCase()) && ctlOn() && panes[active] && panes[active].mode === "plan") { e.preventDefault(); e.stopImmediatePropagation(); ctlKey(k.toLowerCase()); }
+    // A number typed while a line is drawn goes into the draft helper's L, θ box.
+    else if (!ctrl && !e.altKey && /^[0-9.\-]$/.test(k) && draftOn()) { e.preventDefault(); e.stopImmediatePropagation(); draftType(k); }
   }, true);
   hmDefs().then(() => { if (hm.state && hm.state.choose_program) hmChooseProgram(); });
   setInterval(hmPendingOpen, 1000);
