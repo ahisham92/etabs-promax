@@ -778,9 +778,10 @@ async function engineMonitor(ask, what, prog) {
     q(d, "#rmSteps").innerHTML = (mon.steps || []).map(s => `<div class="rs ${esc(s.state)}"><span class="ri">${runIcons[s.state] || ""}</span><span class="rn">${esc(s.name)}</span><span class="rt">${s.seconds ? runTime(s.seconds) : ""}</span>${s.detail ? `<div class="rd">${esc(s.detail)}</div>` : ""}</div>`).join("");
     const w = q(d, "#rmWait"); w.hidden = !mon.waiting; w.textContent = mon.waiting || "";
     q(d, "#rmHeard").textContent = st.running ? (mon.last_heard >= 5 ? `Last heard from ${prog} ${runTime(mon.last_heard)} ago` : `${prog} is working`) : "";
-    const log = q(d, "#rmLog"), lines = tab === "log" ? (mon.log || []) : (st.lines || []);
+    const said = (mon.screen || []).length >= (mon.log || []).length ? (mon.screen || []) : (mon.log || []);
+    const log = q(d, "#rmLog"), lines = tab === "log" ? (said.length ? said : (st.lines || []).map(t => "» " + t)) : (st.lines || []).concat(mon.windows && st.running ? [`${prog} shows: ${mon.windows}`] : []);
     log.innerHTML = lines.length ? lines.map(l => `<div class="${/error|unstable|ill-condition|abort|terminat/i.test(l) ? "bad" : /warning|accuracy|negative/i.test(l) ? "warn" : ""}">${esc(l)}</div>`).join("")
-      : `<div class="kv">${tab === "log" ? `${esc(prog)}'s analysis log appears here while it runs${mon.log_file ? " (" + esc(mon.log_file) + ")" : ""}.` : "Nothing yet."}</div>`;
+      : `<div class="kv">${tab === "log" ? `${esc(mon.program || "The program")}'s analysis messages appear here as it writes them${mon.log_file ? " (" + esc(mon.log_file) + ")" : ""}. Meanwhile, Run messages says what the run is doing.` : "Nothing yet."}</div>`;
     if (follow) log.scrollTop = 1e9;
     const c = btn("Cancel"); if (c) c.disabled = !st.running;
     const s = btn("Show program window"); if (s) s.disabled = !st.running;
@@ -7950,29 +7951,63 @@ async function etnMerge(file) {
     hmSay(added ? `Merged ${added} result rows of ${file.name} into ${tables} tables.` : `${file.name} has no load cases these results do not have already.`, !added);
   } catch (ex) { hmSay("That file could not be read: " + ex.message, true); }
 }
+// What the run window's message box shows, as ETABS's own run window does: the lines of the program's run window as it
+// shows them, else its analysis log; before the program writes anything, the Engine's own steps (grey), so the box is
+// never empty while something happens (Ahmed 2026-11-28). The same for ETABS, SAP2000 and SAFE.
+function runLines(st, done) {
+  st = st || {}; const mon = st.monitor || {};
+  const prog = (mon.screen || []).length >= (mon.log || []).length ? (mon.screen || []) : (mon.log || []);
+  const own = (st.lines || []).map(t => ({text: "» " + t, engine: true}));
+  if (prog.length) return own.concat([{text: ""}], prog.map(t => ({text: t})));
+  const more = [];
+  if (!done) {
+    const step = (mon.steps || []).find(s => s.state === "running");
+    if (step && step.key === "analysis") more.push({text: `» ${mon.program || "The program"} is preparing the analysis; its messages appear here as soon as it writes them${mon.log_file ? " (" + mon.log_file + ")" : ""}.`, engine: true});
+    if (mon.windows) more.push({text: `» ${mon.program || "The program"} shows: ${mon.windows}`, engine: true});
+  }
+  return own.concat(more);
+}
+function runHeard(mon) {
+  const p = mon.program || "The program";
+  return mon.last_heard >= 5 ? `Last heard from ${p} ${runTime(mon.last_heard)} ago.` : `${p} is working.`;
+}
 // The run window as ETABS 23.2 shows it while analysing, and after (Analysis Complete / Analysis Incomplete).
 function etnRunWindow(run, asLog) {
   if (!run) return hmSay("No analysis has run in this session.", true);
   const st = run.st || {}, mon = st.monitor || {}, done = !st.running;
   const pct = Math.round((st.running ? runProgress(mon) : 1) * 100);
   const ok = done && !st.error && !mon.cancelled;
-  const title = !done ? `Analyzing (${String(pct).padStart(3, " ")}%)${mon.case ? `: Case ${mon.case_count ? `(${String(Math.round(100 * (mon.case_number || 0) / mon.case_count)).padStart(3, " ")}%) ` : ""}${mon.case}` : ""}` : ok ? "Analysis Complete" : "Analysis Incomplete";
+  // While it runs, the title is the program's own (ETABS's "Analyzing ( 95%): Case ( 51%) MODAL") once its run window is up.
+  const title = !done ? (/^Analyzing/i.test(mon.screen_title || "") ? mon.screen_title : `Analyzing (${String(pct).padStart(3, " ")}%)${mon.case ? `: Case ${mon.case_count ? `(${String(Math.round(100 * (mon.case_number || 0) / mon.case_count)).padStart(3, " ")}%) ` : ""}${mon.case}` : ""}`) : ok ? "Analysis Complete" : "Analysis Incomplete";
   const status = !done ? "Analyzing" : ok ? "Done - Analysis Complete" : "Done - Analysis Incomplete";
-  const file = (mon.model_file || run.file || "").replace(/\.[^.\\/]*$/, "") + " (.EDB)";
+  // File Name is the engineer's own model; the program runs a working copy of it in the run folder, named so its window
+  // is told apart from any ETABS of the engineer's (Ahmed 2026-11-28: "this should be another file").
+  const own = mon.source_file || run.file || "", copy = mon.model_file || "";
+  const file = own || copy.replace(/\.[^.\\/]*$/, "") + " (.EDB)";
   const head = `<div class="etnRh"><div class="g2" style="grid-template-columns:auto 1fr auto 1fr;gap:4px 12px;flex:1">
       <span>File Name:</span><span style="grid-column:2/5">${esc(file)}</span>
+      ${own && copy ? `<span>Runs as:</span><span class="kv" style="grid-column:2/5">${esc(copy)} (a working copy; your file is not changed)</span>` : ""}
       <span>Start Time:</span><span>${esc(etnStamp(run.started))}</span><span>Elapsed Time:</span><span id="etnEl">${etnClock(mon.elapsed)}</span>
       <span>Finish Time:</span><span>${esc(done ? etnStamp(run.finished) : "Not Applicable")}</span><span>Run Status:</span><span>${esc(status)}</span></div>
       ${done ? "" : `<button id="etnCancel" style="align-self:center;min-width:90px">Cancel Run</button>`}</div>
     <div class="itabs" style="margin-top:8px"><button class="on">Run 1</button></div>
-    <div class="pgwrap" id="etnLog" style="height:300px;font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre;color:#1a3a8a;background:#fff">${(mon.log || []).map(l => esc(l)).join("\n")}</div>
-    ${(mon.steps || []).length ? `<details style="margin-top:6px"><summary class="kv">Engine steps</summary><div class="rmSteps">${mon.steps.map(s => `<div class="rs ${esc(s.state)}"><span class="ri">${runIcons[s.state] || ""}</span><span class="rn">${esc(s.name)}</span><span class="rt">${s.seconds ? runTime(s.seconds) : ""}</span></div>`).join("")}</div></details>` : ""}`;
+    ${mon.waiting && !done ? `<div class="rmWait" style="margin-top:6px">${esc(mon.waiting)}</div>` : ""}
+    <div class="pgwrap" id="etnLog" style="height:300px;font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre;color:#1a3a8a;background:#fff">${runLines(run.st, done).map(l => l.engine ? `<span style="color:#666">${esc(l.text)}</span>` : esc(l.text)).join("\n")}</div>
+    ${!done ? `<div class="kv" style="margin-top:4px">${esc(runHeard(mon))}</div>` : ""}
+    ${(mon.steps || []).length ? `<details id="etnSteps" style="margin-top:6px" ${run.stepsOpen !== false ? "open" : ""}><summary class="kv">Engine steps</summary><div class="rmSteps">${mon.steps.map(s => `<div class="rs ${esc(s.state)}"><span class="ri">${runIcons[s.state] || ""}</span><span class="rn">${esc(s.name)}</span><span class="rt">${s.seconds ? runTime(s.seconds) : ""}</span>${s.detail ? `<div class="rd">${esc(s.detail)}</div>` : ""}</div>`).join("")}</div></details>` : ""}`;
   let d = run.win && run.win.isConnected && !asLog ? run.win : null;
   if (!d) {
     d = dialog(title, head, done ? [["Show Analysis Messages", () => { etnMessages(); return false; }, true], ...(mon.report || (st.monitor || {}).report ? [["Run Report", () => { engineReport(mon.report, run.ask); return false; }, true]] : [])] : [["Show program window", () => { enginePost({show_program: true}).then(j => hmSay(j.ok ? j.said : j.error, !j.ok)).catch(() => {}); return false; }, true]], {float: true, width: 640});
     if (!asLog) run.win = d;
-  } else { q(d, ".dt b").textContent = title; q(d, ".db").innerHTML = head; }
-  const log = q(d, "#etnLog"); if (log) log.scrollTop = 1e9;
+  } else {
+    // Painted again every second: the log keeps where it was scrolled to (the end, unless scrolled up), and Engine steps
+    // stays as it was left, open or closed (Ahmed 2026-11-28: it closed again at once when clicked).
+    const was = q(d, "#etnLog"), atEnd = !was || was.scrollTop + was.clientHeight >= was.scrollHeight - 4, top = was ? was.scrollTop : 0;
+    q(d, ".dt b").textContent = title; q(d, ".db").innerHTML = head;
+    const now = q(d, "#etnLog"); if (now && !atEnd) { now.scrollTop = top; now.dataset.kept = "1"; }
+  }
+  const log = q(d, "#etnLog"); if (log && !log.dataset.kept) log.scrollTop = 1e9;
+  const steps = q(d, "#etnSteps"); if (steps) steps.ontoggle = () => { run.stepsOpen = steps.open; };
   const c = q(d, "#etnCancel");
   if (c) c.onclick = () => dialog("ETABS", `<p style="max-width:360px">&#9888; OK to terminate execution of Job ${esc(etnJob(mon.model_file || run.file))} ?</p>`,
     [["OK", () => { enginePost({cancel: true}).then(j => hmSay(j.ok ? "Cancelling: " + j.said + "." : j.error, !j.ok)).catch(() => {}); }], ["Cancel"]], {width: 400});
