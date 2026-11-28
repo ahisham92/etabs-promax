@@ -133,27 +133,38 @@ static class HandModelTests
             Check(Math.Abs(ft.WorkPlanes!.Single(w => w.Name == "Level L1").Points[0][2] - 3 / 0.3048) < 1e-6, "a units change turns the planes' points too");
         });
 
-        yield return ("drawing by points at story levels, as on a work plane: frames and areas across stories as one object; ends off the levels refused", () =>
+        yield return ("drawing by points at story levels: frames and areas take their type from their inclination (Options > Tolerances), one object across stories; ends off the levels refused", () =>
         {
             var m = Grid(); // Base 0, L1 3, L2 6
             List<string> Names(JsonNode r, string key) => r["result"]![key]!.AsArray().Select(x => x!.GetValue<string>()).ToList();
-            var f = Names(Ok(m, "add_frames_by_points", """{"frames":[[0,0,3,6,0,3],[0,0,0,0,0,6],[0,0,0,6,0,6],[6,0,6,12,5,3]],"section":"ConcCol"}"""), "frames");
+            var f = Names(Ok(m, "add_frames_by_points", """{"frames":[[0,0,3,6,0,3],[0,0,0,0,0,6],[0,0,0,6,0,6],[6,0,6,12,0,3],[0,5,0,12,5,3],[12,5,0,12.03,5,3]],"section":"ConcCol"}"""), "frames");
             LineObject L(int i) => m.Model.Line(f[i].Split('@')[0])!;
             Check(L(0).Kind == LineKind.Beam && f[0].EndsWith("@L1"), "two ends on one level make a beam on it");
             Check(L(1).Kind == LineKind.Column && L(1).StoriesBelowI == 2 && f[1].EndsWith("@L2"), "one end above the other makes a column, one object from the base to L2");
-            Check(L(2).Kind == LineKind.Brace && L(2).StoriesBelowI == 2 && f[2].EndsWith("@L2"), "else a brace, across both stories");
+            Check(L(2).Kind == LineKind.Brace && L(2).StoriesBelowI == 2 && f[2].EndsWith("@L2"), "45 degrees makes a brace, across both stories");
             var down = Physical.Frames(m.Model).Single(x => x.Label + "@" + x.Story == f[3]);
-            Check(L(3).Kind == LineKind.Brace && down.I == new Xyz(12, 5, 3) && down.J == new Xyz(6, 0, 6), "a brace drawn downwards runs from its lower end up");
+            Check(L(3).Kind == LineKind.Brace && down.I == new Xyz(12, 0, 3) && down.J == new Xyz(6, 0, 6), "a brace drawn downwards runs from its lower end up");
+            Check(L(4).Kind == LineKind.Beam && L(4).StoriesBelowI == 1 && f[4].EndsWith("@L1"), "14 degrees from horizontal is within the 20 of Options > Tolerances: a sloped beam, from the base to L1");
+            Check(L(5).Kind == LineKind.Column && L(5).PointI != L(5).PointJ, "0.6 degrees from vertical is within the 1: a column, leaning");
+            Ok(m, "set_program_form", """{"table":"Preferences - Tolerance","values":{"MaxInclHorzBmFlr":"10","MaxInclVertCol":"0.5"}}""");
+            Check(m.Model.Inclinations() == (0.5, 10), "the tolerances are read from Options > Tolerances");
+            var again = Names(Ok(m, "add_frames_by_points", """{"frames":[[6,5,0,18,5,3],[0,5,0,0.03,5,3]],"section":"ConcCol"}"""), "frames");
+            Check(m.Model.Line(again[0].Split('@')[0])!.Kind == LineKind.Brace && m.Model.Line(again[1].Split('@')[0])!.Kind == LineKind.Brace, "with 10 and 0.5 degrees the sloped beam and the leaning column are braces");
+            Ok(m, "set_program_form", """{"table":"Preferences - Tolerance","values":{"MaxInclHorzBmFlr":"","MaxInclVertCol":""}}""");
+            Check(m.Model.Inclinations() == (1, 20), "blank is ETABS's default, 1 and 20");
             Check(Error(m, "add_frames_by_points", """{"frames":[[0,0,1.5,6,0,3]],"section":"ConcCol"}""").Contains("not a story level"), "an end between levels is refused");
             Check(Error(m, "add_frames_by_points", """{"frames":[[6,5,3,6,5,3]],"section":"ConcCol"}""").Contains("two different ends"), "a frame needs two ends");
             Check(Error(m, "add_frames_by_points", """{"frames":[[0,0,3,6,0]],"section":"ConcCol"}""").Contains("6 numbers"), "each frame is six numbers");
 
-            var a = Names(Ok(m, "add_areas_by_points", """{"areas":[[[0,0,3],[6,0,3],[6,5,3],[0,5,3]],[[0,0,0],[6,0,0],[6,0,6],[0,0,6]],[[0,0,0],[6,0,0],[6,5,3],[0,5,3]],[[12,0,0],[12,5,0],[12,5,6]]],"section":"Slab1"}"""), "areas");
+            var a = Names(Ok(m, "add_areas_by_points", """{"areas":[[[0,0,3],[6,0,3],[6,5,3],[0,5,3]],[[0,0,0],[6,0,0],[6,0,6],[0,0,6]],[[0,0,0],[6,0,0],[6,5,3],[0,5,3]],[[12,0,0],[12,5,0],[12,5,6]],[[0,0,0],[12,0,0],[12,12,3],[0,12,3]]],"section":"Slab1","wall_section":"Wall1"}"""), "areas");
+            AreaAssign S(int i) => m.Model.AreaAssigns.Single(x => x.Label + "@" + x.Story == a[i]);
             AreaObject A(int i) => m.Model.Area(a[i].Split('@')[0])!;
             Check(A(0).Kind == AreaKind.Floor && A(0).StoriesBelow.All(b => b == 0) && a[0].EndsWith("@L1"), "corners on one level make a floor on it");
             Check(A(1).Kind == AreaKind.Wall && A(1).StoriesBelow.SequenceEqual([2, 2, 0, 0]) && a[1].EndsWith("@L2"), "upright, a wall: one object from the base to L2");
             Check(A(2).Kind == AreaKind.Ramp && A(2).StoriesBelow.SequenceEqual([1, 1, 0, 0]) && a[2].EndsWith("@L1"), "sloped, a ramp");
             Check(A(3).Kind == AreaKind.Wall && A(3).StoriesBelow.SequenceEqual([2, 2, 0]), "a three-cornered wall too");
+            Check(A(4).Kind == AreaKind.Floor && A(4).StoriesBelow.SequenceEqual([1, 1, 0, 0]), "14 degrees from level is within the 20: a sloped floor, from the base to L1");
+            Check(S(1).Section == "Wall1" && S(3).Section == "Wall1" && S(0).Section == "Slab1" && S(2).Section == "Slab1" && S(4).Section == "Slab1", "the walls take the wall section, the floors and the ramp the other");
             var ramp = Physical.Areas(m.Model).Single(x => x.Label + "@" + x.Story == a[2]);
             Check(ramp.Corners.SequenceEqual([new Xyz(0, 0, 0), new Xyz(6, 0, 0), new Xyz(6, 5, 3), new Xyz(0, 5, 3)]), "the ramp's corners are where they were drawn");
             Check(Error(m, "add_areas_by_points", """{"areas":[[[0,0,0],[6,0,0],[6,5,3],[0,5,0]]],"section":"Slab1"}""").Contains("not flat"), "corners not in one plane are refused");
@@ -162,7 +173,7 @@ static class HandModelTests
             Check(Error(m, "add_areas_by_points", """{"areas":[[[0,0,3],[6,0,3],[6,5,3]]],"section":"Nope"}""").Contains("no slab or wall section"), "the section must be there");
 
             var back = CsiProMax.E2k.E2kReader.Read(CsiProMax.E2k.E2kWriter.Write(m.Model));
-            Check(back.Lines.Exists(l => l.Kind == LineKind.Brace && l.StoriesBelowI == 2) && back.Areas.Exists(x => x.Kind == AreaKind.Wall && x.StoriesBelow.SequenceEqual([2, 2, 0, 0])) && back.Areas.Exists(x => x.Kind == AreaKind.Ramp),
+            Check(back.Lines.Exists(l => l.Kind == LineKind.Brace && l.StoriesBelowI == 2) && back.Lines.Exists(l => l.Kind == LineKind.Beam && l.StoriesBelowI == 1) && back.Areas.Exists(x => x.Kind == AreaKind.Wall && x.StoriesBelow.SequenceEqual([2, 2, 0, 0])) && back.Areas.Exists(x => x.Kind == AreaKind.Ramp),
                 "the .e2k keeps them across their stories");
         });
 

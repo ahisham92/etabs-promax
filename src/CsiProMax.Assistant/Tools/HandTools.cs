@@ -94,6 +94,8 @@ public static class HandTools
                 ["name"] = w.Name, ["points"] = new JsonArray(w.Points.Select(p => (JsonNode)new JsonArray(p.Select(v => (JsonNode)v).ToArray())).ToArray()),
                 ["normal"] = new JsonArray(WorkPlanes.Normal(w).Select(v => (JsonNode)Math.Round(v, 9)).ToArray()),
             }).ToArray()),
+            // Options > Tolerances: what a frame or area drawn by its points comes out as (ModelEdit.Inclinations).
+            ["inclinations"] = new JsonObject { ["from_vertical"] = m.Inclinations().FromVertical, ["from_horizontal"] = m.Inclinations().FromHorizontal },
             ["materials"] = new JsonArray(m.Materials.Select(x => (JsonNode)new JsonObject
             {
                 ["name"] = x.Name, ["type"] = x.Type, ["fc"] = x.Number("FC"), ["fy"] = x.Number("FY"), ["elastic_modulus"] = x.Number("E"), ["unit_weight"] = x.Number("WEIGHTPERVOLUME"), ["poisson"] = x.Number("U"),

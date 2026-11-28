@@ -35,12 +35,12 @@ public static class EditTools
             """{"type":"object","required":["points","stories"],"properties":{"points":{"type":"array","items":{"type":"array","items":{"type":"number"},"description":"[x, y]"}},"stories":{"type":"array","items":{"type":"string"}}}}""",
             Ask.Changes, AddJoints, a => $"Draw {a.Items("points").Count()} joints"),
         new("add_frames_by_points",
-            "Draw a frame between two points in space, as on a work plane in the 3-D view: each [x1, y1, z1, x2, y2, z2], both ends at story levels. Both on one level make a beam, one above the other a column, else a brace; each is one object however many stories it spans.",
+            "Draw Beam/Column/Brace in the 3-D view: a frame between two points in space, each [x1, y1, z1, x2, y2, z2], both ends at story levels. Its type follows its inclination, by Options > Tolerances (within 1 degree of vertical a column, within 20 degrees of horizontal a beam, else a brace, by default); each is one object however many stories it spans.",
             """{"type":"object","required":["frames","section"],"properties":{"frames":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"[x1, y1, z1, x2, y2, z2]"},"section":{"type":"string"}}}""",
             Ask.Changes, AddFramesByPoints, a => $"Draw {a.Items("frames").Count()} frames"),
         new("add_areas_by_points",
-            "Draw an area on its corners in space, as on a work plane in the 3-D view: each [[x, y, z], ...] in order round its edge, every corner at a story level and all in one plane. All on one level make a floor, upright a wall, sloped a ramp; each is one object however many stories it spans.",
-            """{"type":"object","required":["areas","section"],"properties":{"areas":{"type":"array","items":{"type":"array","items":{"type":"array","items":{"type":"number"}}},"description":"[[x, y, z], ...], three corners or more"},"section":{"type":"string","description":"A slab section for a floor or ramp, a wall section for a wall."}}}""",
+            "Draw Floor/Wall in the 3-D view: an area on its corners in space, each [[x, y, z], ...] in order round its edge, every corner at a story level and all in one plane. Its type follows its inclination, by Options > Tolerances (within 20 degrees of level a floor, within 1 degree of upright a wall, else a ramp, by default); each is one object however many stories it spans.",
+            """{"type":"object","required":["areas","section"],"properties":{"areas":{"type":"array","items":{"type":"array","items":{"type":"array","items":{"type":"number"}}},"description":"[[x, y, z], ...], three corners or more"},"section":{"type":"string","description":"The section, for a floor or ramp (and a wall when no wall_section is given)."},"wall_section":{"type":"string","description":"The section an area that comes out a wall takes."}}}""",
             Ask.Changes, AddAreasByPoints, a => $"Draw {a.Items("areas").Count()} areas"),
         new("replicate_objects",
             "Edit > Replicate: copies frames, slabs and walls with their sections, assignments, loads and hinges. mode 'linear': 'number' copies, each dx, dy on from the last; mode 'radial': 'number' copies turned about (cx, cy), each 'angle' degrees on; mode 'mirror': one copy mirrored about the plan line (x1, y1)-(x2, y2); mode 'story': onto each of 'stories', in the same place. delete_original takes the originals off after (Delete Original Objects).",
@@ -166,11 +166,13 @@ public static class EditTools
         var areas = a.Items("areas").Select(x => x.ValueKind == JsonValueKind.Array ? x.EnumerateArray().Select(Corner).ToList() : throw new ToolInputException("Each area is a list of [x, y, z] corners.")).ToList();
         if (areas.Count == 0) throw new ToolInputException("Give areas.");
         var section = a.Need("section");
-        if (!link.Model.ShellSections.Exists(s => s.Name == section)) throw new ToolInputException($"There is no slab or wall section '{section}'.");
+        var wall = a.Text("wall_section") is { Length: > 0 } w ? w : null;
+        foreach (var name in new[] { section, wall }.OfType<string>())
+            if (!link.Model.ShellSections.Exists(s => s.Name == name)) throw new ToolInputException($"There is no slab or wall section '{name}'.");
         return Core(() => link.Edit(m =>
         {
             var diaphragm = m.Diaphragms.FirstOrDefault()?.Name ?? "D1"; // a floor's, as Draw Floor gives it
-            var made = areas.Select(c => m.AddArea(c, section, diaphragm)).Select(x => (JsonNode)(x.Label + "@" + x.Story)).ToArray();
+            var made = areas.Select(c => m.AddArea(c, section, diaphragm, wall)).Select(x => (JsonNode)(x.Label + "@" + x.Story)).ToArray();
             return (JsonNode)new JsonObject { ["areas"] = new JsonArray(made) };
         }));
     }
