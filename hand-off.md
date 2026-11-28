@@ -17,6 +17,9 @@ Standing rules: never change or remove anything another user added unless Ahmed 
 
 ## Releases
 
+### Merged after 0.4.79 (goes out with the next release)
+The Engine run's program window is minimised on the taskbar, no longer hidden through the API. On 0.4.79 ETABS had still not started the analysis of Ahmed's real model 8 minutes after opening it; his own visible ETABS takes about 3 minutes. His own run's LOG builds the same model as the Engine's copy (129,925 against 129,831 joints, 763,754 against 762,914 equations), so the copy is doing the same work, only more slowly. Open: a timed run of a small model, then of his model, both against ETABS's own time.
+
 ### 0.4.79 (2026-11-28, Engine run speed fix on Ahmed's direct ask; everything else stays on hold): PR 362, 364
 Engine run time on Ahmed's real model (0.4.77: 22 minutes inside ETABS before its analysis began, 13:43:51 to 14:05:58, against about 3 minutes in his own ETABS; the whole run went past 40 minutes against his 17). The run window no longer searches ETABS's whole window tree every second for its status bar: the bar is found once and its parts are read every 5 seconds, and the program's windows are looked at every 3 seconds (its log still every second). Each of those looks is answered on ETABS's own thread, the one building the analysis model. Also seen: Ahmed ran the same model in his own ETABS at the same time, so two 14-thread analyses shared the PC. Open: a timed Engine run on the PC with nothing else running.
 
