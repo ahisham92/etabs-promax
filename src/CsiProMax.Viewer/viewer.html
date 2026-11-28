@@ -519,7 +519,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><select id="csys" title="Coordinate system" style="height:19px;padding:0 2px"><option>Global</option></select><span id="wpWrap" hidden style="margin-left:4px"><select id="wpMode" title="Drawing plane: World, or a work plane to draw on in the 3-D view (Define > Engine Extras > Work Planes)" style="height:19px;padding:0 2px"></select></span><select id="unitsSap" hidden title="Units" style="height:19px;padding:0 2px"></select><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw and select in a plan view on one story, on all stories, or on the story and its similar stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option><option value="similar">Similar Stories</option></select></span><select id="csys" title="Coordinate system" style="height:19px;padding:0 2px"><option>Global</option></select><span id="wpWrap" hidden style="margin-left:4px"><select id="wpMode" title="Drawing plane: World, or a work plane to draw on in the 3-D view (Define > Engine Extras > Work Planes)" style="height:19px;padding:0 2px"></select></span><select id="unitsSap" hidden title="Units" style="height:19px;padding:0 2px"></select><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
 <div id="rubber"></div><div id="tip"></div><div id="dockHint"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -3418,7 +3418,7 @@ function boxSelect(p, r, crossing, add) {
   // Joints too, supports and springs among them: a joint is a point, so it is in either window or not.
   const to2 = p.M.to, gotJ = jointsIn(p).filter(j => { const q = to2(j.at); return q[3] && q[0] >= r.x0 && q[0] <= r.x1 && q[1] >= r.y0 && q[1] <= r.y1; }).map(j => j.name);
   if (!add) { sel.clear(); selJ.clear(); }
-  got.forEach(id => sel.add(id)); gotJ.forEach(n => selJ.add(n));
+  onSimilar(p, got).forEach(id => sel.add(id)); jointsOnSimilar(p, gotJ).forEach(n => selJ.add(n));
   selChanged();
 }
 function rightClick(p, x, y, shift, cx, cy) {
@@ -3477,9 +3477,9 @@ function wire(p) {
     if (!d.moved) {
       if (d.button === 2) return rightClick(p, x, y, e.shiftKey, e.clientX, e.clientY);
       if (d.button === 0 && (d.act === "box" || d.act === "orbit" || d.act === "pan")) {
-        const {j, id} = pickAt(p, x, y, 5);
-        if (j) { if (selJ.has(j)) selJ.delete(j); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } selJ.add(j); } }
-        else if (id) { if (sel.has(id)) sel.delete(id); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } sel.add(id); } }
+        const {j, id} = pickAt(p, x, y, 5), js = j ? jointsOnSimilar(p, [j]) : [], ids = id ? onSimilar(p, [id]) : [];
+        if (j) { if (selJ.has(j)) js.forEach(n => selJ.delete(n)); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } js.forEach(n => selJ.add(n)); } }
+        else if (id) { if (sel.has(id)) ids.forEach(i => sel.delete(i)); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } ids.forEach(i => sel.add(i)); } }
         else if (!d.ctrl) { sel.clear(); selJ.clear(); }
         lit = null; markTree(); selChanged();
       }
@@ -28125,7 +28125,7 @@ function drawHint() {
   const k = drawKind(), p = panes[active];
   if (p && p.mode === "3d" && program === "etabs") return draw3dHint();
   if (!p || p.mode !== "plan") return program === "etabs" ? "Drawing is done in a plan view or the 3-D view: click one of them." : "Drawing is done in a plan view: click a Plan View window, or press the plan button on the toolbar.";
-  const where = hm.similar === "all" ? "on every story" : "on " + p.story;
+  const where = storiesWhere(p.story);
   return {column: `Click a grid crossing or a point to place a column ${where}.`, beam: `Click the start, then each next point of the beams ${where}. Right click or Esc ends the line.`, qbeam: `Click a grid line between two crossings: a beam fills that span ${where}.`,
     wall: `Click the start, then each next point of the walls ${where}. Right click or Esc ends the line.`, qwall: `Click a grid line between two crossings: a wall fills that span ${where}.`,
     floor: `Click the floor's corners in order; click the first corner again (or double click) to close it, ${where}.`, rect: `Click two opposite corners of the floor ${where}.`, qfloor: `Click inside a grid bay: a floor fills it ${where}.`,
@@ -28133,9 +28133,42 @@ function drawHint() {
     reshape: hm.chain.length ? "Click the new place of the end or corner (Esc to choose another)." : "Click the end of a beam, column or brace, or the corner of a floor or wall, to reshape it on " + p.story + ".",
     qsec: `Click inside a grid bay: ${hm.secN} secondary beams parallel to ${hm.secDir} fill it ${where}.`, circ: hm.chain.length ? "Click a point on the floor's edge." : `Click the centre of the circular floor ${where}.`, joint: `Click a point to place a joint ${where}, for a support, spring, load or link where no member ends.`}[k] || "";
 }
-function drawStories(p) {
+function drawStories(p) { return storiesFor(p.story); }
+// One Story, All Stories or Similar Stories (the status bar, as in ETABS): what is drawn or selected on a story in a plan
+// view is drawn or selected on that story, on every story, or on the story's similar stories too.
+function storiesFor(story) {
   if (hm.similar === "all") return stories.slice(1).map(s => s.name);
-  return [p.story];
+  if (hm.similar === "similar") return similarGroup(story);
+  return [story];
+}
+// Similar Stories, from Story Data: the story's master story and every story similar to it. A story that is no master
+// and similar to none stands alone. While the definitions are read again after an edit, the last ones serve.
+let storyDefs = null;
+function similarGroup(story) {
+  if (hm.defs) storyDefs = hm.defs.stories || []; else hmDefs();
+  if (!storyDefs) return [story];
+  const all = storyDefs, s = all.find(x => x.name === story);
+  const master = s ? (s.master ? s.name : s.similar_to && s.similar_to !== "None" ? s.similar_to : "") : "";
+  return master ? all.filter(x => x.name === master || x.similar_to === master).map(x => x.name) : [story];
+}
+function storiesWhere(story) {
+  if (hm.similar === "all") return "on every story";
+  const others = storiesFor(story).filter(n => n !== story);
+  return others.length ? `on ${story} and its similar stories (${others.join(", ")})` : "on " + story;
+}
+// The same objects and joints on the other stories (in a plan view, with All or Similar Stories): ETABS names an object
+// by its label on each story (label@story), so the label finds it there.
+function onSimilar(p, ids) {
+  if (!p || p.mode !== "plan" || hm.similar === "one" || !ids.length) return ids;
+  const out = new Set(ids), where = storiesFor(p.story), byName = new Map(frames.concat(areas).map(o => [o.name, o.id]));
+  for (const id of ids) { const o = objOf(id), label = o && o.name.replace(/@[^@]*$/, ""); if (label && label !== o.name) for (const st of where) { const q = byName.get(label + "@" + st); if (q) out.add(q); } }
+  return [...out];
+}
+function jointsOnSimilar(p, names) {
+  if (!p || p.mode !== "plan" || hm.similar === "one" || !names.length) return names;
+  const out = new Set(names), where = storiesFor(p.story);
+  for (const n of names) { const label = n.replace(/@[^@]*$/, ""); if (label !== n) for (const st of where) if (pointXyz.has(label + "@" + st)) out.add(label + "@" + st); }
+  return [...out];
 }
 function snapAt(p, x, y) {
   // Screen distance decides: a grid crossing or a joint within 12 px, else a point on a grid line within 8 px, else where the pointer is.
@@ -28196,7 +28229,7 @@ async function showObjBox() {
     ${ws ? `<span title="The section of an area that comes out a wall">Wall Section</span><select id="pobjWS">${ws.list.length ? opts(ws.list, ws.now) : `<option value="">(define one first)</option>`}</select>` : ""}
     ${drawKind() === "qsec" ? `<span>No. of Beams</span><input id="pobjN" type="number" min="1" max="20" value="${hm.secN}"><span>Approx. Orientation</span><select id="pobjD">${opts([["X", "Parallel to X"], ["Y", "Parallel to Y"]], hm.secDir)}</select>` : ""}
     ${drawKind() === "circ" ? `<span>Sides</span><input id="pobjC" type="number" min="8" max="72" value="${hm.circN}">` : ""}
-    <span>Stories</span><select id="pobjW">${opts([["one", "One Story"], ["all", "All Stories"]], hm.similar)}</select>
+    <span>Stories</span><select id="pobjW">${opts([["one", "One Story"], ["all", "All Stories"], ["similar", "Similar Stories"]], hm.similar)}</select>
     ${program === "etabs" ? `<span title="The plane the 3-D view draws on (Define > Engine Extras > Work Planes)">Work Plane</span><select id="pobjP">${opts([["", "World"], ...workPlanes().map(w => [w.name, w.name])], wpOf(hm.wp) ? hm.wp : "")}</select>` : ""}</div>
     ${s.list.length || kind === "joint" ? "" : `<p class="kv" style="padding:0 8px 6px">No ${kind === "slab" ? "slab" : kind} section yet: Define > ${kind === "slab" || kind === "wall" ? "Slab and Wall Sections" : "Frame Sections"}.</p>`}`;
   if (q(box, "#pobjS")) q(box, "#pobjS").onchange = e => hm.sec[kind] = e.target.value;
@@ -28277,13 +28310,14 @@ function reshapeAt(p, x, y) {
 function lineSelect(p, a, b) {
   // Select Using Intersecting Line: every object the drawn line crosses.
   const to = p.M.to, cross = (p1, p2, p3, p4) => { const d = (p2[0] - p1[0]) * (p4[1] - p3[1]) - (p2[1] - p1[1]) * (p4[0] - p3[0]); if (Math.abs(d) < 1e-9) return false; const t = ((p3[0] - p1[0]) * (p4[1] - p3[1]) - (p3[1] - p1[1]) * (p4[0] - p3[0])) / d, u = ((p3[0] - p1[0]) * (p2[1] - p1[1]) - (p3[1] - p1[1]) * (p2[0] - p1[0])) / d; return t >= 0 && t <= 1 && u >= 0 && u <= 1; };
-  visOf(p); let n = 0;
+  visOf(p); const got = [];
   for (const o of frames.concat(areas)) {
     if (!p.vis || !p.vis[o.id]) continue;
     const pts = (o.type === "f" ? [o.a, o.b] : o.pts).map(to), m = o.type === "f" ? 1 : pts.length;
-    for (let i = 0; i < m; i++) if (cross(a, b, pts[i], pts[(i + 1) % pts.length])) { sel.add(o.id); n++; break; }
+    for (let i = 0; i < m; i++) if (cross(a, b, pts[i], pts[(i + 1) % pts.length])) { got.push(o.id); break; }
   }
-  selChanged(); return n;
+  onSimilar(p, got).forEach(id => sel.add(id));
+  selChanged(); return got.length;
 }
 function drawPreview(p, g, M) {
   if (!drawing() || !(p.mode === "plan" || (p.mode === "3d" && program === "etabs")) || panes[active] !== p) return;
@@ -28452,7 +28486,7 @@ async function draw3dClick(p, x, y, dbl) {
   if (!s.story) return hmSay("That point is between stories: members are drawn between points at story levels.", true);
   const sec = k === "joint" ? "" : (await drawSection(kind)).now;
   if (k !== "joint" && !sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
-  const st = hm.similar === "all" ? stories.slice(1).map(v => v.name) : [s.story], xy = q => [q[0], q[1]];
+  const st = storiesFor(s.story), xy = q => [q[0], q[1]];
   if (k === "joint") return hmRun("add_joints", {points: [xy(s.q)], stories: st});
   if (k === "column") return hmRun("add_columns", {points: [xy(s.q)], stories: st, section: sec});
   if (hm.chain.length && hm.chain[0].length !== 3) hm.chain = []; // a chain begun in a plan view
