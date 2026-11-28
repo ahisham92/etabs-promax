@@ -3416,9 +3416,9 @@ function boxSelect(p, r, crossing, add) {
     if (hit) got.push(o.id);
   }
   // Joints too, supports and springs among them: a joint is a point, so it is in either window or not.
-  const to2 = p.M.to, gotJ = jointsIn(p).filter(j => { const q = to2(j.at); return q[3] && q[0] >= r.x0 && q[0] <= r.x1 && q[1] >= r.y0 && q[1] <= r.y1; }).map(j => j.name);
+  const to2 = p.M.to, gotJ = jointsOnSimilar(p, jointsIn(p).filter(j => { const q = to2(j.at); return q[3] && q[0] >= r.x0 && q[0] <= r.x1 && q[1] >= r.y0 && q[1] <= r.y1; }).map(j => j.name));
   if (!add) { sel.clear(); selJ.clear(); }
-  onSimilar(p, got).forEach(id => sel.add(id)); jointsOnSimilar(p, gotJ).forEach(n => selJ.add(n));
+  onSimilar(p, got).forEach(id => sel.add(id)); gotJ.forEach(n => selJ.add(n));
   selChanged();
 }
 function rightClick(p, x, y, shift, cx, cy) {
